@@ -1,0 +1,6 @@
+{
+  "name": "DigiMoms Smart Restaurant OS",
+  "description": "Enterprise Multi-Tenant SaaS Restaurant Operating System featuring QR Ordering, CEO Control Center, Owner Dashboard, Waiter/Kitchen Terminals, and Multi-language support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

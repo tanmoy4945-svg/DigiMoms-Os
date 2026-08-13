@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .no-print, .no-print-bg {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    position: static !important;
+  }
+  #printable-bill, #printable-bill * {
+    visibility: visible !important;
+  }
+  #printable-bill {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 80mm !important; /* Standard Thermal Receipt Width */
+    margin: 0 auto !important;
+    padding: 10px !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
