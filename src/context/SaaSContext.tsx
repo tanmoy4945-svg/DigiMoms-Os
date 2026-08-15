@@ -115,7 +115,7 @@ interface SaaSContextType {
   extendFreeOffer: (id: string, days: number) => Promise<void>;
   grantFreeExtension: (id: string, days: number, reason?: string) => Promise<void>;
   renewSubscription: (id: string, months: number) => Promise<void>;
-  renewRestaurantMonthly: (id: string, months?: number, paymentDetails?: { transactionId?: string; mode?: string; razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string }) => Promise<void>;
+  renewRestaurantMonthly: (id: string, months?: number, paymentDetails?: { transactionId?: string; mode?: string; razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string; payu_txnid?: string; payu_mihpayid?: string; payu_hash?: string }) => Promise<void>;
   archiveRestaurant: (id: string) => Promise<void>;
   deleteRestaurantPermanently: (id: string) => Promise<void>;
   factoryResetRestaurant: (id: string, ceoPass: string) => Promise<boolean>;
@@ -145,6 +145,7 @@ interface SaaSContextType {
   verifyCashOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
   confirmCashPayment: (orderId: string, cashAmount: number, actorId: string, actorType: 'waiter' | 'owner' | 'staff', actorName: string) => Promise<void>;
   processRazorpayOnlinePayment: (orderId: string, onlineAmountToPay: number, razorpayResponse: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }, customerMobile?: string) => Promise<boolean>;
+  processPayUOnlinePayment: (orderId: string, onlineAmountToPay: number, payuResponse: { txnid: string; mihpayid?: string; hash?: string; status?: string }, customerMobile?: string) => Promise<boolean>;
   updateOrderPaymentMethod: (orderId: string, newMode: 'cash' | 'online' | 'partial', partialOnlineAmount?: number) => Promise<void>;
   paymentTransactions: PaymentTransaction[];
   acceptOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
@@ -491,6 +492,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phonepe_salt_key: r.phonepe_salt_key ?? ov.phonepe_salt_key ?? '',
             phonepe_salt_index: r.phonepe_salt_index ?? ov.phonepe_salt_index ?? '1',
             phonepe_env: r.phonepe_env ?? ov.phonepe_env ?? 'SANDBOX',
+            payu_merchant_key: r.payu_merchant_key ?? ov.payu_merchant_key ?? '',
+            payu_merchant_salt: r.payu_merchant_salt ?? ov.payu_merchant_salt ?? '',
+            payu_env: r.payu_env ?? ov.payu_env ?? 'TEST',
             gateway_verified: r.gateway_verified ?? ov.gateway_verified ?? false,
             gateway_status_message: r.gateway_status_message ?? ov.gateway_status_message ?? ''
           };
@@ -614,7 +618,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           razorpay_key_id: ceoSettingsData.razorpay_key_id || '',
           razorpay_key_secret: ceoSettingsData.razorpay_key_secret || '',
           razorpay_verified: ceoSettingsData.razorpay_verified || false,
-          razorpay_verified_at: ceoSettingsData.razorpay_verified_at
+          razorpay_verified_at: ceoSettingsData.razorpay_verified_at,
+          payu_merchant_key: ceoSettingsData.payu_merchant_key || '',
+          payu_merchant_salt: ceoSettingsData.payu_merchant_salt || '',
+          payu_env: ceoSettingsData.payu_env || 'TEST',
+          payu_verified: ceoSettingsData.payu_verified || false,
+          payu_verified_at: ceoSettingsData.payu_verified_at
         };
         setCeoPaymentConfigState(fullCeoCfg);
         setCeoRazorpayConfigState({
@@ -1267,7 +1276,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           razorpay_key_id: parsed.razorpay_key_id || '',
           razorpay_key_secret: parsed.razorpay_key_secret || '',
           razorpay_verified: parsed.razorpay_verified || false,
-          razorpay_verified_at: parsed.razorpay_verified_at
+          razorpay_verified_at: parsed.razorpay_verified_at,
+          payu_merchant_key: parsed.payu_merchant_key || '',
+          payu_merchant_salt: parsed.payu_merchant_salt || '',
+          payu_env: parsed.payu_env || 'TEST',
+          payu_verified: parsed.payu_verified || false,
+          payu_verified_at: parsed.payu_verified_at
         };
       } catch (e) {
         console.warn('Failed to parse saved CEO payment config', e);
@@ -1283,7 +1297,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       phonepe_verified: false,
       razorpay_key_id: '',
       razorpay_key_secret: '',
-      razorpay_verified: false
+      razorpay_verified: false,
+      payu_merchant_key: '',
+      payu_merchant_salt: '',
+      payu_env: 'TEST',
+      payu_verified: false
     };
   });
 
@@ -1300,7 +1318,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       razorpay_key_id: cfg.razorpay_key_id ?? ceoPaymentConfig.razorpay_key_id ?? '',
       razorpay_key_secret: cfg.razorpay_key_secret ?? ceoPaymentConfig.razorpay_key_secret ?? '',
       razorpay_verified: cfg.razorpay_verified ?? ceoPaymentConfig.razorpay_verified ?? false,
-      razorpay_verified_at: cfg.razorpay_verified_at ?? ceoPaymentConfig.razorpay_verified_at
+      razorpay_verified_at: cfg.razorpay_verified_at ?? ceoPaymentConfig.razorpay_verified_at,
+      payu_merchant_key: cfg.payu_merchant_key ?? ceoPaymentConfig.payu_merchant_key ?? '',
+      payu_merchant_salt: cfg.payu_merchant_salt ?? ceoPaymentConfig.payu_merchant_salt ?? '',
+      payu_env: cfg.payu_env ?? ceoPaymentConfig.payu_env ?? 'TEST',
+      payu_verified: cfg.payu_verified ?? ceoPaymentConfig.payu_verified ?? false,
+      payu_verified_at: cfg.payu_verified_at ?? ceoPaymentConfig.payu_verified_at
     };
 
     setCeoPaymentConfigState(updated);
@@ -1335,6 +1358,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         razorpay_key_secret: updated.razorpay_key_secret,
         razorpay_verified: updated.razorpay_verified,
         razorpay_verified_at: updated.razorpay_verified_at,
+        payu_merchant_key: updated.payu_merchant_key,
+        payu_merchant_salt: updated.payu_merchant_salt,
+        payu_env: updated.payu_env,
+        payu_verified: updated.payu_verified,
+        payu_verified_at: updated.payu_verified_at,
         updated_at: new Date().toISOString()
       }]);
     } catch (err) {
@@ -1389,6 +1417,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     'phonepe_salt_key',
     'phonepe_salt_index',
     'phonepe_env',
+    'payu_merchant_key',
+    'payu_merchant_salt',
+    'payu_env',
     'gateway_verified',
     'gateway_verified_at',
     'gateway_status_message',
@@ -1923,13 +1954,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       razorpay_order_id?: string;
       razorpay_payment_id?: string;
       razorpay_signature?: string;
+      payu_txnid?: string;
+      payu_mihpayid?: string;
+      payu_hash?: string;
     }
   ) => {
     const rest = restaurants.find(r => r.id === id);
     if (!rest) return;
 
     // Idempotency check: prevent duplicate renewal for same payment
-    const rzpTxId = paymentDetails?.razorpay_payment_id || paymentDetails?.transactionId;
+    const rzpTxId = paymentDetails?.razorpay_payment_id || paymentDetails?.payu_txnid || paymentDetails?.payu_mihpayid || paymentDetails?.transactionId;
     if (rzpTxId) {
       const existing = subscriptionHistory.find(
         s => (s.razorpay_payment_id && s.razorpay_payment_id === rzpTxId) ||
@@ -2907,6 +2941,157 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const processPayUOnlinePayment = async (
+    orderId: string,
+    onlineAmountToPay: number,
+    payuResponse: { txnid: string; mihpayid?: string; hash?: string; status?: string; udf1?: string; udf2?: string },
+    customerMobile?: string
+  ): Promise<boolean> => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      showToast("Order not found for online payment.", "error");
+      return false;
+    }
+
+    const rest = restaurants.find(r => r.id === existingOrd.restaurant_id);
+
+    try {
+      const verifyRes = await fetch('/api/payu/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          txnid: payuResponse.txnid,
+          mihpayid: payuResponse.mihpayid,
+          amount: onlineAmountToPay,
+          status: payuResponse.status || 'success',
+          hash: payuResponse.hash,
+          payu_key: rest?.payu_merchant_key,
+          payu_salt: rest?.payu_merchant_salt,
+          env: rest?.payu_env || 'TEST',
+          mode: rest?.payment_mode || 'demo'
+        })
+      });
+
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.verified) {
+        showToast("PayU payment verification failed: " + (verifyData.error || "Invalid response signature"), "error");
+        return false;
+      }
+
+      const grandTotal = existingOrd.grand_total;
+      const prevOnlineAmt = Number(existingOrd.online_amount || 0);
+      const newOnlineTotal = Number((prevOnlineAmt + onlineAmountToPay).toFixed(2));
+      const cashAmt = Number(existingOrd.cash_amount || 0);
+      const totalPaid = Number((newOnlineTotal + cashAmt).toFixed(2));
+      const newCashDue = Math.max(0, Number((grandTotal - totalPaid).toFixed(2)));
+
+      let newPaymentStatus: any = 'pending';
+      let newOrderStatus: any = existingOrd.order_status;
+
+      if (totalPaid >= grandTotal) {
+        newPaymentStatus = 'paid_live';
+        newOrderStatus = 'completed';
+      } else if (totalPaid > 0) {
+        newPaymentStatus = 'partially_paid';
+      }
+
+      const confirmedAtIso = new Date().toISOString();
+
+      const updatePayload = {
+        online_amount: newOnlineTotal,
+        cash_due: newCashDue,
+        payment_status: newPaymentStatus,
+        order_status: newOrderStatus,
+        payu_txnid: payuResponse.txnid,
+        payu_mihpayid: verifyData.mihpayid || payuResponse.mihpayid,
+        payu_hash: payuResponse.hash,
+        payment_actor_id: customerMobile || 'payu_gateway',
+        payment_actor_type: 'customer',
+        payment_actor_name: 'Online Payment (PayU)',
+        payment_confirmed_at: confirmedAtIso,
+        updated_at: confirmedAtIso
+      };
+
+      let { error: updateErr } = await supabase.from('orders').update(updatePayload).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+      if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('column'))) {
+        const retry1 = await supabase.from('orders').update({
+          payment_status: newPaymentStatus,
+          online_amount: newOnlineTotal,
+          cash_due: newCashDue,
+          order_status: newOrderStatus,
+          updated_at: confirmedAtIso
+        }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+        updateErr = retry1.error;
+      }
+
+      if (updateErr) {
+        console.error("PayU order status update error:", updateErr);
+        showToast("Database update error: " + updateErr.message, "error");
+        return false;
+      }
+
+      // SELECT Verification
+      const { data: dbCheck, error: selectErr } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .eq('restaurant_id', existingOrd.restaurant_id)
+        .maybeSingle();
+
+      if (selectErr || !dbCheck) {
+        showToast("Online payment verification failed in database.", "error");
+        return false;
+      }
+
+      // Credit Hotel Wallet (Idempotency built-in)
+      if (dbCheck.payment_status === 'paid_live' || dbCheck.payment_status === 'paid') {
+        await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, onlineAmountToPay || grandTotal, 'online');
+      }
+
+      const txPayload = {
+        id: crypto.randomUUID(),
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number,
+        order_number: existingOrd.order_number,
+        payment_method: 'online',
+        amount: onlineAmountToPay,
+        transaction_id: verifyData.mihpayid || payuResponse.txnid,
+        status: 'paid',
+        actor_id: customerMobile || 'customer',
+        actor_type: 'customer',
+        actor_name: 'Online Payment (PayU)',
+        created_at: confirmedAtIso
+      };
+
+      try {
+        await supabase.from('payment_transactions').insert([txPayload]);
+      } catch (err) {
+        console.warn("payment_transactions insert warning:", err);
+      }
+
+      logAudit({
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        actor_type: 'customer',
+        actor_name: 'Customer (PayU)',
+        action: 'PAYU_PAYMENT_VERIFIED',
+        previous_status: existingOrd.payment_status,
+        new_status: dbCheck.payment_status,
+        description: `PayU payment ₹${onlineAmountToPay} verified for Order ${existingOrd.order_number} (Txn: ${payuResponse.txnid})`
+      });
+
+      await fetchAllFromSupabase();
+      playNotificationSound('new_order');
+      showToast(`Online payment ₹${onlineAmountToPay} verified via PayU!`, 'success');
+      return true;
+    } catch (err: any) {
+      console.error("PayU verification error:", err);
+      showToast("Server connection error during payment verification.", "error");
+      return false;
+    }
+  };
+
   const updateOrderPaymentMethod = async (
     orderId: string,
     newMode: 'cash' | 'online' | 'partial',
@@ -3671,7 +3856,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       restaurants, staffList, tables, tableSessions, categories, menuItems,
       orders, feedbackList, callRequests, activityLogs, auditLogs, logAudit,
       subscriptionHistory,
-      paymentTransactions, confirmCashPayment, processRazorpayOnlinePayment, updateOrderPaymentMethod,
+      paymentTransactions, confirmCashPayment, processRazorpayOnlinePayment, processPayUOnlinePayment, updateOrderPaymentMethod,
       loginCeo, logoutCeo, ceoRazorpayConfig, updateCeoRazorpayConfig, ceoPaymentConfig, updateCeoPaymentConfig,
       addRestaurant, updateRestaurant, suspendRestaurant,
       resumeRestaurant, grantTrial, endTrial, extendTrial, grantFreeOffer, endFreeOffer, extendFreeOffer, grantFreeExtension, renewSubscription, renewRestaurantMonthly, archiveRestaurant, deleteRestaurantPermanently,

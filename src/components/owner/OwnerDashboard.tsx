@@ -158,6 +158,82 @@ export const OwnerDashboard: React.FC = () => {
     }
   };
 
+  const handleProcessPayURenewal = async () => {
+    setIsProcessingPayment(true);
+
+    try {
+      // 1. Create PayU payment request via backend API
+      const createRes = await fetch('/api/payu/create-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: monthlyFee,
+          restaurant_id: currentOwner.id,
+          restaurant_name: currentOwner.name,
+          mobile: currentOwner.owner_mobile,
+          merchant_key: ceoPaymentConfig?.payu_merchant_key,
+          merchant_salt: ceoPaymentConfig?.payu_merchant_salt,
+          env: ceoPaymentConfig?.payu_env || 'TEST'
+        })
+      });
+
+      const createData = await createRes.json();
+
+      if (!createRes.ok || !createData.success) {
+        showToast(`PayU Payment Error: ${createData.error || 'Failed to initiate PayU payment'}`, 'error');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      // 2. Server-side PayU status verification
+      const verifyRes = await fetch('/api/payu/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          merchant_key: ceoPaymentConfig?.payu_merchant_key || createData.merchantKey,
+          txnid: createData.txnid,
+          amount: monthlyFee,
+          productinfo: createData.params?.productinfo || `DigiMoms OS Subscription (${currentOwner.name})`,
+          firstname: createData.params?.firstname || currentOwner.name.substring(0, 15),
+          email: createData.params?.email || 'owner@restaurant.local',
+          status: 'success',
+          hash: createData.hash,
+          merchant_salt: ceoPaymentConfig?.payu_merchant_salt,
+          env: ceoPaymentConfig?.payu_env || 'TEST',
+          mode: createData.mode || ceoPaymentConfig?.mode || 'demo'
+        })
+      });
+
+      const verifyData = await verifyRes.json();
+
+      if (verifyRes.ok && verifyData.verified) {
+        // 3. Extend subscription by 1 calendar month in Supabase and record transaction
+        await renewRestaurantMonthly(currentOwner.id, 1, {
+          transactionId: createData.txnid,
+          mode: createData.mode || ceoPaymentConfig?.mode || 'demo'
+        });
+        setIsProcessingPayment(false);
+        setShowRenewalModal(false);
+        showToast('🎉 Subscription successfully extended by 1 month via PayU!', 'success');
+      } else {
+        showToast(`Verification Failed: ${verifyData.message || 'Payment could not be verified server-side.'}`, 'error');
+        setIsProcessingPayment(false);
+      }
+    } catch (err: any) {
+      console.error('PayU renewal error:', err);
+      showToast(`Renewal Payment Error: ${err.message || 'Server connection error during payment verification'}`, 'error');
+      setIsProcessingPayment(false);
+    }
+  };
+
+  const handleRenewalClick = () => {
+    if (ceoPaymentConfig?.primary_gateway === 'payu') {
+      handleProcessPayURenewal();
+    } else {
+      handleProcessPhonePeRenewal();
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-8 space-y-8">
       {/* Top Header */}
@@ -724,19 +800,19 @@ export const OwnerDashboard: React.FC = () => {
             {(ceoPaymentConfig?.mode || 'demo') === 'demo' ? (
               <div className="p-3.5 rounded-xl bg-purple-950/50 border border-purple-500/30 text-xs text-purple-200 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-purple-300">
-                  <Sparkles className="w-4 h-4 text-purple-400" /> PhonePe Sandbox / Demo Mode
+                  <Sparkles className="w-4 h-4 text-purple-400" /> {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU' : 'PhonePe'} Demo / Sandbox Mode
                 </div>
                 <p className="text-[11px] text-purple-200/80">
-                  PhonePe Business gateway is active in Demo mode. Proceeding will execute server-side verification and extend subscription by 1 calendar month instantly.
+                  {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU' : 'PhonePe Business'} gateway is active in Demo mode. Proceeding will execute server-side verification and extend subscription by 1 calendar month instantly.
                 </p>
               </div>
             ) : (
               <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-emerald-300">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> PhonePe Live Business Verified
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU India Live' : 'PhonePe Live Business'}
                 </div>
                 <p className="text-[11px] text-emerald-200/80">
-                  Payment will be routed via PhonePe Business Merchant ID: {ceoPaymentConfig?.phonepe_merchant_id || 'DIGIMOMS_ONLINE'}.
+                  Payment will be routed via {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU Merchant' : `PhonePe Business Merchant ID: ${ceoPaymentConfig?.phonepe_merchant_id || 'DIGIMOMS_ONLINE'}`}.
                 </p>
               </div>
             )}
@@ -752,16 +828,16 @@ export const OwnerDashboard: React.FC = () => {
               <button
                 type="button"
                 disabled={isProcessingPayment}
-                onClick={handleProcessPhonePeRenewal}
+                onClick={handleRenewalClick}
                 className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2"
               >
                 {isProcessingPayment ? (
                   <>
-                    <Clock className="w-4 h-4 animate-spin" /> Verifying PhonePe...
+                    <Clock className="w-4 h-4 animate-spin" /> Verifying Payment...
                   </>
                 ) : (
                   <>
-                    💳 Pay ₹{monthlyFee} via PhonePe
+                    💳 Pay ₹{monthlyFee} via {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU' : 'PhonePe'}
                   </>
                 )}
               </button>

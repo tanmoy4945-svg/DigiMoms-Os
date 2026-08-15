@@ -51,13 +51,16 @@ export interface Restaurant {
   shipping_delivery_policy?: string;
   contact_us_info?: string;
   payment_mode: PaymentMode; // 'demo' | 'live'
-  live_gateway?: 'razorpay' | 'phonepe';
+  live_gateway?: 'razorpay' | 'phonepe' | 'payu';
   razorpay_key: string;
   razorpay_secret: string;
   phonepe_merchant_id?: string;
   phonepe_salt_key?: string;
   phonepe_salt_index?: string;
   phonepe_env?: 'SANDBOX' | 'PRODUCTION';
+  payu_merchant_key?: string;
+  payu_merchant_salt?: string;
+  payu_env?: 'TEST' | 'LIVE';
   gateway_verified?: boolean;
   gateway_verified_at?: string;
   gateway_status_message?: string;
@@ -186,6 +189,9 @@ export interface Order {
   razorpay_order_id?: string;
   razorpay_payment_id?: string;
   razorpay_signature?: string;
+  payu_txnid?: string;
+  payu_mihpayid?: string;
+  payu_hash?: string;
   notes?: string;
   order_status: OrderStatus;
   subtotal: number;
@@ -314,7 +320,7 @@ export interface CeoRazorpayConfig {
   razorpay_key_id: string;
   razorpay_key_secret: string;
   mode: 'demo' | 'live';
-  primary_gateway?: 'razorpay' | 'phonepe' | 'demo';
+  primary_gateway?: 'razorpay' | 'phonepe' | 'payu' | 'demo';
   phonepe_merchant_id?: string;
   phonepe_salt_key?: string;
   phonepe_salt_index?: string;
@@ -323,6 +329,11 @@ export interface CeoRazorpayConfig {
   phonepe_verified_at?: string;
   razorpay_verified?: boolean;
   razorpay_verified_at?: string;
+  payu_merchant_key?: string;
+  payu_merchant_salt?: string;
+  payu_env?: 'TEST' | 'LIVE';
+  payu_verified?: boolean;
+  payu_verified_at?: string;
 }
 
 export type CeoPaymentConfig = CeoRazorpayConfig;

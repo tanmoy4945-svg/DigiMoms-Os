@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { normalizeImageUrl, getGoogleDriveFallbackUrl } from '../../utils/imageUrl';
+import { Image as ImageIcon } from 'lucide-react';
 
-interface SmartImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
-  src: string;
+interface SmartImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
+  src?: string | null;
   fallbackSrc?: string;
   alt: string;
 }
@@ -15,37 +16,59 @@ export const SmartImage: React.FC<SmartImageProps> = ({
   className = '',
   ...props
 }) => {
-  const initialUrl = normalizeImageUrl(src);
-  const [currentSrc, setCurrentSrc] = useState(initialUrl);
+  const initialUrl = normalizeImageUrl(src || '');
+  const [currentSrc, setCurrentSrc] = useState<string>(initialUrl || (fallbackSrc ? normalizeImageUrl(fallbackSrc) : ''));
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
-    setCurrentSrc(normalizeImageUrl(src));
-    setHasError(false);
-  }, [src]);
+    const normalized = normalizeImageUrl(src || '');
+    if (normalized) {
+      setCurrentSrc(normalized);
+      setHasError(false);
+    } else if (fallbackSrc) {
+      setCurrentSrc(normalizeImageUrl(fallbackSrc));
+      setHasError(false);
+    } else {
+      setCurrentSrc('');
+      setHasError(false);
+    }
+  }, [src, fallbackSrc]);
 
   const handleError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     // Check for Google Drive fallback
-    const gDriveFallback = getGoogleDriveFallbackUrl(currentSrc);
-    if (gDriveFallback && gDriveFallback !== currentSrc) {
-      setCurrentSrc(gDriveFallback);
-      return;
+    if (currentSrc) {
+      const gDriveFallback = getGoogleDriveFallbackUrl(currentSrc);
+      if (gDriveFallback && gDriveFallback !== currentSrc) {
+        setCurrentSrc(gDriveFallback);
+        return;
+      }
     }
 
     // Check for user provided fallback
     if (fallbackSrc && currentSrc !== fallbackSrc) {
-      setCurrentSrc(fallbackSrc);
-      return;
+      const normFallback = normalizeImageUrl(fallbackSrc);
+      if (normFallback && currentSrc !== normFallback) {
+        setCurrentSrc(normFallback);
+        return;
+      }
     }
 
     setHasError(true);
     if (onError) onError(e);
   };
 
-  if (hasError && !fallbackSrc) {
+  // If no source provided or failed to load, render clean fallback container without raw img tag
+  if (!currentSrc || hasError) {
     return (
-      <div className={`bg-slate-800 text-slate-500 flex items-center justify-center text-[10px] font-bold p-1 text-center select-none ${className}`}>
-        Image unavailable
+      <div
+        className={`bg-slate-800 text-slate-400 flex items-center justify-center p-2 text-center select-none overflow-hidden ${className}`}
+        title={alt || 'Image'}
+      >
+        {alt && alt.length <= 4 ? (
+          <span className="font-bold text-xs uppercase">{alt}</span>
+        ) : (
+          <ImageIcon className="w-4 h-4 opacity-50 shrink-0" />
+        )}
       </div>
     );
   }
@@ -54,9 +77,11 @@ export const SmartImage: React.FC<SmartImageProps> = ({
     <img
       {...props}
       src={currentSrc}
-      alt={alt}
+      alt={alt || 'Image'}
       className={className}
       onError={handleError}
+      loading="lazy"
     />
   );
 };
+

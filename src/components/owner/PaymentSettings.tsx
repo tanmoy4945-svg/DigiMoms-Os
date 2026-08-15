@@ -8,7 +8,7 @@ export const PaymentSettings: React.FC = () => {
   const { currentOwner, updateOwnerProfile } = useSaaS();
 
   const [mode, setMode] = useState<'demo' | 'live'>(currentOwner?.payment_mode || 'demo');
-  const [liveGateway, setLiveGateway] = useState<'razorpay' | 'phonepe'>(currentOwner?.live_gateway || 'razorpay');
+  const [liveGateway, setLiveGateway] = useState<'razorpay' | 'phonepe' | 'payu'>(currentOwner?.live_gateway || 'razorpay');
 
   // Razorpay credentials
   const [razorpayKey, setRazorpayKey] = useState(currentOwner?.razorpay_key || '');
@@ -19,6 +19,11 @@ export const PaymentSettings: React.FC = () => {
   const [phonepeSaltKey, setPhonepeSaltKey] = useState(currentOwner?.phonepe_salt_key || '');
   const [phonepeSaltIndex, setPhonepeSaltIndex] = useState(currentOwner?.phonepe_salt_index || '1');
   const [phonepeEnv, setPhonepeEnv] = useState<'SANDBOX' | 'PRODUCTION'>(currentOwner?.phonepe_env || 'SANDBOX');
+
+  // PayU credentials
+  const [payuMerchantKey, setPayuMerchantKey] = useState(currentOwner?.payu_merchant_key || '');
+  const [payuMerchantSalt, setPayuMerchantSalt] = useState(currentOwner?.payu_merchant_salt || '');
+  const [payuEnv, setPayuEnv] = useState<'TEST' | 'LIVE'>(currentOwner?.payu_env || 'TEST');
 
   // Customer Payment Methods Allowed (Cash, Online, Split)
   const [enableCashPayment, setEnableCashPayment] = useState<boolean>(currentOwner?.enable_cash_payment ?? true);
@@ -102,7 +107,10 @@ export const PaymentSettings: React.FC = () => {
         phonepe_merchant_id: phonepeMerchantId,
         phonepe_salt_key: phonepeSaltKey,
         phonepe_salt_index: phonepeSaltIndex,
-        phonepe_env: phonepeEnv
+        phonepe_env: phonepeEnv,
+        payu_merchant_key: payuMerchantKey,
+        payu_merchant_salt: payuMerchantSalt,
+        payu_env: payuEnv
       },
       liveGateway
     );
@@ -145,6 +153,9 @@ export const PaymentSettings: React.FC = () => {
         phonepe_salt_key: phonepeSaltKey,
         phonepe_salt_index: phonepeSaltIndex,
         phonepe_env: phonepeEnv,
+        payu_merchant_key: payuMerchantKey,
+        payu_merchant_salt: payuMerchantSalt,
+        payu_env: payuEnv,
         gateway_verified: verified,
         gateway_status_message: verificationMessage,
         enable_gst: enableGst,
@@ -237,7 +248,7 @@ export const PaymentSettings: React.FC = () => {
             Select Live Payment Gateway Adapter
           </label>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <button
               type="button"
               onClick={() => {
@@ -281,6 +292,28 @@ export const PaymentSettings: React.FC = () => {
               </div>
               {liveGateway === 'phonepe' && <div className="w-2 h-2 rounded-full bg-purple-400"></div>}
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLiveGateway('payu');
+                setVerified(false);
+              }}
+              className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${
+                liveGateway === 'payu'
+                  ? 'bg-emerald-950/40 border-emerald-500 text-white font-bold'
+                  : 'bg-slate-950 border-slate-800 text-slate-400'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Zap className="w-5 h-5 text-emerald-400" />
+                <div className="text-left">
+                  <div className="text-sm">PayU India</div>
+                  <div className="text-[11px] text-slate-400">PayU Money / Gateway</div>
+                </div>
+              </div>
+              {liveGateway === 'payu' && <div className="w-2 h-2 rounded-full bg-emerald-400"></div>}
+            </button>
           </div>
         </div>
 
@@ -321,7 +354,7 @@ export const PaymentSettings: React.FC = () => {
               </div>
             </div>
           </div>
-        ) : (
+        ) : liveGateway === 'phonepe' ? (
           <div className="space-y-4 p-5 rounded-2xl bg-slate-950 border border-slate-800">
             <h3 className="text-xs font-bold uppercase text-purple-400 flex items-center gap-2">
               <Smartphone className="w-4 h-4" /> PhonePe Merchant Credentials (Restaurant Specific)
@@ -382,6 +415,57 @@ export const PaymentSettings: React.FC = () => {
                 >
                   <option value="SANDBOX">UAT / Sandbox (Testing)</option>
                   <option value="PRODUCTION">Production (Live Payments)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 p-5 rounded-2xl bg-slate-950 border border-slate-800">
+            <h3 className="text-xs font-bold uppercase text-emerald-400 flex items-center gap-2">
+              <Zap className="w-4 h-4" /> PayU Merchant Credentials (Restaurant Specific)
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Key *</label>
+                <input
+                  type="text"
+                  placeholder="Merchant Key provided by PayU"
+                  value={payuMerchantKey}
+                  onChange={(e) => {
+                    setPayuMerchantKey(e.target.value);
+                    setVerified(false);
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Salt *</label>
+                <input
+                  type="password"
+                  placeholder="Merchant Salt provided by PayU"
+                  value={payuMerchantSalt}
+                  onChange={(e) => {
+                    setPayuMerchantSalt(e.target.value);
+                    setVerified(false);
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Gateway Environment</label>
+                <select
+                  value={payuEnv}
+                  onChange={(e) => {
+                    setPayuEnv(e.target.value as any);
+                    setVerified(false);
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-emerald-500"
+                >
+                  <option value="TEST">Test / Sandbox (test.payu.in)</option>
+                  <option value="LIVE">Live / Production (secure.payu.in)</option>
                 </select>
               </div>
             </div>

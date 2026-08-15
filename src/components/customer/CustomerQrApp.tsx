@@ -3,7 +3,7 @@ import { useSaaS } from '../../context/SaaSContext';
 import {
   QrCode, Search, Bell, ShoppingBag, Plus, Minus, CheckCircle2,
   Clock, Download, Star, ShieldAlert, ShieldCheck, Sparkles, ChevronDown,
-  Info, Utensils, CreditCard, ArrowDown, Users, KeyRound, Globe, Phone, Ticket
+  Info, Utensils, CreditCard, ArrowDown, Users, KeyRound, Globe, Phone, Ticket, Zap
 } from 'lucide-react';
 import { t } from '../../utils/i18n';
 import { CallWaiterModal } from './CallWaiterModal';
@@ -35,6 +35,7 @@ export const CustomerQrApp: React.FC = () => {
     getActiveTableSession,
     getOrCreateTableSession,
     processRazorpayOnlinePayment,
+    processPayUOnlinePayment,
     sendCallWaiterRequest,
     showToast,
     language,
@@ -218,25 +219,74 @@ export const CustomerQrApp: React.FC = () => {
   const [appliedCoupon, setAppliedCoupon] = useState<CouponConfig | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
 
-  // Modals & Razorpay State
+  // Modals & Online Payment Gateway State
   const [showCallModal, setShowCallModal] = useState<boolean>(false);
   const [feedbackOrder, setFeedbackOrder] = useState<string | null>(null);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
-  const [pendingRzpModal, setPendingRzpModal] = useState<{
+  const [pendingOnlineModal, setPendingOnlineModal] = useState<{
+    gateway: 'razorpay' | 'payu' | 'phonepe';
     order: Order;
     amountToPay: number;
-    rzpOrderId: string;
+    orderOrTxnId: string;
     keyId: string;
+    hash?: string;
+    actionUrl?: string;
   } | null>(null);
-  const [rzpPayMethod, setRzpPayMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
-  const [isVerifyingRzp, setIsVerifyingRzp] = useState<boolean>(false);
+  const [onlinePayMethod, setOnlinePayMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
+  const [isVerifyingOnline, setIsVerifyingOnline] = useState<boolean>(false);
 
-  const triggerRazorpayPayment = async (
+  const triggerOnlinePayment = async (
     order: Order,
     amountToPay: number,
     onSuccess: () => void,
     onCancel: () => void
   ) => {
+    const gateway = restaurant?.live_gateway || 'razorpay';
+
+    if (gateway === 'payu') {
+      try {
+        const createRes = await fetch('/api/payu/create-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: amountToPay,
+            restaurant_id: order.restaurant_id,
+            restaurant_name: restaurant?.name || 'Restaurant Order',
+            order_id: order.id,
+            mobile: customerMobile || '9999999999',
+            payu_key: restaurant?.payu_merchant_key,
+            payu_salt: restaurant?.payu_merchant_salt,
+            env: restaurant?.payu_env || 'TEST'
+          })
+        });
+
+        const payuData = await createRes.json();
+        const txnid = payuData.txnid || `ORD_${order.id.substring(0, 8)}_${Date.now()}`;
+        const keyId = restaurant?.payu_merchant_key || 'PAYU_MERCHANT_KEY';
+
+        setPendingOnlineModal({
+          gateway: 'payu',
+          order,
+          amountToPay,
+          orderOrTxnId: txnid,
+          keyId,
+          hash: payuData.hash,
+          actionUrl: payuData.actionUrl
+        });
+      } catch (err) {
+        console.error("PayU init error:", err);
+        setPendingOnlineModal({
+          gateway: 'payu',
+          order,
+          amountToPay,
+          orderOrTxnId: `ORD_${order.id.substring(0, 8)}_${Date.now()}`,
+          keyId: restaurant?.payu_merchant_key || 'PAYU_MERCHANT_KEY'
+        });
+      }
+      return;
+    }
+
+    // Default to Razorpay
     try {
       const createRes = await fetch('/api/razorpay/create-order', {
         method: 'POST',
@@ -312,19 +362,21 @@ export const CustomerQrApp: React.FC = () => {
         const rzp = new (window as any).Razorpay(options);
         rzp.open();
       } else {
-        setPendingRzpModal({
+        setPendingOnlineModal({
+          gateway: 'razorpay',
           order,
           amountToPay,
-          rzpOrderId,
+          orderOrTxnId: rzpOrderId,
           keyId
         });
       }
     } catch (err) {
       console.error("Razorpay init error:", err);
-      setPendingRzpModal({
+      setPendingOnlineModal({
+        gateway: 'razorpay',
         order,
         amountToPay,
-        rzpOrderId: `order_${Math.random().toString(36).substring(2, 10)}`,
+        orderOrTxnId: `order_${Math.random().toString(36).substring(2, 10)}`,
         keyId: restaurant?.razorpay_key || 'rzp_test_key'
       });
     }
@@ -506,7 +558,7 @@ export const CustomerQrApp: React.FC = () => {
 
       if (paymentMode === 'online' || paymentMode === 'partial') {
         setIsCartOpen(false);
-        await triggerRazorpayPayment(
+        await triggerOnlinePayment(
           createdOrder,
           onlineAmt,
           () => {
@@ -1062,7 +1114,7 @@ export const CustomerQrApp: React.FC = () => {
                             {!isFullyPaid && (
                               <button
                                 onClick={() => {
-                                  triggerRazorpayPayment(
+                                  triggerOnlinePayment(
                                     order,
                                     dueAmt,
                                     () => {},
@@ -1071,7 +1123,8 @@ export const CustomerQrApp: React.FC = () => {
                                 }}
                                 className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shadow-md transition-all flex items-center gap-1"
                               >
-                                <CreditCard className="w-3 h-3" /> Pay Online (Razorpay)
+                                {restaurant?.live_gateway === 'payu' ? <Zap className="w-3 h-3" /> : <CreditCard className="w-3 h-3" />}
+                                Pay Online ({restaurant?.live_gateway === 'payu' ? 'PayU' : 'Razorpay'})
                               </button>
                             )}
 
@@ -1631,21 +1684,23 @@ export const CustomerQrApp: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 4: RAZORPAY PAYMENT VERIFICATION MODAL */}
-      {pendingRzpModal && (
+      {/* MODAL 4: ONLINE PAYMENT VERIFICATION MODAL (PayU / Razorpay) */}
+      {pendingOnlineModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 border border-blue-500/40 rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl">
+          <div className={`bg-slate-900 border ${pendingOnlineModal.gateway === 'payu' ? 'border-emerald-500/40' : 'border-blue-500/40'} rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl`}>
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold">
-                  <CreditCard className="w-4 h-4" />
+                <div className={`w-8 h-8 rounded-xl ${pendingOnlineModal.gateway === 'payu' ? 'bg-emerald-600/20 text-emerald-400' : 'bg-blue-600/20 text-blue-400'} flex items-center justify-center font-bold`}>
+                  {pendingOnlineModal.gateway === 'payu' ? <Zap className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-white text-sm">Razorpay Secure Online Checkout</h3>
-                  <p className="text-[10px] text-slate-400">Order {pendingRzpModal.order.order_number} • Table {pendingRzpModal.order.table_number}</p>
+                  <h3 className="font-extrabold text-white text-sm">
+                    {pendingOnlineModal.gateway === 'payu' ? 'PayU India Secure Checkout' : 'Razorpay Secure Checkout'}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Order {pendingOnlineModal.order.order_number} • Table {pendingOnlineModal.order.table_number}</p>
                 </div>
               </div>
-              <button onClick={() => setPendingRzpModal(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setPendingOnlineModal(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
@@ -1654,12 +1709,16 @@ export const CustomerQrApp: React.FC = () => {
                 <strong className="text-white">{restaurant?.name}</strong>
               </div>
               <div className="flex justify-between text-xs text-slate-400">
-                <span>Razorpay Key ID</span>
-                <span className="font-mono text-[10px] text-blue-400">{pendingRzpModal.keyId}</span>
+                <span>Gateway Adapter</span>
+                <span className="font-mono text-[10px] uppercase text-slate-300 font-bold">{pendingOnlineModal.gateway} ({restaurant?.payment_mode || 'demo'})</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Txn / Key ID</span>
+                <span className="font-mono text-[10px] text-emerald-400">{pendingOnlineModal.keyId.substring(0, 12)}...</span>
               </div>
               <div className="flex justify-between text-sm font-extrabold text-white pt-2 border-t border-slate-800">
                 <span>Amount to Pay</span>
-                <span className="text-emerald-400">₹{pendingRzpModal.amountToPay}</span>
+                <span className="text-emerald-400">₹{pendingOnlineModal.amountToPay}</span>
               </div>
             </div>
 
@@ -1670,9 +1729,13 @@ export const CustomerQrApp: React.FC = () => {
                   <button
                     key={method}
                     type="button"
-                    onClick={() => setRzpPayMethod(method)}
+                    onClick={() => setOnlinePayMethod(method)}
                     className={`p-2.5 rounded-xl border font-bold uppercase transition-all ${
-                      rzpPayMethod === method ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-950 text-slate-400 border-slate-800'
+                      onlinePayMethod === method
+                        ? pendingOnlineModal.gateway === 'payu'
+                          ? 'bg-emerald-600 text-white border-emerald-500'
+                          : 'bg-blue-600 text-white border-blue-500'
+                        : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
                     {method}
@@ -1682,37 +1745,64 @@ export const CustomerQrApp: React.FC = () => {
             </div>
 
             <button
-              disabled={isVerifyingRzp}
+              disabled={isVerifyingOnline}
               onClick={async () => {
-                setIsVerifyingRzp(true);
-                const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-                const signature = `sig_${Math.random().toString(36).substring(2, 12)}`;
+                setIsVerifyingOnline(true);
 
-                const success = await processRazorpayOnlinePayment(
-                  pendingRzpModal.order.id,
-                  pendingRzpModal.amountToPay,
-                  {
-                    razorpay_order_id: pendingRzpModal.rzpOrderId,
-                    razorpay_payment_id: paymentId,
-                    razorpay_signature: signature
-                  },
-                  customerMobile
-                );
+                if (pendingOnlineModal.gateway === 'payu') {
+                  const mihpayid = `mih_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+                  const success = await processPayUOnlinePayment(
+                    pendingOnlineModal.order.id,
+                    pendingOnlineModal.amountToPay,
+                    {
+                      txnid: pendingOnlineModal.orderOrTxnId,
+                      mihpayid,
+                      hash: pendingOnlineModal.hash,
+                      status: 'success'
+                    },
+                    customerMobile
+                  );
 
-                setIsVerifyingRzp(false);
-                if (success) {
-                  setCart([]);
-                  setIsCartOpen(false);
-                  setPendingRzpModal(null);
+                  setIsVerifyingOnline(false);
+                  if (success) {
+                    setCart([]);
+                    setIsCartOpen(false);
+                    setPendingOnlineModal(null);
+                  }
+                } else {
+                  const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+                  const signature = `sig_${Math.random().toString(36).substring(2, 12)}`;
+
+                  const success = await processRazorpayOnlinePayment(
+                    pendingOnlineModal.order.id,
+                    pendingOnlineModal.amountToPay,
+                    {
+                      razorpay_order_id: pendingOnlineModal.orderOrTxnId,
+                      razorpay_payment_id: paymentId,
+                      razorpay_signature: signature
+                    },
+                    customerMobile
+                  );
+
+                  setIsVerifyingOnline(false);
+                  if (success) {
+                    setCart([]);
+                    setIsCartOpen(false);
+                    setPendingOnlineModal(null);
+                  }
                 }
               }}
-              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-extrabold text-xs shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2"
+              className={`w-full py-3.5 rounded-2xl ${
+                pendingOnlineModal.gateway === 'payu'
+                  ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
+                  : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30'
+              } disabled:bg-slate-800 text-white font-extrabold text-xs shadow-xl flex items-center justify-center gap-2`}
             >
-              {isVerifyingRzp ? (
-                <span>Verifying with Razorpay Server...</span>
+              {isVerifyingOnline ? (
+                <span>Verifying with {pendingOnlineModal.gateway === 'payu' ? 'PayU' : 'Razorpay'} Server...</span>
               ) : (
                 <>
-                  <ShieldCheck className="w-4 h-4" /> Pay ₹{pendingRzpModal.amountToPay} via Razorpay
+                  <ShieldCheck className="w-4 h-4" /> Pay ₹{pendingOnlineModal.amountToPay} via {pendingOnlineModal.gateway === 'payu' ? 'PayU' : 'Razorpay'}
                 </>
               )}
             </button>

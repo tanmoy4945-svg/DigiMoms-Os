@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { CreditCard, Smartphone, ShieldCheck, Key, CheckCircle2, AlertTriangle, RefreshCw, Layers } from 'lucide-react';
+import { CreditCard, Smartphone, ShieldCheck, Key, CheckCircle2, AlertTriangle, RefreshCw, Layers, Zap } from 'lucide-react';
 import { verifyCeoGatewayConfig } from '../../lib/paymentAdapters';
 import { CeoPaymentConfig } from '../../types';
 
 export const CeoPaymentSettings: React.FC = () => {
   const { ceoPaymentConfig, updateCeoPaymentConfig, subscriptionHistory } = useSaaS();
 
-  const [primaryGateway, setPrimaryGateway] = useState<'phonepe' | 'razorpay' | 'demo'>(
+  const [primaryGateway, setPrimaryGateway] = useState<'phonepe' | 'razorpay' | 'payu' | 'demo'>(
     ceoPaymentConfig?.primary_gateway || 'phonepe'
   );
   const [mode, setMode] = useState<'demo' | 'live'>(ceoPaymentConfig?.mode || 'demo');
@@ -23,6 +23,12 @@ export const CeoPaymentSettings: React.FC = () => {
   const [razorpayKeyId, setRazorpayKeyId] = useState(ceoPaymentConfig?.razorpay_key_id || '');
   const [razorpayKeySecret, setRazorpayKeySecret] = useState(ceoPaymentConfig?.razorpay_key_secret || '');
   const [razorpayVerified, setRazorpayVerified] = useState(ceoPaymentConfig?.razorpay_verified || false);
+
+  // PayU credentials
+  const [payuMerchantKey, setPayuMerchantKey] = useState(ceoPaymentConfig?.payu_merchant_key || '');
+  const [payuMerchantSalt, setPayuMerchantSalt] = useState(ceoPaymentConfig?.payu_merchant_salt || '');
+  const [payuEnv, setPayuEnv] = useState<'TEST' | 'LIVE'>(ceoPaymentConfig?.payu_env || 'TEST');
+  const [payuVerified, setPayuVerified] = useState(ceoPaymentConfig?.payu_verified || false);
 
   // Verification UI state
   const [isVerifying, setIsVerifying] = useState(false);
@@ -80,6 +86,32 @@ export const CeoPaymentSettings: React.FC = () => {
     });
   };
 
+  const handleVerifyPayU = async () => {
+    setIsVerifying(true);
+    setVerifyMessage('Running PayU SHA-512 Hash Generation and format verification test...');
+
+    const res = await verifyCeoGatewayConfig(
+      {
+        payu_merchant_key: payuMerchantKey,
+        payu_merchant_salt: payuMerchantSalt,
+        payu_env: payuEnv
+      },
+      'payu'
+    );
+
+    setIsVerifying(false);
+    setPayuVerified(res.success);
+    setVerifyMessage(res.message);
+
+    await updateCeoPaymentConfig({
+      payu_merchant_key: payuMerchantKey,
+      payu_merchant_salt: payuMerchantSalt,
+      payu_env: payuEnv,
+      payu_verified: res.success,
+      payu_verified_at: res.verifiedAt
+    });
+  };
+
   const handleSaveAll = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -93,6 +125,11 @@ export const CeoPaymentSettings: React.FC = () => {
       return;
     }
 
+    if (mode === 'live' && primaryGateway === 'payu' && !payuVerified) {
+      alert('⚠️ Verification Required: PayU credentials must be verified before enabling Live Mode for DigiMoms Subscriptions.');
+      return;
+    }
+
     await updateCeoPaymentConfig({
       primary_gateway: primaryGateway,
       mode: mode,
@@ -103,8 +140,13 @@ export const CeoPaymentSettings: React.FC = () => {
       phonepe_verified: phonepeVerified,
       razorpay_key_id: razorpayKeyId,
       razorpay_key_secret: razorpayKeySecret,
-      razorpay_verified: razorpayVerified
+      razorpay_verified: razorpayVerified,
+      payu_merchant_key: payuMerchantKey,
+      payu_merchant_salt: payuMerchantSalt,
+      payu_env: payuEnv,
+      payu_verified: payuVerified
     });
+    alert('✅ DigiMoms CEO Payment Configuration saved successfully!');
   };
 
   return (
@@ -125,7 +167,7 @@ export const CeoPaymentSettings: React.FC = () => {
             Primary DigiMoms Subscription Gateway
           </label>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div
               onClick={() => setPrimaryGateway('phonepe')}
               className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
@@ -136,12 +178,12 @@ export const CeoPaymentSettings: React.FC = () => {
             >
               <div className="flex items-center justify-between">
                 <div className="font-bold text-sm text-purple-400 flex items-center gap-2">
-                  <Smartphone className="w-4 h-4" /> PhonePe (Primary Gateway)
+                  <Smartphone className="w-4 h-4" /> PhonePe (Primary)
                 </div>
                 {primaryGateway === 'phonepe' && <CheckCircle2 className="w-5 h-5 text-purple-400" />}
               </div>
               <p className="text-xs text-slate-400">
-                Official PhonePe Business UPI & QR integration for collecting ₹999/month OS renewals.
+                PhonePe Business UPI & QR integration for OS renewals.
               </p>
             </div>
 
@@ -160,7 +202,26 @@ export const CeoPaymentSettings: React.FC = () => {
                 {primaryGateway === 'razorpay' && <CheckCircle2 className="w-5 h-5 text-indigo-400" />}
               </div>
               <p className="text-xs text-slate-400">
-                DigiMoms company Razorpay account for Cards, UPI and NetBanking subscription payments.
+                Cards, UPI and NetBanking subscription payments.
+              </p>
+            </div>
+
+            <div
+              onClick={() => setPrimaryGateway('payu')}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
+                primaryGateway === 'payu'
+                  ? 'border-emerald-500 bg-emerald-950/30 text-white shadow-lg shadow-emerald-500/10'
+                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-sm text-emerald-400 flex items-center gap-2">
+                  <Zap className="w-4 h-4" /> PayU India
+                </div>
+                {primaryGateway === 'payu' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+              </div>
+              <p className="text-xs text-slate-400">
+                PayU Money & merchant gateway for monthly subscriptions.
               </p>
             </div>
 
@@ -179,7 +240,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 {primaryGateway === 'demo' && <CheckCircle2 className="w-5 h-5 text-blue-400" />}
               </div>
               <p className="text-xs text-slate-400">
-                Simulated 1-click test renewals for development, onboarding, and testing.
+                Simulated 1-click test renewals for development & testing.
               </p>
             </div>
           </div>
@@ -369,6 +430,81 @@ export const CeoPaymentSettings: React.FC = () => {
                 }}
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white font-mono outline-none focus:border-indigo-500"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* PayU India Config Section */}
+        <div className="space-y-4 p-6 rounded-2xl bg-slate-950 border border-slate-800">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+              <Zap className="w-4 h-4" /> PayU India Company Credentials
+            </h3>
+
+            <div className="flex items-center gap-2">
+              {payuVerified ? (
+                <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Verified
+                </span>
+              ) : (
+                <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  Unverified
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={handleVerifyPayU}
+                disabled={isVerifying}
+                className="px-3 py-1.5 rounded-xl bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 text-xs font-bold border border-emerald-500/40 flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3 h-3 ${isVerifying ? 'animate-spin' : ''}`} /> Verify PayU
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Key *</label>
+              <input
+                type="text"
+                placeholder="Merchant Key"
+                value={payuMerchantKey}
+                onChange={(e) => {
+                  setPayuMerchantKey(e.target.value);
+                  setPayuVerified(false);
+                }}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white font-mono outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Salt *</label>
+              <input
+                type="password"
+                placeholder="Merchant Salt"
+                value={payuMerchantSalt}
+                onChange={(e) => {
+                  setPayuMerchantSalt(e.target.value);
+                  setPayuVerified(false);
+                }}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white font-mono outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Environment</label>
+              <select
+                value={payuEnv}
+                onChange={(e) => {
+                  setPayuEnv(e.target.value as any);
+                  setPayuVerified(false);
+                }}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-emerald-500"
+              >
+                <option value="TEST">Test / Sandbox (test.payu.in)</option>
+                <option value="LIVE">Live / Production (secure.payu.in)</option>
+              </select>
             </div>
           </div>
         </div>

@@ -168,6 +168,9 @@ export async function validateAndNormalizeImageUrl(
  * Internal helper to test if an image URL loads in the DOM with natural dimensions
  */
 function testImageCanLoad(url: string, timeoutMs: number): Promise<boolean> {
+  if (!url || !url.trim()) {
+    return Promise.resolve(false);
+  }
   return new Promise((resolve) => {
     const img = new Image();
     let timer: any = null;
