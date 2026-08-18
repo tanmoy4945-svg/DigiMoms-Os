@@ -92,7 +92,7 @@ export const PricingPage: React.FC = () => {
             <ul className="space-y-3 pt-4 text-sm text-slate-200">
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-blue-400" /> Unlimited Table QR Codes</li>
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-blue-400" /> Multi-language (EN, BN, HI)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-blue-400" /> Razorpay Live Payment Gateway</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-blue-400" /> Live Payment Gateway (UPI, Cards & Net Banking)</li>
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-blue-400" /> Staff & Waiter Accounts</li>
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-blue-400" /> Detailed Sales Analytics & CSV Export</li>
             </ul>

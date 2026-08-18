@@ -23,7 +23,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
           <p>Customers ordering via QR code do NOT require mandatory account creation. Dining preferences and cart orders are stored in temporary table sessions to facilitate kitchen fulfillment.</p>
 
           <h3 className="font-bold text-white text-base pt-2">3. Payment Security</h3>
-          <p>We do NOT store credit card details or bank passwords on our servers. All online payment flows use 256-bit SSL encrypted PCI-DSS compliant gateways like Razorpay.</p>
+          <p>We do NOT store credit card details or bank passwords on our servers. All online payment flows use 256-bit SSL encrypted PCI-DSS compliant payment gateways supporting UPI, Cards, and Net Banking.</p>
 
           <h3 className="font-bold text-white text-base pt-2">4. Data Retention</h3>
           <p>Order records and invoices are securely saved for tax compliance. You may request data export or account closure by contacting our support hotline at +91 9475388085.</p>

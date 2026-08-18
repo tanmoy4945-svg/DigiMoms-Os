@@ -4,7 +4,7 @@ import {
   CustomerFeedback, CallWaiterRequest, ActivityLog, AuditLog, Language,
   CeoRazorpayConfig, CeoPaymentConfig, DigiMomsSubscriptionPayment, PaymentTransaction, SubscriptionHistory,
   RestaurantWebsiteSettings, RestaurantServiceItem, RestaurantPricingItem, RestaurantLegalPages, RestaurantSocialLinks,
-  AppNotification, NotificationEventType
+  AppNotification, NotificationEventType, OfflinePaymentRecord, OfflinePaymentMethod
 } from '../types';
 import { 
   playNotificationSound, unlockAudioContext, 
@@ -144,9 +144,13 @@ interface SaaSContextType {
   completeCallRequest: (requestId: string) => Promise<void>;
   verifyCashOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
   confirmCashPayment: (orderId: string, cashAmount: number, actorId: string, actorType: 'waiter' | 'owner' | 'staff', actorName: string) => Promise<void>;
+  recordOfflinePayment: (orderId: string, payments: { method: OfflinePaymentMethod; amount: number; reference?: string; note?: string }[], actorName?: string, actorType?: 'owner' | 'staff') => Promise<boolean>;
+  verifyUpiPayment: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
+  rejectUpiPayment: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
+  submitUpiPaymentConfirmation: (orderId: string, upiRef?: string) => Promise<boolean>;
   processRazorpayOnlinePayment: (orderId: string, onlineAmountToPay: number, razorpayResponse: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }, customerMobile?: string) => Promise<boolean>;
   processPayUOnlinePayment: (orderId: string, onlineAmountToPay: number, payuResponse: { txnid: string; mihpayid?: string; hash?: string; status?: string }, customerMobile?: string) => Promise<boolean>;
-  updateOrderPaymentMethod: (orderId: string, newMode: 'cash' | 'online' | 'partial', partialOnlineAmount?: number) => Promise<void>;
+  updateOrderPaymentMethod: (orderId: string, newMode: 'cash' | 'online' | 'partial' | 'upi_qr', partialOnlineAmount?: number) => Promise<void>;
   paymentTransactions: PaymentTransaction[];
   acceptOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
   startCookingOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
@@ -161,7 +165,7 @@ interface SaaSContextType {
     tableId: string,
     tableNumber: string,
     items: { menu_id: string; menu_name: string; quantity: number; price: number; special_instructions?: string }[],
-    paymentMode: 'cash' | 'demo' | 'online' | 'partial',
+    paymentMode: 'cash' | 'demo' | 'online' | 'partial' | 'upi_qr',
     customerMobile?: string,
     partialDetails?: { online_amount: number; cash_amount: number },
     razorpayDetails?: { razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string },
@@ -1436,6 +1440,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     'enable_cash_payment',
     'enable_online_payment',
     'enable_split_payment',
+    'enable_upi_qr',
+    'upi_id',
+    'upi_name',
+    'upi_qr_image',
+    'enable_gateway_payment',
     'status',
     'monthly_subscription_fee',
     'trial_days',
@@ -2582,6 +2591,189 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await confirmCashPayment(orderId, Math.max(0, dueToCollect), actorId, type, actor);
   };
 
+  const verifyUpiPayment = async (
+    orderId: string,
+    actorName?: string,
+    actorType?: 'owner' | 'staff'
+  ) => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      showToast("Order not found.", "error");
+      return;
+    }
+
+    const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Staff'));
+    const type = actorType || (currentStaff ? 'staff' : 'owner');
+    const actorId = currentStaff ? currentStaff.id : (currentOwner ? currentOwner.id : 'staff');
+    const confirmedAtIso = new Date().toISOString();
+    const grandTotal = existingOrd.grand_total;
+
+    const fullUpdatePayload = {
+      online_amount: grandTotal,
+      cash_due: 0,
+      payment_status: 'paid_live',
+      order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+      verified_by: actor,
+      verified_staff_id: actorId,
+      verified_at: confirmedAtIso,
+      payment_actor_id: actorId,
+      payment_actor_type: type,
+      payment_actor_name: `${actor} (UPI Verified)`,
+      payment_confirmed_at: confirmedAtIso,
+      updated_at: confirmedAtIso
+    };
+
+    let { error: updateErr } = await supabase
+      .from('orders')
+      .update(fullUpdatePayload)
+      .eq('id', orderId)
+      .eq('restaurant_id', existingOrd.restaurant_id);
+
+    if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('column'))) {
+      console.warn("Retrying UPI order verification with core fields...");
+      const retry = await supabase.from('orders').update({
+        payment_status: 'paid_live',
+        online_amount: grandTotal,
+        cash_due: 0,
+        order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+        updated_at: confirmedAtIso
+      }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+      updateErr = retry.error;
+    }
+
+    if (updateErr) {
+      console.error("verifyUpiPayment update error:", updateErr);
+      showToast(`Failed to verify UPI payment: ${updateErr.message || 'Database error'}`, 'error');
+      return;
+    }
+
+    // Credit Hotel Wallet (Idempotent)
+    await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, grandTotal, 'online');
+
+    const txPayload = {
+      id: crypto.randomUUID(),
+      restaurant_id: existingOrd.restaurant_id,
+      order_id: existingOrd.id,
+      table_number: existingOrd.table_number,
+      order_number: existingOrd.order_number,
+      payment_method: 'online',
+      amount: grandTotal,
+      transaction_id: existingOrd.upi_ref_number ? `UPI_REF_${existingOrd.upi_ref_number}` : `UPI_VERIFIED_${Date.now()}`,
+      status: 'paid',
+      actor_id: actorId,
+      actor_type: type,
+      actor_name: `${actor} (UPI Verification)`,
+      created_at: confirmedAtIso
+    };
+
+    try {
+      await supabase.from('payment_transactions').insert([txPayload]);
+    } catch (err) {
+      console.warn("payment_transactions insert notice:", err);
+    }
+
+    logAudit({
+      restaurant_id: existingOrd.restaurant_id,
+      order_id: existingOrd.id,
+      actor_type: type,
+      actor_id: actorId,
+      actor_name: actor,
+      action: 'UPI_PAYMENT_VERIFIED',
+      previous_status: existingOrd.payment_status,
+      new_status: 'paid_live',
+      description: `UPI Scan & Pay payment ₹${grandTotal} verified by ${actor} (${type}). Ref: ${existingOrd.upi_ref_number || 'Direct Scan'}. Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
+    });
+
+    await fetchAllFromSupabase();
+    playNotificationSound('new_order');
+    showToast(`✅ UPI payment of ₹${grandTotal} verified for Table ${existingOrd.table_number}! Order sent to kitchen.`, 'success');
+  };
+
+  const rejectUpiPayment = async (
+    orderId: string,
+    actorName?: string,
+    actorType?: 'owner' | 'staff'
+  ) => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) return;
+
+    const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Staff'));
+    const type = actorType || (currentStaff ? 'staff' : 'owner');
+    const confirmedAtIso = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        payment_status: 'pending',
+        notes: existingOrd.notes ? `${existingOrd.notes} | UPI verification declined by staff` : 'UPI verification declined by staff',
+        updated_at: confirmedAtIso
+      })
+      .eq('id', orderId)
+      .eq('restaurant_id', existingOrd.restaurant_id);
+
+    if (!error) {
+      logAudit({
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        actor_type: type,
+        actor_name: actor,
+        action: 'UPI_PAYMENT_REJECTED',
+        previous_status: existingOrd.payment_status,
+        new_status: 'pending',
+        description: `UPI payment declined by ${actor} for Order ${existingOrd.order_number} Table ${existingOrd.table_number}. Requesting cash.`
+      });
+      await fetchAllFromSupabase();
+      showToast(`UPI verification rejected for Table ${existingOrd.table_number}. Staff should collect cash.`, 'info');
+    }
+  };
+
+  const submitUpiPaymentConfirmation = async (orderId: string, upiRef?: string): Promise<boolean> => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) return false;
+
+    const confirmedAtIso = new Date().toISOString();
+    const updatePayload: Record<string, any> = {
+      payment_mode: 'upi_qr',
+      payment_status: 'payment_verification_pending',
+      updated_at: confirmedAtIso
+    };
+    if (upiRef) {
+      updatePayload.upi_ref_number = upiRef;
+    }
+
+    let { error } = await supabase
+      .from('orders')
+      .update(updatePayload)
+      .eq('id', orderId)
+      .eq('restaurant_id', existingOrd.restaurant_id);
+
+    if (error && (error.code === '42703' || error.message?.includes('column'))) {
+      const retry = await supabase.from('orders').update({
+        payment_mode: 'upi_qr',
+        payment_status: 'payment_verification_pending',
+        updated_at: confirmedAtIso
+      }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+      error = retry.error;
+    }
+
+    if (!error) {
+      triggerRealtimeEventNotification({
+        type: 'new_order',
+        title: `🔔 UPI Payment Pending Verification`,
+        body: `Table ${existingOrd.table_number} (${existingOrd.order_number}) submitted UPI payment ₹${existingOrd.grand_total}. Ref: ${upiRef || 'Direct Scan'}. Please verify!`,
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number,
+        target_roles: ['owner', 'waiter', 'kitchen']
+      });
+      playNotificationSound('new_order');
+      await fetchAllFromSupabase();
+      showToast(`Payment submitted! Staff is verifying your transaction.`, 'info');
+      return true;
+    }
+    return false;
+  };
+
   const creditHotelWallet = async (
     restaurantId: string,
     orderId: string,
@@ -2793,6 +2985,154 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await fetchAllFromSupabase();
     playNotificationSound('new_order');
     showToast(`Cash payment of ₹${cashAmountCollected} confirmed by ${actorName}! Order marked PAID and COMPLETED.`, 'success');
+  };
+
+  const recordOfflinePayment = async (
+    orderId: string,
+    payments: { method: OfflinePaymentMethod; amount: number; reference?: string; note?: string }[],
+    actorName?: string,
+    actorType?: 'owner' | 'staff'
+  ): Promise<boolean> => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      showToast("Order not found.", "error");
+      return false;
+    }
+
+    const validPayments = payments.filter(p => Number(p.amount) > 0);
+    if (validPayments.length === 0) {
+      showToast("Please enter at least one valid payment amount greater than 0.", "error");
+      return false;
+    }
+
+    const totalNewAmount = validPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Staff'));
+    const type = actorType || (currentStaff ? 'staff' : 'owner');
+    const actorId = currentStaff ? currentStaff.id : (currentOwner ? currentOwner.id : 'staff');
+    const confirmedAtIso = new Date().toISOString();
+
+    const newRecords: OfflinePaymentRecord[] = validPayments.map(p => ({
+      id: crypto.randomUUID(),
+      method: p.method,
+      amount: Number(p.amount),
+      reference: p.reference ? p.reference.trim() : undefined,
+      note: p.note ? p.note.trim() : undefined,
+      recorded_by: `${actor} (${type})`,
+      recorded_at: confirmedAtIso
+    }));
+
+    const existingOfflineRecords = Array.isArray(existingOrd.offline_payments) ? existingOrd.offline_payments : [];
+    const updatedOfflineRecords = [...existingOfflineRecords, ...newRecords];
+
+    const grandTotal = existingOrd.grand_total;
+    const onlineAmt = Number(existingOrd.online_amount || 0);
+    const prevCashAmt = Number(existingOrd.cash_amount || 0);
+    const newCashTotal = Number((prevCashAmt + totalNewAmount).toFixed(2));
+    const totalPaid = Number((onlineAmt + newCashTotal).toFixed(2));
+    const newCashDue = Math.max(0, Number((grandTotal - totalPaid).toFixed(2)));
+
+    let newPaymentStatus: any = 'pending';
+    let newOrderStatus = existingOrd.order_status;
+
+    if (totalPaid >= grandTotal) {
+      newPaymentStatus = existingOrd.payment_mode === 'demo' ? 'paid_demo' : 'paid_cash';
+      if (existingOrd.order_status === 'pending') {
+        newOrderStatus = 'accepted';
+      }
+    } else if (totalPaid > 0) {
+      newPaymentStatus = 'partially_paid';
+    }
+
+    const fullUpdatePayload: Record<string, any> = {
+      cash_amount: newCashTotal,
+      cash_due: newCashDue,
+      payment_status: newPaymentStatus,
+      order_status: newOrderStatus,
+      offline_payments: updatedOfflineRecords,
+      verified_by: actor,
+      verified_staff_id: actorId,
+      verified_at: confirmedAtIso,
+      payment_actor_id: actorId,
+      payment_actor_type: type,
+      payment_actor_name: `${actor} (${type})`,
+      payment_confirmed_at: confirmedAtIso,
+      updated_at: confirmedAtIso
+    };
+
+    let { error: updateErr } = await supabase
+      .from('orders')
+      .update(fullUpdatePayload)
+      .eq('id', orderId)
+      .eq('restaurant_id', existingOrd.restaurant_id);
+
+    if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('column'))) {
+      console.warn("Retrying offline payments update with core schema fields...");
+      const retry1 = await supabase.from('orders').update({
+        payment_status: newPaymentStatus,
+        cash_amount: newCashTotal,
+        cash_due: newCashDue,
+        order_status: newOrderStatus,
+        updated_at: confirmedAtIso
+      }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+      updateErr = retry1.error;
+    }
+
+    if (updateErr) {
+      console.error("recordOfflinePayment update error:", updateErr);
+      showToast(`Failed to record offline payment: ${updateErr.message || 'Database error'}`, 'error');
+      return false;
+    }
+
+    // Insert payment transactions for each recorded entry
+    for (const p of validPayments) {
+      const txPayload = {
+        id: crypto.randomUUID(),
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number,
+        order_number: existingOrd.order_number,
+        payment_method: p.method === 'cash' ? 'cash' : (p.method === 'upi' || p.method === 'qr' ? 'upi_qr' : p.method),
+        amount: Number(p.amount),
+        transaction_id: p.reference ? `OFFLINE_${p.method.toUpperCase()}_${p.reference}` : `OFFLINE_${p.method.toUpperCase()}_${Date.now()}`,
+        status: newPaymentStatus === 'paid_cash' || newPaymentStatus === 'paid' ? 'paid' : 'partially_paid',
+        actor_id: actorId,
+        actor_type: type,
+        actor_name: `${actor} (${type})`,
+        created_at: confirmedAtIso
+      };
+
+      try {
+        await supabase.from('payment_transactions').insert([txPayload]);
+      } catch (err) {
+        console.warn("payment_transactions insert notice:", err);
+      }
+    }
+
+    // Credit Hotel Wallet
+    await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, totalNewAmount, 'cash');
+
+    const breakdownText = validPayments.map(p => `${p.method.toUpperCase()}: ₹${p.amount}${p.reference ? ` (Ref: ${p.reference})` : ''}`).join(', ');
+
+    logAudit({
+      restaurant_id: existingOrd.restaurant_id,
+      order_id: existingOrd.id,
+      actor_type: type,
+      actor_id: actorId,
+      actor_name: actor,
+      action: 'OFFLINE_PAYMENT_COLLECTED',
+      previous_status: existingOrd.payment_status,
+      new_status: newPaymentStatus,
+      description: `Recorded offline payment of ₹${totalNewAmount} [${breakdownText}] by ${actor} (${type}). Remaining due: ₹${newCashDue}. Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
+    });
+
+    await fetchAllFromSupabase();
+    playNotificationSound('new_order');
+    if (newPaymentStatus === 'paid_cash' || newPaymentStatus === 'paid') {
+      showToast(`✅ Payment of ₹${totalNewAmount} recorded by ${actor}! Order ${existingOrd.order_number} is fully PAID.`, 'success');
+    } else {
+      showToast(`📝 Payment of ₹${totalNewAmount} recorded. Remaining balance: ₹${newCashDue}.`, 'info');
+    }
+    return true;
   };
 
   const processRazorpayOnlinePayment = async (
@@ -3094,7 +3434,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateOrderPaymentMethod = async (
     orderId: string,
-    newMode: 'cash' | 'online' | 'partial',
+    newMode: 'cash' | 'online' | 'partial' | 'upi_qr',
     partialOnlineAmount?: number
   ) => {
     const existingOrd = orders.find(o => o.id === orderId);
@@ -3111,6 +3451,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else if (newMode === 'online') {
       online_amount = grandTotal;
       cash_due = 0;
+    } else if (newMode === 'upi_qr') {
+      online_amount = 0;
+      cash_due = grandTotal;
     } else {
       cash_due = Number((grandTotal - online_amount - cash_amount).toFixed(2));
     }
@@ -3364,7 +3707,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     tableId: string,
     tableNumber: string,
     items: { menu_id: string; menu_name: string; quantity: number; price: number; special_instructions?: string }[],
-    paymentMode: 'cash' | 'demo' | 'online' | 'partial',
+    paymentMode: 'cash' | 'demo' | 'online' | 'partial' | 'upi_qr',
     customerMobile?: string,
     partialDetails?: { online_amount: number; cash_amount: number },
     razorpayDetails?: { razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string },
@@ -3453,6 +3796,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         online_amount = 0;
         cash_due = grand_total;
       }
+    } else if (effectivePaymentMode === 'upi_qr') {
+      paymentStatus = 'payment_verification_pending';
+      orderStatus = 'pending';
+      online_amount = 0;
+      cash_due = grand_total;
     } else {
       // Cash payment
       paymentStatus = 'pending';
@@ -3486,6 +3834,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       cash_amount,
       cash_due,
       notes: notes || null,
+      upi_ref_number: (notes?.startsWith('UPI_REF:') ? notes.replace('UPI_REF:', '') : null),
       razorpay_order_id: razorpayDetails?.razorpay_order_id || null,
       razorpay_payment_id: razorpayDetails?.razorpay_payment_id || null,
       razorpay_signature: razorpayDetails?.razorpay_signature || null,
@@ -3863,7 +4212,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       factoryResetRestaurant, executeProductionReset, loginOwner, logoutOwner, updateOwnerProfile,
       addCategory, updateCategory, addMenuItem, updateMenuItem, toggleMenuItemAvailability,
       addTable, clearTableSession, addStaffMember, toggleStaffStatus, deleteStaffMember, updateStaffPassword,
-      loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder,
+      loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder, recordOfflinePayment,
+      verifyUpiPayment, rejectUpiPayment, submitUpiPaymentConfirmation,
       acceptOrder, startCookingOrder, markOrderReady, serveOrder, completeOrder, placeOrder,
       sendCallWaiterRequest, submitCustomerFeedback, getActiveTableSession, getOrCreateTableSession,
       websiteSettings, restaurantServices, restaurantPricing, restaurantLegalPages, restaurantSocialLinks,

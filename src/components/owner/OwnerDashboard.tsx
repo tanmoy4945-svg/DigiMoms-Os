@@ -4,7 +4,7 @@ import { SmartImage } from '../common/SmartImage';
 import {
   Building2, Utensils, QrCode, Users, CreditCard, BarChart3,
   Star, Settings, LogOut, CheckCircle2, Clock, PhoneCall, ShoppingBag, Bell, AlertTriangle, ShieldCheck, Sparkles,
-  FileText, Printer, Download, Globe
+  FileText, Printer, Download, Globe, Banknote
 } from 'lucide-react';
 import { MenuManagement } from './MenuManagement';
 import { TableManagement } from './TableManagement';
@@ -15,6 +15,7 @@ import { FeedbackViewer } from './FeedbackViewer';
 import { SettingsManagement } from './SettingsManagement';
 import { RestaurantWebsiteManager } from './RestaurantWebsiteManager';
 import { BillModal } from '../common/BillModal';
+import { OfflinePaymentModal } from '../common/OfflinePaymentModal';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RealtimeStatusBadge } from '../common/RealtimeStatusBadge';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
@@ -30,6 +31,8 @@ export const OwnerDashboard: React.FC = () => {
     acceptCallRequest,
     completeCallRequest,
     verifyCashOrder,
+    verifyUpiPayment,
+    rejectUpiPayment,
     acceptOrder,
     startCookingOrder,
     markOrderReady,
@@ -49,6 +52,7 @@ export const OwnerDashboard: React.FC = () => {
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
+  const [selectedOfflineOrder, setSelectedOfflineOrder] = useState<Order | null>(null);
 
   if (!currentOwner) {
     return (
@@ -644,14 +648,43 @@ export const OwnerDashboard: React.FC = () => {
 
                     {/* Operational Override Buttons */}
                     <div className="flex items-center gap-2 flex-wrap">
+                      {order.payment_status === 'payment_verification_pending' && (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => verifyUpiPayment(order.id, currentOwner.owner_name, 'owner')}
+                            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md flex items-center gap-1"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> [Verify UPI Paid]
+                          </button>
+                          <button
+                            onClick={() => rejectUpiPayment(order.id, currentOwner.owner_name, 'owner')}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/80 text-rose-300 font-bold text-xs border border-slate-700"
+                            title="Decline UPI and request cash"
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+
                       {(order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0))) > 0 &&
-                       order.payment_status !== 'paid_live' && order.payment_status !== 'paid' && order.payment_status !== 'paid_demo' && order.payment_status !== 'paid_cash' && (
-                        <button
-                          onClick={() => verifyCashOrder(order.id, currentOwner.owner_name, 'owner')}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md"
-                        >
-                          [Mark Cash Paid]
-                        </button>
+                       order.payment_status !== 'paid_live' && order.payment_status !== 'paid' && order.payment_status !== 'paid_demo' && order.payment_status !== 'paid_cash' && order.payment_status !== 'payment_verification_pending' && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setSelectedOfflineOrder(order)}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs border border-slate-700 flex items-center gap-1 transition-all"
+                            title="Record Cash, Counter UPI, Card or Mixed payment"
+                          >
+                            <Banknote className="w-3 h-3 text-emerald-400" />
+                            <span>Split / Pay</span>
+                          </button>
+                          <button
+                            onClick={() => verifyCashOrder(order.id, currentOwner.owner_name, 'owner')}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md flex items-center gap-1"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Mark Cash Paid</span>
+                          </button>
+                        </div>
                       )}
 
                       {(order.order_status === 'pending' || order.order_status === 'received') && (
@@ -851,6 +884,15 @@ export const OwnerDashboard: React.FC = () => {
         role="owner"
         currentView={`Owner Dashboard (${activeTab})`}
         restaurantName={currentOwner?.name || 'Restaurant'}
+      />
+
+      {/* Offline Payment Modal */}
+      <OfflinePaymentModal
+        isOpen={!!selectedOfflineOrder}
+        onClose={() => setSelectedOfflineOrder(null)}
+        order={selectedOfflineOrder}
+        actorName={currentOwner.owner_name}
+        actorType="owner"
       />
     </div>
   );

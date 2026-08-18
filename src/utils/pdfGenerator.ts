@@ -91,7 +91,7 @@ export function generateInvoicePdf(order: Order, restaurant: Restaurant) {
     const isPaid = (order.payment_status as string) === 'paid_live' || (order.payment_status as string) === 'paid' || (order.payment_status as string) === 'paid_cash' || (order.payment_status as string) === 'paid_demo' || (totalPaid >= grandTotal && grandTotal > 0);
     const isPartiallyPaid = !isPaid && ((order.payment_status as string) === 'partially_paid' || (order.payment_status as string) === 'partial' || totalPaid > 0);
     const statusText = isPaid ? 'PAID' : (isPartiallyPaid ? 'PARTIALLY PAID' : 'PENDING');
-    const payMethodLabel = (onlineAmt > 0 && cashAmt > 0) ? 'SPLIT (ONLINE + CASH)' : (onlineAmt > 0 ? 'ONLINE (RAZORPAY)' : (cashAmt > 0 ? 'CASH' : 'PENDING'));
+    const payMethodLabel = (onlineAmt > 0 && cashAmt > 0) ? 'SPLIT (ONLINE + CASH)' : (onlineAmt > 0 ? 'ONLINE (UPI/CARD/NET BANKING)' : (cashAmt > 0 ? 'CASH' : 'PENDING'));
 
     doc.text(`Payment Status: ${statusText}`, margin, y);
     y += 3.5;
@@ -198,7 +198,7 @@ export function generateInvoicePdf(order: Order, restaurant: Restaurant) {
     doc.line(margin, y, 75, y);
     y += 3.5;
 
-    doc.text(`Online Paid (Razorpay): Rs.${onlineAmt.toFixed(2)}`, margin, y);
+    doc.text(`Online Paid (UPI/Card/Net Banking): Rs.${onlineAmt.toFixed(2)}`, margin, y);
     y += 3.5;
     doc.text(`Cash Paid: Rs.${cashAmt.toFixed(2)}`, margin, y);
     y += 3.5;

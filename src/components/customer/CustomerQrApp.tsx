@@ -3,7 +3,8 @@ import { useSaaS } from '../../context/SaaSContext';
 import {
   QrCode, Search, Bell, ShoppingBag, Plus, Minus, CheckCircle2,
   Clock, Download, Star, ShieldAlert, ShieldCheck, Sparkles, ChevronDown,
-  Info, Utensils, CreditCard, ArrowDown, Users, KeyRound, Globe, Phone, Ticket, Zap
+  Info, Utensils, CreditCard, ArrowDown, Users, KeyRound, Globe, Phone, Ticket, Zap,
+  Copy, Check, ExternalLink
 } from 'lucide-react';
 import { t } from '../../utils/i18n';
 import { CallWaiterModal } from './CallWaiterModal';
@@ -36,6 +37,7 @@ export const CustomerQrApp: React.FC = () => {
     getOrCreateTableSession,
     processRazorpayOnlinePayment,
     processPayUOnlinePayment,
+    submitUpiPaymentConfirmation,
     sendCallWaiterRequest,
     showToast,
     language,
@@ -210,9 +212,15 @@ export const CustomerQrApp: React.FC = () => {
   const [isPlacingOrder, setIsPlacingOrder] = useState<boolean>(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [lastPlacedOrder, setLastPlacedOrder] = useState<Order | null>(null);
-  const [paymentMode, setPaymentMode] = useState<'cash' | 'online' | 'partial'>('cash');
+  const [paymentMode, setPaymentMode] = useState<'cash' | 'online' | 'partial' | 'upi_qr'>('cash');
   const [partialOnlineAmount, setPartialOnlineAmount] = useState<string>('');
   const [customerMobile, setCustomerMobile] = useState<string>('');
+
+  // UPI Scan & Pay Modal State
+  const [upiPaymentModalOrder, setUpiPaymentModalOrder] = useState<Order | null>(null);
+  const [upiRefInput, setUpiRefInput] = useState<string>('');
+  const [isSubmittingUpi, setIsSubmittingUpi] = useState<boolean>(false);
+  const [copiedUpi, setCopiedUpi] = useState<boolean>(false);
 
   // Coupon State
   const [couponInput, setCouponInput] = useState<string>('');
@@ -422,6 +430,9 @@ export const CustomerQrApp: React.FC = () => {
 
   const cartSubtotal = cart.reduce((acc, i) => acc + (i.menuItem.price * i.quantity), 0);
 
+  // Master Online Payment Switch
+  const isOnlinePaymentActive = Boolean(restaurant?.enable_online_payment ?? true);
+
   // 1. GST Tax - ONLY if enabled by owner or gst_percentage > 0
   const isGstEnabled = Boolean(restaurant?.enable_gst ?? true);
   const gstRate = isGstEnabled ? Number(restaurant?.gst_percentage ?? 5) : 0;
@@ -434,8 +445,8 @@ export const CustomerQrApp: React.FC = () => {
   const isServiceChargeEnabled = Boolean(restaurant?.enable_service_charge);
   const cartServiceCharge = isServiceChargeEnabled ? Number((cartSubtotal * (Number(restaurant?.service_charge_percentage || 0) / 100)).toFixed(2)) : 0;
 
-  // 3. Online Payment Discount
-  const isOnlineDiscountEnabled = Boolean(restaurant?.enable_online_discount ?? true);
+  // 3. Online Payment Discount (Only active when online payment is ON)
+  const isOnlineDiscountEnabled = isOnlinePaymentActive && Boolean(restaurant?.enable_online_discount ?? true);
   const onlineDiscountRate = (paymentMode === 'online' || paymentMode === 'demo') && isOnlineDiscountEnabled
     ? Number(restaurant?.online_discount_percentage ?? 5)
     : 0;
@@ -523,8 +534,9 @@ export const CustomerQrApp: React.FC = () => {
         special_instructions: c.instructions
       }));
 
-      const onlineAmt = paymentMode === 'partial' ? (Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2)) : (paymentMode === 'online' ? cartGrandTotal : 0);
-      const cashAmt = paymentMode === 'partial' ? Number((cartGrandTotal - onlineAmt).toFixed(2)) : (paymentMode === 'cash' ? cartGrandTotal : 0);
+      const effectivePaymentMode = isOnlinePaymentActive ? paymentMode : 'cash';
+      const onlineAmt = effectivePaymentMode === 'partial' ? (Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2)) : (effectivePaymentMode === 'online' ? cartGrandTotal : 0);
+      const cashAmt = effectivePaymentMode === 'partial' ? Number((cartGrandTotal - onlineAmt).toFixed(2)) : (effectivePaymentMode === 'cash' ? cartGrandTotal : 0);
 
       const createdOrder = await placeOrder(
         restaurant.id,
@@ -532,9 +544,9 @@ export const CustomerQrApp: React.FC = () => {
         table.id,
         table.table_number,
         items,
-        paymentMode,
+        effectivePaymentMode,
         customerMobile,
-        paymentMode === 'partial' ? { online_amount: onlineAmt, cash_amount: cashAmt } : undefined,
+        effectivePaymentMode === 'partial' ? { online_amount: onlineAmt, cash_amount: cashAmt } : undefined,
         undefined,
         undefined,
         {
@@ -556,7 +568,7 @@ export const CustomerQrApp: React.FC = () => {
 
       setLastPlacedOrder(createdOrder);
 
-      if (paymentMode === 'online' || paymentMode === 'partial') {
+      if (effectivePaymentMode === 'online' || effectivePaymentMode === 'partial') {
         setIsCartOpen(false);
         await triggerOnlinePayment(
           createdOrder,
@@ -570,6 +582,11 @@ export const CustomerQrApp: React.FC = () => {
             setIsPlacingOrder(false);
           }
         );
+      } else if (effectivePaymentMode === 'upi_qr') {
+        setCart([]);
+        setIsCartOpen(false);
+        setUpiPaymentModalOrder(createdOrder);
+        setUpiRefInput('');
       } else {
         setCart([]);
         setIsCartOpen(false);
@@ -1073,8 +1090,40 @@ export const CustomerQrApp: React.FC = () => {
                           ))}
                         </div>
 
-                        {/* CASH PAYMENT PENDING CALLOUT */}
-                        {!isFullyPaid && (
+                        {/* PAYMENT STATUS CALLOUTS */}
+                        {order.payment_status === 'payment_verification_pending' ? (
+                          <div className="bg-purple-950/40 border border-purple-500/40 rounded-xl p-3 space-y-2 text-purple-200">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-xs flex items-center gap-1.5 text-purple-300">
+                                <Clock className="w-4 h-4 text-purple-400 animate-spin" /> UPI Verification in Progress
+                              </span>
+                              <span className="text-xs font-extrabold text-purple-400 font-mono">₹{order.grand_total}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-300 leading-snug">
+                              We received your UPI payment confirmation{order.upi_ref_number ? ` (Ref: ${order.upi_ref_number})` : ''}. Waiter or counter staff is verifying the transaction.
+                            </p>
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                onClick={() => {
+                                  setUpiPaymentModalOrder(order);
+                                  setUpiRefInput(order.upi_ref_number || '');
+                                }}
+                                className="flex-1 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600 text-purple-200 hover:text-white font-bold text-xs border border-purple-500/30 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <QrCode className="w-3.5 h-3.5" /> View UPI QR
+                              </button>
+                              <button
+                                onClick={() => {
+                                  sendCallWaiterRequest(restaurant.id, session?.id || '', table.table_number, 'payment');
+                                  showToast(`Waiter notified to verify Table #${table.table_number}'s UPI payment.`, 'info');
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-purple-500 hover:bg-purple-400 text-slate-950 font-extrabold text-xs transition-all flex items-center justify-center gap-1"
+                              >
+                                <Bell className="w-3.5 h-3.5" /> Call Waiter
+                              </button>
+                            </div>
+                          </div>
+                        ) : !isFullyPaid ? (
                           <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-3 space-y-2 text-amber-200">
                             <div className="flex items-center justify-between">
                               <span className="font-bold text-xs flex items-center gap-1.5 text-amber-300">
@@ -1083,19 +1132,34 @@ export const CustomerQrApp: React.FC = () => {
                               <span className="text-xs font-extrabold text-amber-400 font-mono">Due: ₹{dueAmt}</span>
                             </div>
                             <p className="text-[11px] text-slate-300 leading-snug">
-                              To make payment, tap the <strong>Bell 🔔 icon</strong> to call a waiter, or visit the reception counter.
+                              {isOnlinePaymentActive
+                                ? 'To make payment, tap the Bell 🔔 icon to call a waiter, or pay instantly via UPI Scan & Pay.'
+                                : (t('payment_collected_by_restaurant', language) || 'Payment will be collected by the restaurant. Please call the waiter or make payment at the cash counter.')}
                             </p>
-                            <button
-                              onClick={() => {
-                                sendCallWaiterRequest(restaurant.id, session?.id || '', table.table_number, 'payment');
-                                showToast(`Payment assistance requested! Waiter notified for Table #${table.table_number}.`, 'info');
-                              }}
-                              className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all"
-                            >
-                              🔔 Call Waiter for Payment
-                            </button>
+                            <div className="flex gap-2">
+                              {isOnlinePaymentActive && Boolean(restaurant?.enable_upi_qr ?? true) && (
+                                <button
+                                  onClick={() => {
+                                    setUpiPaymentModalOrder(order);
+                                    setUpiRefInput('');
+                                  }}
+                                  className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-lg shadow-purple-600/20 flex items-center justify-center gap-1.5 transition-all"
+                                >
+                                  <QrCode className="w-4 h-4" /> Scan & Pay (UPI)
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  sendCallWaiterRequest(restaurant.id, session?.id || '', table.table_number, 'payment');
+                                  showToast(`Payment assistance requested! Waiter notified for Table #${table.table_number}.`, 'info');
+                                }}
+                                className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all"
+                              >
+                                🔔 {isOnlinePaymentActive ? 'Call Waiter' : 'Call Waiter for Bill / Payment'}
+                              </button>
+                            </div>
                           </div>
-                        )}
+                        ) : null}
 
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800">
                           <div>
@@ -1103,15 +1167,16 @@ export const CustomerQrApp: React.FC = () => {
                               <span>Total: ₹{order.grand_total}</span>
                               <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${
                                 isFullyPaid ? 'bg-emerald-950 text-emerald-400 border-emerald-500/40' :
+                                order.payment_status === 'payment_verification_pending' ? 'bg-purple-950 text-purple-300 border-purple-500/40' :
                                 'bg-amber-950 text-amber-400 border-amber-500/40'
                               }`}>
-                                {isFullyPaid ? 'PAID' : 'PAYMENT PENDING'}
+                                {isFullyPaid ? 'PAID' : order.payment_status === 'payment_verification_pending' ? 'UPI VERIFICATION PENDING' : 'PAYMENT PENDING'}
                               </span>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-2 flex-wrap">
-                            {!isFullyPaid && (
+                            {!isFullyPaid && isOnlinePaymentActive && (
                               <button
                                 onClick={() => {
                                   triggerOnlinePayment(
@@ -1123,8 +1188,8 @@ export const CustomerQrApp: React.FC = () => {
                                 }}
                                 className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shadow-md transition-all flex items-center gap-1"
                               >
-                                {restaurant?.live_gateway === 'payu' ? <Zap className="w-3 h-3" /> : <CreditCard className="w-3 h-3" />}
-                                Pay Online ({restaurant?.live_gateway === 'payu' ? 'PayU' : 'Razorpay'})
+                                <CreditCard className="w-3 h-3" />
+                                Pay Online (UPI / Card / Net Banking)
                               </button>
                             )}
 
@@ -1589,59 +1654,93 @@ export const CustomerQrApp: React.FC = () => {
 
             {/* Payment Method Selector */}
             <form onSubmit={handlePlaceOrder} className="space-y-4">
-              <div className="space-y-2">
-                <label className="block text-xs font-bold uppercase text-slate-400">{t('payment_mode', language)}</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {Boolean(restaurant?.enable_cash_payment ?? true) && (
-                    <div
-                      onClick={() => setPaymentMode('cash')}
-                      className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
-                        paymentMode === 'cash' ? 'border-emerald-500 bg-emerald-950/40 text-emerald-300' : 'border-slate-800 bg-slate-950 text-slate-400'
-                      }`}
-                    >
-                      <Utensils className="w-4 h-4" /> Cash
+              {isOnlinePaymentActive ? (
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase text-slate-400">{t('payment_mode', language)}</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {Boolean(restaurant?.enable_cash_payment ?? true) && (
+                      <div
+                        onClick={() => setPaymentMode('cash')}
+                        className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
+                          paymentMode === 'cash' ? 'border-emerald-500 bg-emerald-950/40 text-emerald-300' : 'border-slate-800 bg-slate-950 text-slate-400'
+                        }`}
+                      >
+                        <Utensils className="w-4 h-4" /> Cash
+                      </div>
+                    )}
+
+                    {Boolean(restaurant?.enable_upi_qr ?? true) && (
+                      <div
+                        onClick={() => setPaymentMode('upi_qr')}
+                        className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
+                          paymentMode === 'upi_qr' ? 'border-purple-500 bg-purple-950/40 text-purple-300 shadow-md shadow-purple-500/10' : 'border-slate-800 bg-slate-950 text-slate-400'
+                        }`}
+                      >
+                        <QrCode className="w-4 h-4 text-purple-400" /> UPI Scan & Pay
+                      </div>
+                    )}
+
+                    {Boolean(restaurant?.enable_gateway_payment ?? true) && (
+                      <div
+                        onClick={() => setPaymentMode('online')}
+                        className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
+                          paymentMode === 'online' ? 'border-blue-500 bg-blue-950/40 text-blue-300' : 'border-slate-800 bg-slate-950 text-slate-400'
+                        }`}
+                      >
+                        <CreditCard className="w-4 h-4" /> Online Gateway
+                      </div>
+                    )}
+
+                    {Boolean(restaurant?.enable_split_payment ?? true) && (
+                      <div
+                        onClick={() => setPaymentMode('partial')}
+                        className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
+                          paymentMode === 'partial' ? 'border-amber-500 bg-amber-950/40 text-amber-300' : 'border-slate-800 bg-slate-950 text-slate-400'
+                        }`}
+                      >
+                        <Sparkles className="w-4 h-4" /> Partial Pay
+                      </div>
+                    )}
+                  </div>
+
+                  {paymentMode === 'upi_qr' && (
+                    <div className="p-3 bg-purple-950/30 border border-purple-500/30 rounded-xl space-y-1.5 text-xs text-purple-200">
+                      <div className="font-bold flex items-center gap-1.5 text-purple-300">
+                        <QrCode className="w-4 h-4 text-purple-400" /> Direct UPI Scan & Pay
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-snug">
+                        On clicking Confirm Order, you'll see {restaurant.upi_name || restaurant.name}'s UPI QR code. Pay using any UPI app (UPI, Cards, Net Banking) and staff verifies instantly!
+                      </p>
                     </div>
                   )}
 
-                  {Boolean(restaurant?.enable_online_payment ?? true) && (
-                    <div
-                      onClick={() => setPaymentMode('online')}
-                      className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
-                        paymentMode === 'online' ? 'border-blue-500 bg-blue-950/40 text-blue-300' : 'border-slate-800 bg-slate-950 text-slate-400'
-                      }`}
-                    >
-                      <CreditCard className="w-4 h-4" /> Full Online
-                    </div>
-                  )}
-
-                  {Boolean(restaurant?.enable_split_payment ?? true) && (
-                    <div
-                      onClick={() => setPaymentMode('partial')}
-                      className={`p-2.5 rounded-2xl border cursor-pointer text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-1 text-center ${
-                        paymentMode === 'partial' ? 'border-purple-500 bg-purple-950/40 text-purple-300' : 'border-slate-800 bg-slate-950 text-slate-400'
-                      }`}
-                    >
-                      <Sparkles className="w-4 h-4" /> Partial Pay
+                  {paymentMode === 'partial' && (
+                    <div className="p-3 bg-purple-950/30 border border-purple-500/30 rounded-xl space-y-2">
+                      <label className="block text-[11px] font-semibold text-purple-300">Online Deposit Amount (INR)</label>
+                      <input
+                        type="number"
+                        placeholder={`Default ₹${Math.round(cartGrandTotal / 2)}`}
+                        value={partialOnlineAmount}
+                        onChange={(e) => setPartialOnlineAmount(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                      />
+                      <p className="text-[10px] text-purple-400 font-medium">
+                        Pay ₹{Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2)} online now, remaining ₹{cartGrandTotal - (Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2))} in cash at counter.
+                      </p>
                     </div>
                   )}
                 </div>
-
-                {paymentMode === 'partial' && (
-                  <div className="p-3 bg-purple-950/30 border border-purple-500/30 rounded-xl space-y-2">
-                    <label className="block text-[11px] font-semibold text-purple-300">Online Deposit Amount (INR)</label>
-                    <input
-                      type="number"
-                      placeholder={`Default ₹${Math.round(cartGrandTotal / 2)}`}
-                      value={partialOnlineAmount}
-                      onChange={(e) => setPartialOnlineAmount(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-                    />
-                    <p className="text-[10px] text-purple-400 font-medium">
-                      Pay ₹{Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2)} online now, remaining ₹{cartGrandTotal - (Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2))} in cash at counter.
-                    </p>
+              ) : (
+                <div className="p-3.5 bg-amber-950/40 border border-amber-500/30 rounded-2xl space-y-1 text-amber-200">
+                  <div className="font-bold text-xs flex items-center gap-2 text-amber-300">
+                    <Utensils className="w-4 h-4 text-amber-400" />
+                    <span>Restaurant Collection Notice</span>
                   </div>
-                )}
-              </div>
+                  <p className="text-[11px] text-slate-300 leading-snug">
+                    {t('payment_collected_by_restaurant', language) || 'Payment will be collected by the restaurant. Please call the waiter or make payment at the cash counter.'}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Mobile Number (Optional for order tracking)</label>
@@ -1684,6 +1783,148 @@ export const CustomerQrApp: React.FC = () => {
         </div>
       )}
 
+      {/* MODAL 3.5: DIRECT UPI SCAN & PAY MODAL */}
+      {upiPaymentModalOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="bg-slate-900 border border-purple-500/40 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center font-bold">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-sm">UPI Direct Scan & Pay</h3>
+                  <p className="text-[10px] text-slate-400">Order {upiPaymentModalOrder.order_number} • Table {upiPaymentModalOrder.table_number}</p>
+                </div>
+              </div>
+              <button onClick={() => setUpiPaymentModalOrder(null)} className="text-slate-400 hover:text-white p-1">✕</button>
+            </div>
+
+            {/* Payee Details & Total */}
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] text-slate-400">Pay to</div>
+                <div className="text-xs font-bold text-white">{restaurant?.upi_name || restaurant?.name}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] text-slate-400">Amount Due</div>
+                <div className="text-base font-extrabold font-mono text-purple-400">₹{upiPaymentModalOrder.grand_total}</div>
+              </div>
+            </div>
+
+            {/* QR Code Container */}
+            {(() => {
+              const upiPayeeId = restaurant?.upi_id?.trim() || '';
+              const upiPayeeName = restaurant?.upi_name?.trim() || restaurant?.name || 'Restaurant';
+              const upiAmount = upiPaymentModalOrder.grand_total;
+              const upiNote = `Order ${upiPaymentModalOrder.order_number}`;
+              const upiDeepLink = upiPayeeId
+                ? `upi://pay?pa=${encodeURIComponent(upiPayeeId)}&pn=${encodeURIComponent(upiPayeeName)}&am=${upiAmount}&cu=INR&tn=${encodeURIComponent(upiNote)}`
+                : '';
+              const qrDisplayUrl = restaurant?.upi_qr_image || (upiDeepLink
+                ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiDeepLink)}`
+                : '');
+
+              return (
+                <div className="space-y-3 text-center">
+                  {qrDisplayUrl ? (
+                    <div className="p-3 bg-white rounded-2xl shadow-xl border-2 border-purple-500/30 max-w-[200px] mx-auto relative group">
+                      <img
+                        src={qrDisplayUrl}
+                        alt="Restaurant UPI QR"
+                        className="w-full h-auto object-contain rounded-lg"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 text-slate-400 text-xs">
+                      UPI ID not configured by restaurant owner yet. Please pay in cash.
+                    </div>
+                  )}
+
+                  {/* UPI ID & Copy Action */}
+                  {upiPayeeId && (
+                    <div className="flex items-center justify-between bg-slate-950 border border-purple-500/20 rounded-xl px-3 py-2 text-xs">
+                      <div className="text-left overflow-hidden">
+                        <span className="text-[10px] text-slate-400 block">UPI VPA:</span>
+                        <span className="font-mono text-purple-300 font-semibold text-[11px] truncate block">{upiPayeeId}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(upiPayeeId);
+                          setCopiedUpi(true);
+                          setTimeout(() => setCopiedUpi(false), 2000);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white font-bold text-[10px] flex items-center gap-1 transition-all"
+                      >
+                        {copiedUpi ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        {copiedUpi ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Direct Mobile Intent Link */}
+                  {upiDeepLink && (
+                    <a
+                      href={upiDeepLink}
+                      className="w-full py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-bold flex items-center justify-center gap-2 transition-all"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Pay via UPI Apps (UPI / Card / Net Banking)
+                    </a>
+                  )}
+
+                  {/* UTR / Reference Input */}
+                  <div className="space-y-1.5 text-left pt-1">
+                    <label className="block text-[11px] font-semibold text-slate-300">
+                      UPI Ref / UTR / Txn No. (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 423456789012 or your name"
+                      value={upiRefInput}
+                      onChange={(e) => setUpiRefInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500 font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      Enter the 12-digit UPI reference from your payment app so staff can verify faster.
+                    </p>
+                  </div>
+
+                  {/* Submit Confirmation Button */}
+                  <button
+                    type="button"
+                    disabled={isSubmittingUpi}
+                    onClick={async () => {
+                      setIsSubmittingUpi(true);
+                      const res = await submitUpiPaymentConfirmation(upiPaymentModalOrder.id, upiRefInput.trim() || undefined);
+                      setIsSubmittingUpi(false);
+                      if (res) {
+                        setUpiPaymentModalOrder(null);
+                        setUpiRefInput('');
+                      }
+                    }}
+                    className="w-full py-3 rounded-2xl bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-extrabold text-xs shadow-xl shadow-purple-600/30 flex items-center justify-center gap-2 transition-all"
+                  >
+                    {isSubmittingUpi ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Submitting to Staff...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" /> I Have Paid — Submit for Verification
+                      </>
+                    )}
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* MODAL 4: ONLINE PAYMENT VERIFICATION MODAL (PayU / Razorpay) */}
       {pendingOnlineModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
@@ -1695,7 +1936,7 @@ export const CustomerQrApp: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-white text-sm">
-                    {pendingOnlineModal.gateway === 'payu' ? 'PayU India Secure Checkout' : 'Razorpay Secure Checkout'}
+                    Secure Online Checkout (UPI, Cards, Net Banking)
                   </h3>
                   <p className="text-[10px] text-slate-400">Order {pendingOnlineModal.order.order_number} • Table {pendingOnlineModal.order.table_number}</p>
                 </div>
@@ -1799,10 +2040,10 @@ export const CustomerQrApp: React.FC = () => {
               } disabled:bg-slate-800 text-white font-extrabold text-xs shadow-xl flex items-center justify-center gap-2`}
             >
               {isVerifyingOnline ? (
-                <span>Verifying with {pendingOnlineModal.gateway === 'payu' ? 'PayU' : 'Razorpay'} Server...</span>
+                <span>Verifying Payment (UPI / Card / Net Banking)...</span>
               ) : (
                 <>
-                  <ShieldCheck className="w-4 h-4" /> Pay ₹{pendingOnlineModal.amountToPay} via {pendingOnlineModal.gateway === 'payu' ? 'PayU' : 'Razorpay'}
+                  <ShieldCheck className="w-4 h-4" /> Pay ₹{pendingOnlineModal.amountToPay} Online (UPI / Card / Net Banking)
                 </>
               )}
             </button>

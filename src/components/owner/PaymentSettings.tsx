@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { CreditCard, ShieldCheck, Zap, Key, Smartphone, CheckCircle2, AlertTriangle, RefreshCw, Percent, Receipt, Tag, Trash2, Plus, Ticket, Banknote } from 'lucide-react';
+import {
+  CreditCard, ShieldCheck, Zap, Key, Smartphone, CheckCircle2,
+  AlertTriangle, RefreshCw, Percent, Receipt, Tag, Trash2, Plus,
+  Ticket, Banknote, QrCode, Upload, Eye, Link as LinkIcon, Check, Copy
+} from 'lucide-react';
 import { verifyRestaurantGateway } from '../../lib/paymentAdapters';
 import { CouponConfig } from '../../types';
 
@@ -9,6 +13,19 @@ export const PaymentSettings: React.FC = () => {
 
   const [mode, setMode] = useState<'demo' | 'live'>(currentOwner?.payment_mode || 'demo');
   const [liveGateway, setLiveGateway] = useState<'razorpay' | 'phonepe' | 'payu'>(currentOwner?.live_gateway || 'razorpay');
+
+  // Master Online Payment Toggle
+  const [enableOnlinePayment, setEnableOnlinePayment] = useState<boolean>(currentOwner?.enable_online_payment ?? true);
+
+  // Scan & Pay (UPI QR) Configuration
+  const [enableUpiQr, setEnableUpiQr] = useState<boolean>(currentOwner?.enable_upi_qr ?? true);
+  const [upiId, setUpiId] = useState<string>(currentOwner?.upi_id || '');
+  const [upiName, setUpiName] = useState<string>(currentOwner?.upi_name || currentOwner?.name || '');
+  const [upiQrImage, setUpiQrImage] = useState<string>(currentOwner?.upi_qr_image || '');
+  const [customQrUrlInput, setCustomQrUrlInput] = useState<string>('');
+
+  // Payment Gateway Configuration
+  const [enableGatewayPayment, setEnableGatewayPayment] = useState<boolean>(currentOwner?.enable_gateway_payment ?? true);
 
   // Razorpay credentials
   const [razorpayKey, setRazorpayKey] = useState(currentOwner?.razorpay_key || '');
@@ -25,9 +42,8 @@ export const PaymentSettings: React.FC = () => {
   const [payuMerchantSalt, setPayuMerchantSalt] = useState(currentOwner?.payu_merchant_salt || '');
   const [payuEnv, setPayuEnv] = useState<'TEST' | 'LIVE'>(currentOwner?.payu_env || 'TEST');
 
-  // Customer Payment Methods Allowed (Cash, Online, Split)
+  // Customer Payment Methods Allowed
   const [enableCashPayment, setEnableCashPayment] = useState<boolean>(currentOwner?.enable_cash_payment ?? true);
-  const [enableOnlinePayment, setEnableOnlinePayment] = useState<boolean>(currentOwner?.enable_online_payment ?? true);
   const [enableSplitPayment, setEnableSplitPayment] = useState<boolean>(currentOwner?.enable_split_payment ?? true);
 
   // Tax & Charges State
@@ -66,8 +82,33 @@ export const PaymentSettings: React.FC = () => {
   const [verificationMessage, setVerificationMessage] = useState<string>(
     currentOwner?.gateway_status_message || ''
   );
+  const [copiedUpi, setCopiedUpi] = useState(false);
 
   if (!currentOwner) return null;
+
+  // Auto-generated QR code preview URL
+  const generatedUpiString = upiId.trim()
+    ? `upi://pay?pa=${encodeURIComponent(upiId.trim())}&pn=${encodeURIComponent(upiName.trim() || currentOwner.name)}&cu=INR`
+    : '';
+
+  const activeQrPreviewUrl = upiQrImage || (generatedUpiString
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(generatedUpiString)}`
+    : '');
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Please choose an image under 2MB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUpiQrImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleAddCoupon = () => {
     if (!newCouponCode.trim()) return;
@@ -136,9 +177,9 @@ export const PaymentSettings: React.FC = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Prevent turning on 'live' mode if gateway isn't verified
-    if (mode === 'live' && !verified) {
-      alert('⚠️ Verification Required: You must verify your Live Gateway credentials before activating Live mode. Falling back to Demo mode until verified.');
+    // Prevent turning on 'live' mode if gateway isn't verified and gateway payments are enabled
+    if (mode === 'live' && enableGatewayPayment && !verified) {
+      alert('⚠️ Verification Required: You must verify your Live Gateway credentials before activating Live gateway mode. Falling back to Demo mode until verified.');
       setMode('demo');
       return;
     }
@@ -147,6 +188,12 @@ export const PaymentSettings: React.FC = () => {
       await updateOwnerProfile({
         payment_mode: mode,
         live_gateway: liveGateway,
+        enable_online_payment: enableOnlinePayment,
+        enable_upi_qr: enableUpiQr,
+        upi_id: upiId.trim(),
+        upi_name: upiName.trim(),
+        upi_qr_image: upiQrImage,
+        enable_gateway_payment: enableGatewayPayment,
         razorpay_key: razorpayKey,
         razorpay_secret: razorpaySecret,
         phonepe_merchant_id: phonepeMerchantId,
@@ -158,6 +205,8 @@ export const PaymentSettings: React.FC = () => {
         payu_env: payuEnv,
         gateway_verified: verified,
         gateway_status_message: verificationMessage,
+        enable_cash_payment: enableCashPayment,
+        enable_split_payment: enableSplitPayment,
         enable_gst: enableGst,
         gst_percentage: Number(gstPercentage) || 0,
         enable_packaging_charge: enablePackaging,
@@ -167,12 +216,9 @@ export const PaymentSettings: React.FC = () => {
         enable_online_discount: enableOnlineDiscount,
         online_discount_percentage: Number(onlineDiscountPercentage) || 0,
         enable_coupons: enableCoupons,
-        coupons: coupons,
-        enable_cash_payment: enableCashPayment,
-        enable_online_payment: enableOnlinePayment,
-        enable_split_payment: enableSplitPayment
+        coupons: coupons
       });
-      alert('✅ Payment settings saved successfully!');
+      alert('✅ Restaurant Payment & Tax settings saved successfully!');
     } catch (err: any) {
       console.error("Save payment settings error:", err);
       alert(`❌ Failed to save payment settings: ${err?.message || String(err)}`);
@@ -182,337 +228,533 @@ export const PaymentSettings: React.FC = () => {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-white">Payment Gateway & Operating Mode</h2>
+        <h2 className="text-xl font-bold text-white">Restaurant Payment Configuration</h2>
         <p className="text-xs text-slate-400">
-          Configure customer checkout mode for <strong className="text-white">{currentOwner.name}</strong>. Demo payment mode remains available permanently for testing.
+          Configure direct UPI Scan & Pay, Online Payment Gateways, and Customer Checkout rules for <strong className="text-white">{currentOwner.name}</strong>.
         </p>
       </div>
 
       <form onSubmit={handleSave} className="p-8 rounded-3xl bg-slate-900 border border-slate-800 space-y-8 shadow-2xl">
-        {/* 1. Mode Selector */}
-        <div className="space-y-3">
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-            Customer Payment Mode
-          </label>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div
-              onClick={() => setMode('demo')}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
-                mode === 'demo'
-                  ? 'border-blue-500 bg-blue-950/30 text-white shadow-lg shadow-blue-500/10'
-                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="font-bold text-sm text-blue-400 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-blue-400" /> Demo Payment Mode (Active Test)
-                </div>
-                {mode === 'demo' && <CheckCircle2 className="w-5 h-5 text-blue-400" />}
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Simulates instant successful online payments. Ideal for testing, staff training, and initial onboarding without requiring live bank/gateway API keys.
-              </p>
-            </div>
-
-            <div
-              onClick={() => {
-                if (!verified) {
-                  alert('Please enter and verify your live gateway credentials below first before selecting Live Mode.');
-                } else {
-                  setMode('live');
-                }
-              }}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
-                mode === 'live'
-                  ? 'border-emerald-500 bg-emerald-950/30 text-white shadow-lg shadow-emerald-500/10'
-                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="font-bold text-sm text-emerald-400 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> Live Gateway Mode ({liveGateway.toUpperCase()})
-                </div>
-                {mode === 'live' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Processes real online customer payments via your restaurant's verified gateway adapter ({liveGateway === 'phonepe' ? 'PhonePe' : 'Razorpay'}).
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. Live Gateway Adapter Selection */}
-        <div className="space-y-4 pt-6 border-t border-slate-800">
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-            Select Live Payment Gateway Adapter
-          </label>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <button
-              type="button"
-              onClick={() => {
-                setLiveGateway('razorpay');
-                setVerified(false);
-              }}
-              className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${
-                liveGateway === 'razorpay'
-                  ? 'bg-indigo-950/40 border-indigo-500 text-white font-bold'
-                  : 'bg-slate-950 border-slate-800 text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <CreditCard className="w-5 h-5 text-indigo-400" />
-                <div className="text-left">
-                  <div className="text-sm">Razorpay Checkout</div>
-                  <div className="text-[11px] text-slate-400">Cards, UPI, NetBanking</div>
-                </div>
-              </div>
-              {liveGateway === 'razorpay' && <div className="w-2 h-2 rounded-full bg-indigo-400"></div>}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setLiveGateway('phonepe');
-                setVerified(false);
-              }}
-              className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${
-                liveGateway === 'phonepe'
-                  ? 'bg-purple-950/40 border-purple-500 text-white font-bold'
-                  : 'bg-slate-950 border-slate-800 text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Smartphone className="w-5 h-5 text-purple-400" />
-                <div className="text-left">
-                  <div className="text-sm">PhonePe Business</div>
-                  <div className="text-[11px] text-slate-400">Official Merchant UPI & QR</div>
-                </div>
-              </div>
-              {liveGateway === 'phonepe' && <div className="w-2 h-2 rounded-full bg-purple-400"></div>}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setLiveGateway('payu');
-                setVerified(false);
-              }}
-              className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${
-                liveGateway === 'payu'
-                  ? 'bg-emerald-950/40 border-emerald-500 text-white font-bold'
-                  : 'bg-slate-950 border-slate-800 text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Zap className="w-5 h-5 text-emerald-400" />
-                <div className="text-left">
-                  <div className="text-sm">PayU India</div>
-                  <div className="text-[11px] text-slate-400">PayU Money / Gateway</div>
-                </div>
-              </div>
-              {liveGateway === 'payu' && <div className="w-2 h-2 rounded-full bg-emerald-400"></div>}
-            </button>
-          </div>
-        </div>
-
-        {/* 3. Credentials Form */}
-        {liveGateway === 'razorpay' ? (
-          <div className="space-y-4 p-5 rounded-2xl bg-slate-950 border border-slate-800">
-            <h3 className="text-xs font-bold uppercase text-indigo-400 flex items-center gap-2">
-              <Key className="w-4 h-4" /> Razorpay Merchant Credentials (Restaurant Specific)
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Razorpay Key ID *</label>
-                <input
-                  type="text"
-                  placeholder="rzp_live_xxxxxxxxxxxx"
-                  value={razorpayKey}
-                  onChange={(e) => {
-                    setRazorpayKey(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Razorpay Key Secret *</label>
-                <input
-                  type="password"
-                  placeholder="••••••••••••••••••••"
-                  value={razorpaySecret}
-                  onChange={(e) => {
-                    setRazorpaySecret(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
-          </div>
-        ) : liveGateway === 'phonepe' ? (
-          <div className="space-y-4 p-5 rounded-2xl bg-slate-950 border border-slate-800">
-            <h3 className="text-xs font-bold uppercase text-purple-400 flex items-center gap-2">
-              <Smartphone className="w-4 h-4" /> PhonePe Merchant Credentials (Restaurant Specific)
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">PhonePe Merchant ID (MID) *</label>
-                <input
-                  type="text"
-                  placeholder="PGMERCXXXXXXXX"
-                  value={phonepeMerchantId}
-                  onChange={(e) => {
-                    setPhonepeMerchantId(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">PhonePe Salt Key *</label>
-                <input
-                  type="password"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  value={phonepeSaltKey}
-                  onChange={(e) => {
-                    setPhonepeSaltKey(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Salt Index *</label>
-                <input
-                  type="text"
-                  placeholder="1"
-                  value={phonepeSaltIndex}
-                  onChange={(e) => {
-                    setPhonepeSaltIndex(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Gateway Environment</label>
-                <select
-                  value={phonepeEnv}
-                  onChange={(e) => {
-                    setPhonepeEnv(e.target.value as any);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-purple-500"
-                >
-                  <option value="SANDBOX">UAT / Sandbox (Testing)</option>
-                  <option value="PRODUCTION">Production (Live Payments)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4 p-5 rounded-2xl bg-slate-950 border border-slate-800">
-            <h3 className="text-xs font-bold uppercase text-emerald-400 flex items-center gap-2">
-              <Zap className="w-4 h-4" /> PayU Merchant Credentials (Restaurant Specific)
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Key *</label>
-                <input
-                  type="text"
-                  placeholder="Merchant Key provided by PayU"
-                  value={payuMerchantKey}
-                  onChange={(e) => {
-                    setPayuMerchantKey(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Salt *</label>
-                <input
-                  type="password"
-                  placeholder="Merchant Salt provided by PayU"
-                  value={payuMerchantSalt}
-                  onChange={(e) => {
-                    setPayuMerchantSalt(e.target.value);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Gateway Environment</label>
-                <select
-                  value={payuEnv}
-                  onChange={(e) => {
-                    setPayuEnv(e.target.value as any);
-                    setVerified(false);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-emerald-500"
-                >
-                  <option value="TEST">Test / Sandbox (test.payu.in)</option>
-                  <option value="LIVE">Live / Production (secure.payu.in)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 4. Gateway Verification & Status Box */}
-        <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {verified ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              ) : (
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
-              )}
-              <span className="text-xs font-bold text-white">
-                Gateway Status: {verified ? 'VERIFIED & READY' : 'NOT VERIFIED'}
+        
+        {/* 1. MASTER ONLINE PAYMENT TOGGLE */}
+        <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-sm font-bold text-white">
+              <Zap className="w-5 h-5 text-blue-400" />
+              <span>Online Payments Master Switch</span>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                enableOnlinePayment ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {enableOnlinePayment ? 'ENABLED' : 'DISABLED'}
               </span>
             </div>
-
-            <button
-              type="button"
-              onClick={handleVerify}
-              disabled={isVerifying}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-2 transition-all"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin' : ''}`} />
-              {isVerifying ? 'Verifying...' : 'Verify Gateway Credentials'}
-            </button>
+            <p className="text-xs text-slate-400">
+              When turned ON, guests can pay digitally via UPI Scan & Pay or Payment Gateway. When turned OFF, checkout defaults exclusively to Cash.
+            </p>
           </div>
 
-          {verificationMessage && (
-            <div className={`p-3 rounded-xl text-xs font-mono border ${
-              verified ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300'
-            }`}>
-              {verificationMessage}
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enableOnlinePayment}
+              onChange={(e) => setEnableOnlinePayment(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-14 h-8 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+
+        {/* 2. SCAN & PAY (UPI QR CODE) SECTION */}
+        <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
+                <QrCode className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  Direct UPI Scan & Pay (No Gateway Fees)
+                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-extrabold uppercase">
+                    Zero Commission
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Customers scan your restaurant's UPI QR code to pay directly to your bank account. Staff verifies upon confirmation.
+                </p>
+              </div>
+            </div>
+
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableUpiQr}
+                onChange={(e) => setEnableUpiQr(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+
+          {enableUpiQr && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Restaurant UPI ID (VPA) *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. restaurantname@upi or 9876543210@okaxis"
+                    value={upiId}
+                    onChange={(e) => setUpiId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Customer UPI apps (GPay, PhonePe, Paytm, BHIM) will send money directly to this ID.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Payee / Restaurant Display Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Royal Spice Family Restaurant"
+                    value={upiName}
+                    onChange={(e) => setUpiName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Custom UPI QR Code Image (Optional)
+                  </label>
+                  
+                  <div className="space-y-2">
+                    <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-800 hover:border-purple-500/50 rounded-xl cursor-pointer bg-slate-900/50 transition-all">
+                      <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                      <span className="text-xs text-slate-300 font-semibold">Upload QR Image File</span>
+                      <span className="text-[10px] text-slate-500">PNG, JPG, WebP up to 2MB</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Or paste QR Code Image URL"
+                        value={customQrUrlInput}
+                        onChange={(e) => setCustomQrUrlInput(e.target.value)}
+                        className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (customQrUrlInput.trim()) {
+                            setUpiQrImage(customQrUrlInput.trim());
+                            setCustomQrUrlInput('');
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
+                      >
+                        Set URL
+                      </button>
+                    </div>
+
+                    {upiQrImage && (
+                      <button
+                        type="button"
+                        onClick={() => setUpiQrImage('')}
+                        className="text-[11px] text-rose-400 hover:underline font-semibold flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Remove Custom QR (Use Auto-Generated UPI QR)
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Live UPI QR Preview Box */}
+              <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
+                  <Eye className="w-4 h-4 text-purple-400" /> Customer Scan & Pay Preview
+                </div>
+
+                {activeQrPreviewUrl ? (
+                  <div className="p-3 bg-white rounded-2xl shadow-lg border border-slate-700">
+                    <img
+                      src={activeQrPreviewUrl}
+                      alt="UPI QR Code Preview"
+                      className="w-44 h-44 object-contain mx-auto rounded-lg"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-44 h-44 rounded-2xl border-2 border-dashed border-slate-800 flex flex-col items-center justify-center p-4 text-slate-500">
+                    <QrCode className="w-8 h-8 mb-2 opacity-50" />
+                    <span className="text-[11px]">Enter UPI ID on the left to generate QR Code</span>
+                  </div>
+                )}
+
+                <div className="space-y-0.5 text-xs">
+                  <div className="font-bold text-white">{upiName || currentOwner.name}</div>
+                  <div className="text-purple-400 font-mono font-semibold text-[11px] flex items-center justify-center gap-1">
+                    {upiId || 'upi_id_not_set@bank'}
+                    {upiId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(upiId);
+                          setCopiedUpi(true);
+                          setTimeout(() => setCopiedUpi(false), 2000);
+                        }}
+                        className="text-slate-400 hover:text-white"
+                        title="Copy UPI ID"
+                      >
+                        {copiedUpi ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 text-[10px] text-purple-300 leading-snug">
+                  🛡️ <strong>Manual Staff Verification Flow:</strong> When a customer scans & taps "Payment Completed", the order is marked <em>"Verification Pending"</em> until confirmed by floor waiter or cash counter staff.
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        {/* 4.5 Payment Options Configuration */}
+        {/* 3. PAYMENT GATEWAYS CONFIGURATION */}
+        <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center font-bold">
+                <CreditCard className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  Automated Payment Gateway (Razorpay / PhonePe / PayU)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Instant automated order confirmation via Cards, NetBanking, and Gateway UPI.
+                </p>
+              </div>
+            </div>
+
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableGatewayPayment}
+                onChange={(e) => setEnableGatewayPayment(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {enableGatewayPayment && (
+            <div className="space-y-6 pt-2">
+              {/* Operating Mode Selector */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Gateway Operating Mode
+                </label>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div
+                    onClick={() => setMode('demo')}
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-1.5 ${
+                      mode === 'demo'
+                        ? 'border-blue-500 bg-blue-950/30 text-white shadow-lg shadow-blue-500/10'
+                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-xs text-blue-400 flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-blue-400" /> Demo Payment Mode (Testing)
+                      </div>
+                      {mode === 'demo' && <CheckCircle2 className="w-4 h-4 text-blue-400" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Simulates instant successful online payments. Ideal for testing and staff training without live API keys.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      if (!verified) {
+                        alert('⚠️ Verification Required: You must verify your credentials before switching to Live mode.');
+                        return;
+                      }
+                      setMode('live');
+                    }}
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-1.5 ${
+                      mode === 'live'
+                        ? 'border-emerald-500 bg-emerald-950/30 text-white shadow-lg shadow-emerald-500/10'
+                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-xs text-emerald-400 flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" /> Live Production Gateway
+                      </div>
+                      {mode === 'live' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Collects real payments into your bank account. Requires verified merchant credentials below.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Gateway Provider Selection Tabs */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Select Gateway Provider
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLiveGateway('razorpay');
+                      setVerified(false);
+                    }}
+                    className={`p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${
+                      liveGateway === 'razorpay'
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <Key className="w-4 h-4" /> Razorpay
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLiveGateway('phonepe');
+                      setVerified(false);
+                    }}
+                    className={`p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${
+                      liveGateway === 'phonepe'
+                        ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <Smartphone className="w-4 h-4" /> PhonePe
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLiveGateway('payu');
+                      setVerified(false);
+                    }}
+                    className={`p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${
+                      liveGateway === 'payu'
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <Zap className="w-4 h-4" /> PayU
+                  </button>
+                </div>
+              </div>
+
+              {/* Gateway Credentials Inputs */}
+              {liveGateway === 'razorpay' ? (
+                <div className="space-y-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <h4 className="text-xs font-bold uppercase text-blue-400 flex items-center gap-2">
+                    <Key className="w-4 h-4" /> Razorpay API Credentials
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Razorpay Key ID *</label>
+                      <input
+                        type="text"
+                        placeholder="rzp_live_xxxxxxxxxxxxxx"
+                        value={razorpayKey}
+                        onChange={(e) => {
+                          setRazorpayKey(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Razorpay Key Secret *</label>
+                      <input
+                        type="password"
+                        placeholder="xxxxxxxxxxxxxxxxxxxxxxxx"
+                        value={razorpaySecret}
+                        onChange={(e) => {
+                          setRazorpaySecret(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : liveGateway === 'phonepe' ? (
+                <div className="space-y-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <h4 className="text-xs font-bold uppercase text-purple-400 flex items-center gap-2">
+                    <Smartphone className="w-4 h-4" /> PhonePe API Credentials
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Merchant ID (MID) *</label>
+                      <input
+                        type="text"
+                        placeholder="PGMERCXXXXXXXX"
+                        value={phonepeMerchantId}
+                        onChange={(e) => {
+                          setPhonepeMerchantId(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Salt Key *</label>
+                      <input
+                        type="password"
+                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        value={phonepeSaltKey}
+                        onChange={(e) => {
+                          setPhonepeSaltKey(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Salt Index *</label>
+                      <input
+                        type="text"
+                        placeholder="1"
+                        value={phonepeSaltIndex}
+                        onChange={(e) => {
+                          setPhonepeSaltIndex(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Environment</label>
+                      <select
+                        value={phonepeEnv}
+                        onChange={(e) => {
+                          setPhonepeEnv(e.target.value as any);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-purple-500"
+                      >
+                        <option value="SANDBOX">UAT / Sandbox (Testing)</option>
+                        <option value="PRODUCTION">Production (Live)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <h4 className="text-xs font-bold uppercase text-emerald-400 flex items-center gap-2">
+                    <Zap className="w-4 h-4" /> PayU API Credentials
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Key *</label>
+                      <input
+                        type="text"
+                        placeholder="Merchant Key provided by PayU"
+                        value={payuMerchantKey}
+                        onChange={(e) => {
+                          setPayuMerchantKey(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Salt *</label>
+                      <input
+                        type="password"
+                        placeholder="Merchant Salt provided by PayU"
+                        value={payuMerchantSalt}
+                        onChange={(e) => {
+                          setPayuMerchantSalt(e.target.value);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Environment</label>
+                      <select
+                        value={payuEnv}
+                        onChange={(e) => {
+                          setPayuEnv(e.target.value as any);
+                          setVerified(false);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-emerald-500"
+                      >
+                        <option value="TEST">Test / Sandbox (test.payu.in)</option>
+                        <option value="LIVE">Live / Production (secure.payu.in)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Gateway Verification Action */}
+              <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {verified ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  )}
+                  <span className="text-xs font-bold text-white">
+                    Gateway Status: {verified ? 'VERIFIED & READY' : 'NOT VERIFIED'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleVerify}
+                  disabled={isVerifying}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-2 transition-all"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin' : ''}`} />
+                  {isVerifying ? 'Verifying...' : 'Verify Gateway Credentials'}
+                </button>
+              </div>
+
+              {verificationMessage && (
+                <div className={`p-3 rounded-xl text-xs font-mono border ${
+                  verified ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300'
+                }`}>
+                  {verificationMessage}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 4. CUSTOMER CHECKOUT OPTIONS TOGGLES */}
         <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
           <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm">
-            <CreditCard className="w-5 h-5" /> Allowed Customer Payment Options
+            <CreditCard className="w-5 h-5" /> Allowed Customer Payment Options at Checkout
           </div>
           <p className="text-xs text-slate-400">
-            Control which payment modes customers can choose during checkout on their devices. Disabling an option will hide it on the checkout screen.
+            Control which payment modes customers can choose during checkout on their mobile devices.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -520,7 +762,7 @@ export const PaymentSettings: React.FC = () => {
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-white flex items-center gap-2">
-                  <Banknote className="w-4 h-4 text-emerald-400" /> Cash Payment
+                  <Banknote className="w-4 h-4 text-emerald-400" /> Cash at Table / Counter
                 </span>
                 <input
                   type="checkbox"
@@ -530,25 +772,28 @@ export const PaymentSettings: React.FC = () => {
                 />
               </div>
               <p className="text-[11px] text-slate-400">
-                Allow customers to pay cash at the counter or to the waiter.
+                Allow customers to pay cash directly to waiter or at counter.
               </p>
             </div>
 
-            {/* Online Payment Option */}
+            {/* Direct Scan & Pay */}
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-white flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-blue-400" /> Full Online Payment
+                  <QrCode className="w-4 h-4 text-purple-400" /> Scan & Pay (UPI QR)
                 </span>
                 <input
                   type="checkbox"
-                  checked={enableOnlinePayment}
-                  onChange={(e) => setEnableOnlinePayment(e.target.checked)}
-                  className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                  checked={enableUpiQr && enableOnlinePayment}
+                  onChange={(e) => {
+                    setEnableUpiQr(e.target.checked);
+                    if (e.target.checked && !enableOnlinePayment) setEnableOnlinePayment(true);
+                  }}
+                  className="w-4 h-4 accent-purple-500 rounded cursor-pointer"
                 />
               </div>
               <p className="text-[11px] text-slate-400">
-                Allow customers to pay 100% online via UPI / Cards / NetBanking.
+                Show restaurant UPI QR for direct zero-fee payments with staff verification.
               </p>
             </div>
 
@@ -556,29 +801,29 @@ export const PaymentSettings: React.FC = () => {
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-white flex items-center gap-2">
-                  <Percent className="w-4 h-4 text-purple-400" /> Split / Partial Payment
+                  <Percent className="w-4 h-4 text-blue-400" /> Split / Partial Pay
                 </span>
                 <input
                   type="checkbox"
                   checked={enableSplitPayment}
                   onChange={(e) => setEnableSplitPayment(e.target.checked)}
-                  className="w-4 h-4 accent-purple-500 rounded cursor-pointer"
+                  className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
                 />
               </div>
               <p className="text-[11px] text-slate-400">
-                Allow customers to split payment (e.g., pay ₹100 online and rest in cash).
+                Allow customers to deposit part amount online and balance in cash.
               </p>
             </div>
           </div>
         </div>
 
-        {/* 5. Tax & Extra Charges Configuration */}
+        {/* 5. TAX & EXTRA CHARGES */}
         <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
           <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
             <Receipt className="w-5 h-5" /> Tax & Extra Charges Settings
           </div>
           <p className="text-xs text-slate-400">
-            Set custom GST percentage and optional packaging or service charges. These will appear dynamically on customer checkout and final bills.
+            Set custom GST percentage, packaging fee, or service charges. Applied automatically on checkout and bills.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -661,11 +906,11 @@ export const PaymentSettings: React.FC = () => {
           </div>
         </div>
 
-        {/* 6. Full Online Payment Discount */}
+        {/* 6. ONLINE PAYMENT DISCOUNT */}
         <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-              <Percent className="w-5 h-5" /> Online Payment Discount Settings
+              <Percent className="w-5 h-5" /> Online Payment Instant Discount
             </div>
             <input
               type="checkbox"
@@ -675,7 +920,7 @@ export const PaymentSettings: React.FC = () => {
             />
           </div>
           <p className="text-xs text-slate-400">
-            Encourage customers to pay fully online by providing an instant discount at checkout. Applied automatically when customer selects 'Full Online'.
+            Incentivize customers to pay online / UPI by offering an instant percentage discount at checkout.
           </p>
 
           {enableOnlineDiscount && (
@@ -693,7 +938,7 @@ export const PaymentSettings: React.FC = () => {
           )}
         </div>
 
-        {/* 7. Coupon & Promo Codes Configuration */}
+        {/* 7. COUPON & PROMO CODES */}
         <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-blue-400 font-bold text-sm">
@@ -807,17 +1052,17 @@ export const PaymentSettings: React.FC = () => {
           )}
         </div>
 
-        {/* 8. Save Button */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+        {/* 8. SAVE BUTTON */}
+        <div className="flex items-center justify-between pt-4 border-t border-slate-800">
           <p className="text-[11px] text-slate-400">
-            🔒 Credentials are bound specifically to restaurant ID <span className="text-slate-200 font-mono">{currentOwner.id.substring(0, 8)}...</span>
+            🔒 Configuration is saved securely for restaurant <span className="text-slate-200 font-mono">{currentOwner.name}</span>.
           </p>
 
           <button
             type="submit"
-            className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all"
+            className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2"
           >
-            Save Payment Configuration
+            <CheckCircle2 className="w-4 h-4" /> Save Payment Configuration
           </button>
         </div>
       </form>

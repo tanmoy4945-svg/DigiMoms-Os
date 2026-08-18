@@ -6,8 +6,8 @@ export type Language = 'en' | 'bn' | 'hi';
 export type TableStatus = 'available' | 'occupied' | 'cleaning' | 'reserved' | 'maintenance';
 export type SessionStatus = 'active' | 'closed';
 export type OrderStatus = 'pending' | 'accepted' | 'cooking' | 'ready' | 'served' | 'completed' | 'cancelled';
-export type OrderPaymentMode = 'cash' | 'demo' | 'online' | 'partial';
-export type OrderPaymentStatus = 'pending' | 'paid_demo' | 'paid_live' | 'paid_cash' | 'partial' | 'partially_paid' | 'failed' | 'paid';
+export type OrderPaymentMode = 'cash' | 'demo' | 'online' | 'partial' | 'upi_qr';
+export type OrderPaymentStatus = 'pending' | 'payment_verification_pending' | 'paid_demo' | 'paid_live' | 'paid_cash' | 'partial' | 'partially_paid' | 'failed' | 'paid';
 export type RequestType = 'call' | 'water' | 'spoon' | 'tissue' | 'cleaning' | 'bill' | 'help' | 'payment';
 export type CallStatus = 'pending' | 'accepted' | 'completed';
 
@@ -76,10 +76,15 @@ export interface Restaurant {
   online_discount_percentage?: number;
   enable_coupons?: boolean;
   coupons?: CouponConfig[];
-  // Allowed Payment Options
+  // Allowed Payment Options & Methods
   enable_cash_payment?: boolean;
   enable_online_payment?: boolean;
   enable_split_payment?: boolean;
+  enable_upi_qr?: boolean;
+  upi_id?: string;
+  upi_name?: string;
+  upi_qr_image?: string;
+  enable_gateway_payment?: boolean;
   status: RestaurantStatus;
   trial_start: string;
   trial_end: string;
@@ -174,6 +179,18 @@ export interface OrderItem {
   special_instructions?: string;
 }
 
+export type OfflinePaymentMethod = 'cash' | 'upi' | 'qr' | 'card' | 'other';
+
+export interface OfflinePaymentRecord {
+  id: string;
+  method: OfflinePaymentMethod;
+  amount: number;
+  reference?: string;
+  note?: string;
+  recorded_by?: string;
+  recorded_at: string;
+}
+
 export interface Order {
   id: string;
   restaurant_id: string;
@@ -186,12 +203,15 @@ export interface Order {
   online_amount?: number;
   cash_amount?: number;
   cash_due?: number;
+  offline_payments?: OfflinePaymentRecord[];
   razorpay_order_id?: string;
   razorpay_payment_id?: string;
   razorpay_signature?: string;
   payu_txnid?: string;
   payu_mihpayid?: string;
   payu_hash?: string;
+  upi_ref_number?: string;
+  upi_id?: string;
   notes?: string;
   order_status: OrderStatus;
   subtotal: number;
@@ -229,12 +249,12 @@ export interface PaymentTransaction {
   order_id: string;
   table_number: string;
   order_number: string;
-  payment_method: 'online' | 'cash' | 'partial';
+  payment_method: 'online' | 'cash' | 'partial' | 'upi_qr' | 'upi' | 'qr' | 'card' | 'other';
   amount: number;
   transaction_id: string;
   status: 'paid' | 'pending' | 'partially_paid' | 'failed';
   actor_id?: string;
-  actor_type?: 'waiter' | 'owner' | 'customer' | 'system';
+  actor_type?: 'waiter' | 'owner' | 'customer' | 'system' | 'staff';
   actor_name?: string;
   created_at: string;
 }

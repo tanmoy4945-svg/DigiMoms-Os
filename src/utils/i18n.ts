@@ -61,6 +61,7 @@ export const translations = {
     payment_mode: 'Select Payment Method',
     pay_cash: 'Cash / Pay at Counter',
     pay_online: 'Online Payment (UPI/Card/NetBanking)',
+    payment_collected_by_restaurant: 'Payment will be collected by the restaurant. Please call the waiter or make payment at the cash counter.',
     cash_note: 'Cash payment requires waiter verification before kitchen preparation.',
     place_order: 'Place Order',
     order_success: 'Order Placed Successfully!',
@@ -162,7 +163,7 @@ export const translations = {
     days_left: 'days remaining',
     renew_now: 'Renew Now',
     payment_gateway_config: 'Payment Gateway Setup',
-    live_mode: 'Live Mode (PhonePe / Razorpay)',
+    live_mode: 'Live Mode (UPI, Cards & Net Banking)',
     demo_mode: 'Permanent Demo Mode',
 
     // CEO Dashboard
@@ -246,6 +247,7 @@ export const translations = {
     payment_mode: 'পেমেন্ট পদ্ধতি নির্বাচন করুন',
     pay_cash: 'ক্যাশ / কাউন্টারে দিন',
     pay_online: 'অনলাইন পেমেন্ট (UPI/কার্ড)',
+    payment_collected_by_restaurant: 'পেমেন্টের জন্য ওয়েটারকে ডাকুন অথবা ক্যাশ কাউন্টারে যোগাযোগ করুন।',
     cash_note: 'ক্যাশ অর্ডারের ক্ষেত্রে ওয়েটারের নিশ্চিতকরণ প্রয়োজন।',
     place_order: 'অর্ডার নিশ্চিত করুন',
     order_success: 'অর্ডার সফলভাবে জমা হয়েছে!',
@@ -347,7 +349,7 @@ export const translations = {
     days_left: 'দিন বাকি আছে',
     renew_now: 'এখনই রিনিউ করুন',
     payment_gateway_config: 'পেমেন্ট গেটওয়ে সেটআপ',
-    live_mode: 'লাইভ মোড (PhonePe / Razorpay)',
+    live_mode: 'লাইভ মোড (UPI, কার্ড ও নেট ব্যাংকিং)',
     demo_mode: 'স্থায়ী ডেমো মোড',
 
     // CEO Dashboard
@@ -431,6 +433,7 @@ export const translations = {
     payment_mode: 'भुगतान का तरीका चुनें',
     pay_cash: 'नकद / काउंटर पर भुगतान',
     pay_online: 'ऑनलाइन भुगतान (UPI/कार्ड)',
+    payment_collected_by_restaurant: 'भुगतान रेस्तरां द्वारा लिया जाएगा। कृपया वेटर को बुलाएं या कैश काउंटर पर भुगतान करें।',
     cash_note: 'नकद भुगतान के लिए वेटर द्वारा सत्यापन आवश्यक है।',
     place_order: 'ऑर्डर दें',
     order_success: 'ऑर्डर सफलतापूर्वक दर्ज हुआ!',
@@ -532,7 +535,7 @@ export const translations = {
     days_left: 'दिन शेष हैं',
     renew_now: 'अभी रिन्यू करें',
     payment_gateway_config: 'पेमेंट गेटवे सेटअप',
-    live_mode: 'लाइव मोड (PhonePe / Razorpay)',
+    live_mode: 'लाइव मोड (UPI, कार्ड और नेट बैंकिंग)',
     demo_mode: 'स्थायी डेमो मोड',
 
     // CEO Dashboard

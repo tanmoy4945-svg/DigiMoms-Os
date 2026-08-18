@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { Bell, CheckCircle2, RotateCcw, Utensils, LogOut, PhoneCall, ShoppingBag, ShieldCheck } from 'lucide-react';
+import { Bell, CheckCircle2, RotateCcw, Utensils, LogOut, PhoneCall, ShoppingBag, ShieldCheck, QrCode, XCircle, Banknote } from 'lucide-react';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RealtimeStatusBadge } from '../common/RealtimeStatusBadge';
+import { OfflinePaymentModal } from '../common/OfflinePaymentModal';
+import { Order } from '../../types';
 
 export const WaiterTerminal: React.FC = () => {
+  const [selectedOfflineOrder, setSelectedOfflineOrder] = useState<Order | null>(null);
   const {
     currentStaff,
     logoutStaff,
@@ -13,6 +16,8 @@ export const WaiterTerminal: React.FC = () => {
     completeCallRequest,
     orders,
     verifyCashOrder,
+    verifyUpiPayment,
+    rejectUpiPayment,
     serveOrder,
     completeOrder,
     tables,
@@ -43,10 +48,16 @@ export const WaiterTerminal: React.FC = () => {
   const pendingCalls = callRequests.filter(c => c.restaurant_id === currentStaff.restaurant_id && c.status === 'pending');
   const myAcceptedCalls = callRequests.filter(c => c.restaurant_id === currentStaff.restaurant_id && c.status === 'accepted' && c.accepted_by_name === currentStaff.name);
 
-  // Strictly filter cash-due orders (exclude orders that are paid online, cash, or fully paid)
+  // Filter pending UPI verification orders
+  const pendingUpiOrders = orders.filter(o =>
+    o.restaurant_id === currentStaff.restaurant_id &&
+    o.payment_status === 'payment_verification_pending'
+  );
+
+  // Strictly filter cash-due orders (exclude orders that are paid online, cash, or UPI verification pending)
   const pendingCashOrders = orders.filter(o => {
     if (o.restaurant_id !== currentStaff.restaurant_id) return false;
-    if (o.payment_status === 'paid_live' || o.payment_status === 'paid' || o.payment_status === 'paid_demo' || o.payment_status === 'paid_cash') return false;
+    if (o.payment_status === 'paid_live' || o.payment_status === 'paid' || o.payment_status === 'paid_demo' || o.payment_status === 'paid_cash' || o.payment_status === 'payment_verification_pending') return false;
     const due = o.cash_due ?? (o.grand_total - (o.online_amount || 0) - (o.cash_amount || 0));
     return due > 0;
   });
@@ -170,6 +181,80 @@ export const WaiterTerminal: React.FC = () => {
         )}
       </div>
 
+      {/* UPI Scan & Pay Pending Verification Banner */}
+      {pendingUpiOrders.length > 0 && (
+        <div className="p-6 rounded-3xl bg-purple-950/40 border border-purple-500/50 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 text-purple-300">
+              <QrCode className="w-6 h-6 animate-pulse text-purple-400" />
+              <h3 className="text-lg font-bold">
+                UPI Scan & Pay Verifications Required ({pendingUpiOrders.length})
+              </h3>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 text-xs font-bold uppercase border border-purple-500/30">
+              Staff Confirmation Pending
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300">
+            Customers scanned the UPI QR code and submitted payment. Please check your bank notification / soundbox / UPI app and click <strong>Verify</strong> to approve and send the order to the kitchen.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {pendingUpiOrders.map(order => (
+              <div key={order.id} className="p-4 rounded-2xl bg-slate-950 border border-purple-500/40 space-y-3 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-extrabold uppercase">
+                    UPI SCAN & PAY
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <div>
+                    <span className="font-extrabold text-white font-mono text-sm">Order {order.order_number}</span>
+                    <span className="text-xs text-purple-300 ml-2 font-bold">Table #{order.table_number}</span>
+                  </div>
+                  <span className="text-sm font-extrabold font-mono text-emerald-400">₹{order.grand_total}</span>
+                </div>
+
+                {/* UPI Ref / UTR number if provided */}
+                <div className="bg-purple-950/40 p-2.5 rounded-xl border border-purple-500/20 text-xs space-y-1">
+                  <div className="text-slate-400 text-[10px]">Customer Submitted Reference:</div>
+                  <div className="font-mono font-bold text-white text-xs">
+                    {order.upi_ref_number || (order.notes?.startsWith('UPI_REF:') ? order.notes.replace('UPI_REF:', '') : 'Direct UPI Scan (No Ref Provided)')}
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-300">
+                  {order.items.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-slate-800/80">
+                  <button
+                    onClick={() => verifyUpiPayment(order.id, currentStaff.name, 'staff')}
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Verify & Send to Kitchen
+                  </button>
+
+                  <button
+                    onClick={() => rejectUpiPayment(order.id, currentStaff.name, 'staff')}
+                    className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-300 font-bold text-xs transition-all border border-slate-700"
+                    title="Decline and request cash payment"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Orders to Verify or Serve */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Pending Cash Verification */}
@@ -204,18 +289,30 @@ export const WaiterTerminal: React.FC = () => {
                     {order.items.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
                     <div>
                       <div className="text-xs text-slate-400">Total Amount: <strong className="text-white">₹{order.grand_total}</strong></div>
                       <div className="text-[10px] text-amber-400 font-bold uppercase">Payment Status: CASH PAYMENT PENDING (Due: ₹{dueAmt})</div>
                     </div>
 
-                    <button
-                      onClick={() => verifyCashOrder(order.id, currentStaff.name, 'staff')}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md transition-all"
-                    >
-                      [Mark Cash Paid]
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedOfflineOrder(order)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs border border-slate-700 flex items-center gap-1 transition-all"
+                        title="Record Cash, Counter UPI, Card or Mixed payment"
+                      >
+                        <Banknote className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Record / Split</span>
+                      </button>
+
+                      <button
+                        onClick={() => verifyCashOrder(order.id, currentStaff.name, 'staff')}
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md transition-all flex items-center gap-1"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Full Cash (₹{dueAmt})</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -282,6 +379,15 @@ export const WaiterTerminal: React.FC = () => {
         role="waiter"
         currentView="Waiter Terminal"
         restaurantName={restaurant.name}
+      />
+
+      {/* Offline Payment Modal */}
+      <OfflinePaymentModal
+        isOpen={!!selectedOfflineOrder}
+        onClose={() => setSelectedOfflineOrder(null)}
+        order={selectedOfflineOrder}
+        actorName={currentStaff.name}
+        actorType="staff"
       />
     </div>
   );
