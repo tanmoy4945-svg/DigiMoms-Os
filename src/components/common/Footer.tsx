@@ -19,7 +19,7 @@ export const Footer: React.FC = () => {
             <span className="font-bold text-xl text-white tracking-tight">DigiMoms OS</span>
           </div>
           <p className="text-sm leading-relaxed text-slate-400">
-            Next-Generation Enterprise Multi-Tenant Smart Restaurant Operating System. Empowering 10,000+ dining establishments with QR ordering, kitchen automation & real-time analytics.
+            Next-Generation Enterprise Multi-Tenant Smart Restaurant Operating System. Empowering dining establishments with QR ordering, kitchen automation & real-time analytics.
           </p>
           <div className="flex items-center gap-3 pt-2">
             <a
