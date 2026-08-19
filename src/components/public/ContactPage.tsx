@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Phone, MessageSquare, Mail, Clock, Send } from 'lucide-react';
+import { Phone, MessageSquare, Mail, Clock, Send, MapPin, UserCheck } from 'lucide-react';
 import { useSaaS } from '../../context/SaaSContext';
 
 export const ContactPage: React.FC = () => {
@@ -33,11 +33,11 @@ export const ContactPage: React.FC = () => {
                 href="https://wa.me/919475388085"
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-4 p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-900/60 transition-all"
+                className="flex items-center gap-4 p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-900/60 transition-all shadow-md"
               >
                 <MessageSquare className="w-6 h-6 text-emerald-400 shrink-0" />
                 <div>
-                  <div className="text-xs font-semibold text-emerald-400 uppercase">WhatsApp Instant Help</div>
+                  <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wide">WhatsApp Support (24 Hours Active)</div>
                   <div className="text-base font-bold text-white">+91 9475388085</div>
                 </div>
               </a>
@@ -55,14 +55,34 @@ export const ContactPage: React.FC = () => {
                 <div>
                   <div className="text-xs font-semibold text-slate-400 uppercase">Support Email</div>
                   <div className="text-base font-bold text-white">support@digimoms.com</div>
+                  <div className="text-xs text-slate-400">tanmoy4945@gmail.com</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                <MapPin className="w-6 h-6 text-amber-400 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-slate-400 uppercase">Registered Address</div>
+                  <div className="text-sm font-bold text-white">Andulia, Lachhmi Chak, Sabang, Paschim Medinipur</div>
+                  <div className="text-xs text-slate-400">West Bengal, 721144, India</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                <UserCheck className="w-6 h-6 text-blue-400 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-slate-400 uppercase">Legal Operator & Founder</div>
+                  <div className="text-base font-bold text-white">Tanmoy Jana</div>
+                  <div className="text-xs text-slate-400">Trade Name: DigiMoms Marketing Agency</div>
                 </div>
               </div>
 
               <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
                 <Clock className="w-6 h-6 text-amber-400 shrink-0" />
                 <div>
-                  <div className="text-xs font-semibold text-slate-400 uppercase">Support Operating Hours</div>
-                  <div className="text-sm font-medium text-slate-200">Monday - Sunday: 10:00 AM - 10:00 PM IST</div>
+                  <div className="text-xs font-semibold text-slate-400 uppercase">Office Hours & Availability</div>
+                  <div className="text-sm font-medium text-slate-200">Monday - Saturday: 10:00 AM - 9:00 PM IST</div>
+                  <div className="text-xs text-emerald-400 font-semibold mt-0.5">WhatsApp Support: 24 Hours Active</div>
                 </div>
               </div>
             </div>

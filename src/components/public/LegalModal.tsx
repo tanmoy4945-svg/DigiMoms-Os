@@ -14,19 +14,30 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
       body: (
         <div className="space-y-4 text-slate-300 text-sm leading-relaxed">
           <p><strong>Effective Date:</strong> August 2026</p>
-          <p>DigiMoms Smart Restaurant OS ("Company", "We", "Our") respects your privacy. This Privacy Policy outlines how we collect, use, and protect information across our multi-tenant SaaS application platform.</p>
+          <p>This website and digital platform is operated by <strong>DigiMoms Marketing Agency</strong> (Legal Operator: <strong>Tanmoy Jana</strong>). We respect your privacy and are committed to protecting all personal and operational data collected across our multi-tenant SaaS application platform.</p>
           
           <h3 className="font-bold text-white text-base pt-2">1. Information We Collect</h3>
-          <p>We collect restaurant owner details (Name, Phone number, Business Address, GSTIN, FSSAI numbers), staff credentials, and transaction meta-data required to process dining sessions and generate digital bills.</p>
+          <p>We collect restaurant owner details (Name, Phone number, Business Address, GSTIN, FSSAI numbers), staff credentials, and transaction meta-data required to process dining sessions, manage kitchen workflow, and generate digital bills.</p>
 
-          <h3 className="font-bold text-white text-base pt-2">2. Customer Dining Data</h3>
-          <p>Customers ordering via QR code do NOT require mandatory account creation. Dining preferences and cart orders are stored in temporary table sessions to facilitate kitchen fulfillment.</p>
+          <h3 className="font-bold text-white text-base pt-2">2. Customer Dining & QR Ordering Data</h3>
+          <p>Customers ordering via QR code do NOT require mandatory personal account creation. Dining preferences and cart orders are temporarily stored in active table sessions to facilitate swift kitchen preparation and invoice settlement.</p>
 
-          <h3 className="font-bold text-white text-base pt-2">3. Payment Security</h3>
-          <p>We do NOT store credit card details or bank passwords on our servers. All online payment flows use 256-bit SSL encrypted PCI-DSS compliant payment gateways supporting UPI, Cards, and Net Banking.</p>
+          <h3 className="font-bold text-white text-base pt-2">3. Payment Security & Data Handling</h3>
+          <p>We do not store payment card details, CVVs, or online banking passwords on our servers. All digital transactions are handled via 256-bit SSL encrypted, PCI-DSS compliant secure payment systems supporting UPI, Credit/Debit Cards, and Net Banking.</p>
 
-          <h3 className="font-bold text-white text-base pt-2">4. Data Retention</h3>
-          <p>Order records and invoices are securely saved for tax compliance. You may request data export or account closure by contacting our support hotline at +91 9475388085.</p>
+          <h3 className="font-bold text-white text-base pt-2">4. Data Isolation & Confidentiality</h3>
+          <p>Every restaurant account operates within a strictly isolated database tenant. Sales figures, menu pricing, recipe information, and customer records remain strictly private and are never shared or sold to third parties.</p>
+
+          <h3 className="font-bold text-white text-base pt-2">5. Legal Operator & Grievance Contact</h3>
+          <p>For any privacy inquiries, data export requests, or grievances, you may contact our designated officer:</p>
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1.5 mt-1">
+            <p><strong className="text-white">Legal Operator:</strong> Tanmoy Jana</p>
+            <p><strong className="text-white">Trade Name:</strong> DigiMoms Marketing Agency</p>
+            <p><strong className="text-white">Address:</strong> Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144</p>
+            <p><strong className="text-white">Email:</strong> tanmoy4945@gmail.com / support@digimoms.com</p>
+            <p><strong className="text-white">WhatsApp Support:</strong> 24 Hours Active (+91 9475388085)</p>
+            <p><strong className="text-white">Office Hours:</strong> Mon - Sat (10 AM - 9 PM IST)</p>
+          </div>
         </div>
       )
     },
@@ -35,36 +46,48 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
       icon: <FileText className="w-6 h-6 text-purple-400" />,
       body: (
         <div className="space-y-4 text-slate-300 text-sm leading-relaxed">
+          <p className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/20 text-blue-200 font-semibold text-sm">
+            This website is operated by DigiMoms Marketing Agency.
+          </p>
           <p><strong>Last Updated:</strong> August 2026</p>
-          <p>By registering or using the DigiMoms Smart Restaurant OS, you agree to these Terms and Conditions.</p>
+          <p>By registering, accessing, or using the DigiMoms Smart Restaurant OS, you agree to be bound by these Terms and Conditions.</p>
 
-          <h3 className="font-bold text-white text-base pt-2">1. SaaS Subscription & Free Access</h3>
-          <p>New restaurants are granted a 15-day trial period or lifetime tier as configured by the CEO Super Administrator. Subscriptions can be renewed or upgraded without losing existing menu data or invoice history.</p>
+          <h3 className="font-bold text-white text-base pt-2">1. Operating Entity & Legal Ownership</h3>
+          <p>The platform, services, and software are legally operated by <strong>Tanmoy Jana</strong> under the trade name <strong>DigiMoms Marketing Agency</strong>, located at <strong>Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144</strong>.</p>
 
-          <h3 className="font-bold text-white text-base pt-2">2. Multi-Tenant Isolation</h3>
-          <p>Each restaurant operates in a strictly isolated tenant environment (`restaurant_id`). Attempting cross-tenant data access, reverse engineering, or unauthorized API probing will result in immediate permanent suspension.</p>
+          <h3 className="font-bold text-white text-base pt-2">2. SaaS Subscription & 15-Day Free Trial</h3>
+          <p>New restaurants are provided a 15-day free trial period to evaluate all features of the operating system. Subscriptions can be activated or renewed at ₹999/month (INR) without losing existing restaurant data or invoice history.</p>
 
-          <h3 className="font-bold text-white text-base pt-2">3. Restaurant Responsibility</h3>
-          <p>Restaurant owners are solely responsible for setting accurate food prices, GST taxes, FSSAI licenses, and verifying cash payments collected at table counters.</p>
+          <h3 className="font-bold text-white text-base pt-2">3. Multi-Tenant Isolation & Permitted Use</h3>
+          <p>Each restaurant operates in a secure, isolated tenant environment. Users agree not to reverse engineer, probe, or attempt unauthorized access to other tenants or system infrastructure.</p>
+
+          <h3 className="font-bold text-white text-base pt-2">4. Restaurant Responsibility</h3>
+          <p>Restaurant owners are solely responsible for ensuring accurate menu pricing, food preparation standards, applicable GST/taxes, and statutory FSSAI compliance.</p>
         </div>
       )
     },
     refund: {
-      title: 'Refund & Cancellation Policy',
+      title: 'Return, Refund & Cancellation Policy',
       icon: <HelpCircle className="w-6 h-6 text-emerald-400" />,
       body: (
         <div className="space-y-4 text-slate-300 text-sm leading-relaxed">
-          <p><strong>Policy Summary:</strong></p>
-          <p>DigiMoms provides a digital cloud SaaS software service for restaurant management.</p>
+          <h3 className="font-bold text-white text-base pt-1">Return & Refund Policy</h3>
+          <p className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200">
+            We offer a 15-day free trial for DigiMoms Smart Restaurant OS. Once a paid subscription has started, it is non-refundable. In case of any billing error, the amount will be refunded to the original payment source within 5–7 business days.
+          </p>
 
-          <h3 className="font-bold text-white text-base pt-2">1. Free Trial & Cancellation</h3>
-          <p>Restaurants can evaluate all features during the 15-day free trial without submitting credit card details. Subscription payments can be cancelled at any time before the next billing cycle.</p>
+          <h3 className="font-bold text-white text-base pt-2">Cancellation Policy</h3>
+          <p className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200">
+            Users can cancel their subscription at any time from the dashboard. The service will remain active until the end of the current billing cycle, after which no new charges will apply.
+          </p>
 
-          <h3 className="font-bold text-white text-base pt-2">2. Refund Requests</h3>
-          <p>If you experience technical server downtime exceeding 24 hours that cannot be resolved by support, you may request a pro-rata refund for the unused subscription period within 7 days of payment.</p>
-
-          <h3 className="font-bold text-white text-base pt-2">3. Contact Support</h3>
-          <p>For refund requests or assistance, please reach out via WhatsApp at <strong>+91 9475388085</strong> with your Restaurant Name and Payment ID.</p>
+          <h3 className="font-bold text-white text-base pt-2">Billing Queries & Support</h3>
+          <p>For any billing clarification or assistance, please contact our support team:</p>
+          <div className="text-xs text-slate-300 space-y-1">
+            <p><strong>WhatsApp Support:</strong> 24 Hours Active (+91 9475388085)</p>
+            <p><strong>Office Hours:</strong> Mon - Sat (10 AM - 9 PM IST)</p>
+            <p><strong>Email:</strong> support@digimoms.com / tanmoy4945@gmail.com</p>
+          </div>
         </div>
       )
     },
@@ -73,14 +96,13 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
       icon: <FileText className="w-6 h-6 text-amber-400" />,
       body: (
         <div className="space-y-4 text-slate-300 text-sm leading-relaxed">
-          <p><strong>Digital SaaS Product Delivery:</strong></p>
-          <p>DigiMoms Smart Restaurant OS is a 100% cloud-based Software-as-a-Service (SaaS) platform. No physical goods or hard copies are shipped via courier.</p>
+          <h3 className="font-bold text-white text-base pt-1">Digital Service Delivery</h3>
+          <p className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200">
+            All our services and software access are delivered digitally within 24–48 hours via email or account activation. There is no physical shipping or logistics delivery.
+          </p>
 
-          <h3 className="font-bold text-white text-base pt-2">1. Instant Activation</h3>
-          <p>Upon registration by the CEO or Restaurant Owner, the digital tenant instance, owner dashboard, kitchen terminals, and QR code generator are provisioned instantly.</p>
-
-          <h3 className="font-bold text-white text-base pt-2">2. Printable QR Downloads</h3>
-          <p>Table QR codes and invoices can be downloaded instantly in PDF format from the Owner Dashboard and printed using any standard office printer.</p>
+          <h3 className="font-bold text-white text-base pt-2">Immediate System Access</h3>
+          <p>Upon registration, your digital tenant dashboard, menu management tools, waiter interfaces, kitchen KDS, and printable QR assets become available online immediately.</p>
         </div>
       )
     },
@@ -89,8 +111,8 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
       icon: <AlertCircle className="w-6 h-6 text-sky-400" />,
       body: (
         <div className="space-y-4 text-slate-300 text-sm leading-relaxed">
-          <p>This application uses essential session storage and local cookies solely to maintain active dining sessions, user authorization tokens, and language preferences.</p>
-          <p>We do NOT use invasive third-party tracking or advertising cookies.</p>
+          <p>This application uses essential session storage and functional cookies solely to maintain active dining sessions, authenticated login state, and language preferences.</p>
+          <p>We do NOT use third-party tracking or advertising cookies.</p>
         </div>
       )
     }
