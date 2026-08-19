@@ -115,7 +115,7 @@ export const Footer: React.FC = () => {
               Operating Hours: Mon - Sun (10:00 AM - 10:00 PM IST)
             </p>
             <div className="pt-2 text-xs text-slate-400 bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <span className="font-semibold text-slate-200">Razorpay Onboarding Compliant</span>
+              <span className="font-semibold text-slate-200">Online Payment Onboarding Compliant</span>
               <br />Digital SaaS Cloud Operating System for Restaurants & Hospitality.
             </div>
           </div>
