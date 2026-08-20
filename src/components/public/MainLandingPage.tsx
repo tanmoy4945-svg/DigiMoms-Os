@@ -6,7 +6,7 @@ import {
   QrCode, ChefHat, ShieldCheck, Zap, Smartphone, BarChart3,
   Globe, CheckCircle2, ArrowRight, Utensils, PhoneCall,
   Laptop, Code, Sparkles, Lock, Bot, GraduationCap,
-  Compass, HeartHandshake, Layers, HelpCircle, Check, FileText, MapPin
+  Compass, HeartHandshake, Layers, HelpCircle, Check, FileText
 } from 'lucide-react';
 
 export const MainLandingPage: React.FC = () => {
@@ -332,27 +332,13 @@ export const MainLandingPage: React.FC = () => {
                 <Compass className="w-3.5 h-3.5" /> {t.journeyTag}
               </div>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-white">{t.journeyTitle}</h2>
-              <div className="flex flex-wrap items-center gap-2.5 text-xs text-amber-300 font-bold">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-amber-300 font-bold">
                 <span className="px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">{t.journeyFounder}</span>
                 <span className="px-3 py-1 rounded-lg bg-slate-800 border border-slate-700">{t.journeyEstablished}</span>
-                <span className="px-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-amber-400" /> Andulia, Sabang, Paschim Medinipur, WB
-                </span>
               </div>
               <p className="text-slate-300 text-sm leading-relaxed pt-2">
                 {t.journeyStory}
               </p>
-            </div>
-            <div className="pt-4 border-t border-slate-800/80">
-              <button
-                onClick={() => {
-                  setActiveView('public-about');
-                  window.history.pushState({}, '', '/about');
-                }}
-                className="inline-flex items-center gap-2 text-xs font-bold text-blue-400 hover:text-blue-300 transition-all"
-              >
-                Read Full About Us & Company Profile <ArrowRight className="w-3.5 h-3.5" />
-              </button>
             </div>
           </div>
 

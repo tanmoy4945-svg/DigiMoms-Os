@@ -5,7 +5,6 @@ import { Footer } from './components/common/Footer';
 import { NotificationToast } from './components/common/NotificationToast';
 
 import { MainLandingPage } from './components/public/MainLandingPage';
-import { AboutUsPage } from './components/public/AboutUsPage';
 import { PricingPage } from './components/public/PricingPage';
 import { ContactPage } from './components/public/ContactPage';
 import { RestaurantPublicWebsite } from './components/public/RestaurantPublicWebsite';
@@ -120,7 +119,6 @@ const AppContent: React.FC = () => {
 
       <main className="flex-1">
         {(activeView === 'landing' || activeView === 'public-home') && <MainLandingPage />}
-        {(activeView === 'about' || (activeView as any) === 'public-about') && <AboutUsPage />}
         {(activeView === 'pricing' || activeView === 'public-pricing') && <PricingPage />}
         {(activeView === 'contact' || activeView === 'public-contact') && <ContactPage />}
 

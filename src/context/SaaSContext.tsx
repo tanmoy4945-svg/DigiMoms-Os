@@ -18,7 +18,6 @@ import { registerServiceWorker, triggerSystemNotification } from '../utils/notif
 
 export type ActiveView = 
   | 'public-home' 
-  | 'public-about'
   | 'public-pricing' 
   | 'public-contact' 
   | 'public-restaurant' 
@@ -258,9 +257,6 @@ const parseRouteFromPath = (
   if (cleanPath.startsWith('/r/')) {
     const rawSlug = cleanPath.split('/r/')[1]?.split('/')[0]?.split('?')[0]?.split('#')[0] || '';
     return { view: 'public-restaurant', shortCode: '', slug: rawSlug.trim() };
-  }
-  if (cleanPath === '/about' || cleanPath === '/public-about') {
-    return { view: 'public-about', shortCode: '', slug: '' };
   }
   if (cleanPath === '/pricing' || cleanPath === '/public-pricing') {
     return { view: 'public-pricing', shortCode: '', slug: '' };
