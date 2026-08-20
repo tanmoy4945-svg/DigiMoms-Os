@@ -19,17 +19,17 @@ export const Footer: React.FC = () => {
             <span className="font-bold text-xl text-white tracking-tight">DigiMoms OS</span>
           </div>
           <p className="text-sm leading-relaxed text-slate-400">
-            Next-Generation Enterprise Multi-Tenant Smart Restaurant Operating System. Empowering 10,000+ dining establishments with QR ordering, kitchen automation & real-time analytics.
+            Modern Multi-Tenant Smart Restaurant Operating System designed for dining establishments and local food businesses across India with QR table ordering, kitchen automation & digital billing.
           </p>
           <div className="flex items-center gap-3 pt-2">
             <a
               href="https://wa.me/919475388085"
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500/30 text-emerald-300 text-xs font-semibold hover:bg-emerald-900/80 transition-all"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-950/80 border border-emerald-500/30 text-emerald-300 text-xs font-semibold hover:bg-emerald-900/80 transition-all shadow-md"
             >
               <MessageSquare className="w-4 h-4 text-emerald-400" />
-              WhatsApp Support: +91 9475388085
+              WhatsApp Support (24 Hours Active): +91 9475388085
             </a>
           </div>
         </div>
@@ -41,6 +41,11 @@ export const Footer: React.FC = () => {
             <li>
               <button onClick={() => { setActiveView('landing'); window.history.pushState({}, '', '/'); }} className="hover:text-blue-400 transition-all">
                 Home
+              </button>
+            </li>
+            <li>
+              <button onClick={() => { setActiveView('public-about'); window.history.pushState({}, '', '/about'); }} className="hover:text-blue-400 transition-all font-medium text-slate-200">
+                About Us & Leadership
               </button>
             </li>
             <li>
@@ -105,19 +110,27 @@ export const Footer: React.FC = () => {
 
         {/* Col 4: Contact & Support */}
         <div className="space-y-3">
-          <h4 className="text-sm font-semibold text-white uppercase tracking-wider">Enterprise Contact</h4>
+          <h4 className="text-sm font-semibold text-white uppercase tracking-wider">Enterprise & Legal Operator</h4>
           <div className="space-y-2 text-sm">
-            <p className="flex items-center gap-2">
+            <p className="text-xs text-slate-300">
+              <strong className="text-white">Legal Operator:</strong> Tanmoy Jana
+            </p>
+            <p className="text-xs text-slate-300">
+              <strong className="text-white">Trade Name:</strong> DigiMoms Marketing Agency
+            </p>
+            <p className="text-xs text-slate-300 leading-snug">
+              <strong className="text-white">Address:</strong> Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144.
+            </p>
+            <p className="flex items-center gap-2 pt-1 text-xs text-slate-200">
               <Phone className="w-4 h-4 text-blue-400" />
-              <span>Direct Hotline: +91 9475388085</span>
+              <span>Direct: +91 9475388085</span>
             </p>
             <p className="text-xs text-slate-400">
-              Operating Hours: Mon - Sun (10:00 AM - 10:00 PM IST)
+              <strong className="text-slate-300">Office Time:</strong> Mon - Sat (10 AM - 9 PM IST)
             </p>
-            <div className="pt-2 text-xs text-slate-400 bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <span className="font-semibold text-slate-200">Razorpay Onboarding Compliant</span>
-              <br />Digital SaaS Cloud Operating System for Restaurants & Hospitality.
-            </div>
+            <p className="text-xs text-emerald-400 font-semibold">
+              WhatsApp Support: 24 Hours Active
+            </p>
           </div>
         </div>
       </div>

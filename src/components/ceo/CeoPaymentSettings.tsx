@@ -30,9 +30,28 @@ export const CeoPaymentSettings: React.FC = () => {
   const [payuEnv, setPayuEnv] = useState<'TEST' | 'LIVE'>(ceoPaymentConfig?.payu_env || 'TEST');
   const [payuVerified, setPayuVerified] = useState(ceoPaymentConfig?.payu_verified || false);
 
-  // Verification UI state
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState('');
+
+  // Synchronize local input state when ceoPaymentConfig loads from server/database
+  React.useEffect(() => {
+    if (ceoPaymentConfig) {
+      setPrimaryGateway(ceoPaymentConfig.primary_gateway || 'phonepe');
+      setMode(ceoPaymentConfig.mode || 'demo');
+      setPhonepeMerchantId(ceoPaymentConfig.phonepe_merchant_id || '');
+      setPhonepeSaltKey(ceoPaymentConfig.phonepe_salt_key || '');
+      setPhonepeSaltIndex(ceoPaymentConfig.phonepe_salt_index || '1');
+      setPhonepeEnv(ceoPaymentConfig.phonepe_env || 'SANDBOX');
+      setPhonepeVerified(ceoPaymentConfig.phonepe_verified || false);
+      setRazorpayKeyId(ceoPaymentConfig.razorpay_key_id || '');
+      setRazorpayKeySecret(ceoPaymentConfig.razorpay_key_secret || '');
+      setRazorpayVerified(ceoPaymentConfig.razorpay_verified || false);
+      setPayuMerchantKey(ceoPaymentConfig.payu_merchant_key || '');
+      setPayuMerchantSalt(ceoPaymentConfig.payu_merchant_salt || '');
+      setPayuEnv(ceoPaymentConfig.payu_env || 'TEST');
+      setPayuVerified(ceoPaymentConfig.payu_verified || false);
+    }
+  }, [ceoPaymentConfig]);
 
   const handleVerifyPhonePe = async () => {
     setIsVerifying(true);

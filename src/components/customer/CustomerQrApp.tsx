@@ -10,6 +10,7 @@ import { t } from '../../utils/i18n';
 import { CallWaiterModal } from './CallWaiterModal';
 import { FeedbackModal } from './FeedbackModal';
 import { BillModal } from '../common/BillModal';
+import { PayUCheckoutModal } from '../common/PayUCheckoutModal';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
 import { MenuItem, MenuCategory, TableSession, Table, Language, Restaurant, Order, CouponConfig } from '../../types';
@@ -231,6 +232,10 @@ export const CustomerQrApp: React.FC = () => {
   const [showCallModal, setShowCallModal] = useState<boolean>(false);
   const [feedbackOrder, setFeedbackOrder] = useState<string | null>(null);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
+  const [payuModalData, setPayuModalData] = useState<{
+    order: Order;
+    amountToPay: number;
+  } | null>(null);
   const [pendingOnlineModal, setPendingOnlineModal] = useState<{
     gateway: 'razorpay' | 'payu' | 'phonepe';
     order: Order;
@@ -252,45 +257,10 @@ export const CustomerQrApp: React.FC = () => {
     const gateway = restaurant?.live_gateway || 'razorpay';
 
     if (gateway === 'payu') {
-      try {
-        const createRes = await fetch('/api/payu/create-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: amountToPay,
-            restaurant_id: order.restaurant_id,
-            restaurant_name: restaurant?.name || 'Restaurant Order',
-            order_id: order.id,
-            mobile: customerMobile || '9999999999',
-            payu_key: restaurant?.payu_merchant_key,
-            payu_salt: restaurant?.payu_merchant_salt,
-            env: restaurant?.payu_env || 'TEST'
-          })
-        });
-
-        const payuData = await createRes.json();
-        const txnid = payuData.txnid || `ORD_${order.id.substring(0, 8)}_${Date.now()}`;
-        const keyId = restaurant?.payu_merchant_key || 'PAYU_MERCHANT_KEY';
-
-        setPendingOnlineModal({
-          gateway: 'payu',
-          order,
-          amountToPay,
-          orderOrTxnId: txnid,
-          keyId,
-          hash: payuData.hash,
-          actionUrl: payuData.actionUrl
-        });
-      } catch (err) {
-        console.error("PayU init error:", err);
-        setPendingOnlineModal({
-          gateway: 'payu',
-          order,
-          amountToPay,
-          orderOrTxnId: `ORD_${order.id.substring(0, 8)}_${Date.now()}`,
-          keyId: restaurant?.payu_merchant_key || 'PAYU_MERCHANT_KEY'
-        });
-      }
+      setPayuModalData({
+        order,
+        amountToPay
+      });
       return;
     }
 
@@ -2123,6 +2093,52 @@ export const CustomerQrApp: React.FC = () => {
           order={selectedBillOrder}
           restaurant={restaurant}
           onClose={() => setSelectedBillOrder(null)}
+        />
+      )}
+
+      {/* PayU Food Order Payment Gateway Modal */}
+      {payuModalData && restaurant && (
+        <PayUCheckoutModal
+          isOpen={!!payuModalData}
+          onClose={() => setPayuModalData(null)}
+          onSuccess={async (paymentData) => {
+            const currentOrderId = payuModalData.order.id;
+            const currentAmt = payuModalData.amountToPay;
+            const currentOrder = payuModalData.order;
+
+            const success = await processPayUOnlinePayment(
+              currentOrderId,
+              currentAmt,
+              {
+                txnid: paymentData.txnid,
+                mihpayid: paymentData.mihpayid || `mih_${Date.now()}`,
+                hash: paymentData.hash,
+                status: 'success'
+              },
+              customerMobile
+            );
+
+            if (success) {
+              setCart([]);
+              setIsCartOpen(false);
+              setPayuModalData(null);
+              setLastPlacedOrder(currentOrder);
+              showToast('🎉 PayU payment confirmed! Your food order is being prepared.', 'success');
+            }
+          }}
+          amount={payuModalData.amountToPay}
+          title={`Order #${payuModalData.order.order_number || ''} • Table ${payuModalData.order.table_number || ''}`}
+          subtitle={`Payment for ${restaurant.name}`}
+          orderId={payuModalData.order.id}
+          restaurantId={restaurant.id}
+          restaurantName={restaurant.name}
+          customerName={customerMobile ? `Customer (${customerMobile})` : `Table ${payuModalData.order.table_number}`}
+          customerMobile={customerMobile || '9999999999'}
+          customerEmail="customer@digimoms.in"
+          payuKey={restaurant.payu_merchant_key}
+          payuSalt={restaurant.payu_merchant_salt}
+          env={restaurant.payu_env || 'TEST'}
+          isSubscription={false}
         />
       )}
 

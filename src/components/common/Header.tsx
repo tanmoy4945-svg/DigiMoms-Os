@@ -56,6 +56,18 @@ export const Header: React.FC = () => {
 
           <button
             onClick={() => {
+              setActiveView('public-about');
+              window.history.pushState({}, '', '/about');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+              activeView === 'public-about' || (activeView as any) === 'about' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {language === 'bn' ? 'আমাদের সম্পর্কে' : language === 'hi' ? 'हमारे बारे में' : 'About Us'}
+          </button>
+
+          <button
+            onClick={() => {
               setActiveView(ceoAuthenticated ? 'ceo-dashboard' : 'ceo-login');
               window.history.pushState({}, '', '/login-ceo');
             }}

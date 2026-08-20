@@ -255,11 +255,11 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     ],
     learnDisclaimer: 'DigiMoms provides software and learning assistance; it does not replace the restaurant owner responsibility for staff training, food quality, and business decisions.',
 
-    journeyTag: 'Our Story',
+    journeyTag: 'About Us & Leadership',
     journeyTitle: 'Our Journey',
-    journeyFounder: 'Tanmoy Jana (Founder & CEO)',
+    journeyFounder: 'Tanmoy Jana (Founder & Legal Operator)',
     journeyEstablished: 'Established in 2024',
-    journeyStory: 'DigiMoms Marketing Agency was established in 2024 by Tanmoy Jana. Starting as a digital and marketing-focused initiative to help local businesses establish a digital presence, DigiMoms expanded its vision to build technology solutions for the hospitality sector — developing DigiMoms Smart Restaurant OS to make modern digital restaurant tools simpler and more accessible.',
+    journeyStory: 'Founded by Tanmoy Jana, DigiMoms Marketing Agency is helping local businesses and restaurants in India with modern IT solutions and operating systems. Headquartered at Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144, DigiMoms provides cutting-edge digital restaurant technology with a 15-day free trial and starting at ₹999/month (INR).',
 
     visionTag: 'Core Purpose',
     visionTitle: 'Our Vision',
@@ -448,11 +448,11 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     ],
     learnDisclaimer: 'ডিজিমমস সফটওয়্যার ও লার্নিং সহায়তা প্রদান করে; এটি রেস্তোরাঁ মালিকের স্টাফ ট্রেনিং ও ব্যবসা সংক্রান্ত নিজস্ব সিদ্ধান্তের বিকল্প নয়।',
 
-    journeyTag: 'আমাদের পথচলা',
+    journeyTag: 'আমাদের সম্পর্কে ও নেতৃত্ব',
     journeyTitle: 'আমাদের পথচলা (Our Journey)',
-    journeyFounder: 'তন্ময় জানা (প্রতিষ্ঠাতা ও সিইও)',
+    journeyFounder: 'তন্ময় জানা (প্রতিষ্ঠাতা ও আইনি পরিচালক)',
     journeyEstablished: 'প্রতিষ্ঠিত: ২০২৪',
-    journeyStory: 'ডিজিমমস মার্কেটিং এজেন্সি ২০২৪ সালে তন্ময় জানা প্রতিষ্ঠা করেন। স্থানীয় ব্যবসাগুলোকে ডিজিটাল উপস্থিতিতে সাহায্য করার লক্ষ্য নিয়ে যাত্রা শুরু করে, ডিজিমমস পরবর্তীতে রেস্তোরাঁ খাতের জন্য একটি সম্পূর্ণ ডিজিটাল অপারেটিং সিস্টেম — "ডিজিমমস স্মার্ট রেস্তোরাঁ ওএস" তৈরি করে।',
+    journeyStory: 'তন্ময় জানা কর্তৃক প্রতিষ্ঠিত, ডিজিমমস মার্কেটিং এজেন্সি ভারতের স্থানীয় ব্যবসা ও রেস্তোরাঁগুলোকে আধুনিক আইটি সমাধান এবং অপারেটিং সিস্টেমের মাধ্যমে সহায়তা করছে। প্রধান কার্যালয়: আন্দুলিয়া, লক্ষ্মী চক, সবং, পশ্চিম মেদিনীপুর, পশ্চিমবঙ্গ, ৭২১১৪৪।',
 
     visionTag: 'মূল লক্ষ্য',
     visionTitle: 'আমাদের ভিশন (Our Vision)',
@@ -641,11 +641,11 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     ],
     learnDisclaimer: 'DigiMoms सॉफ्टवेयर और सीखने की सहायता प्रदान करता है; यह स्टाफ प्रशिक्षण और व्यावसायिक निर्णयों के लिए रेस्टोरेंट मालिक की जिम्मेदारी का विकल्प नहीं है।',
 
-    journeyTag: 'हमारी यात्रा',
+    journeyTag: 'हमारे बारे में एवं नेतृत्व',
     journeyTitle: 'हमारी यात्रा (Our Journey)',
-    journeyFounder: 'तन्मय जाना (संस्थापक एवं सीईओ)',
+    journeyFounder: 'तन्मय जाना (संस्थापक एवं वैधानिक संचालक)',
     journeyEstablished: 'स्थापना: 2024',
-    journeyStory: 'DigiMoms मार्केटिंग एजेंसी की स्थापना 2024 में तन्मय जाना द्वारा की गई थी। स्थानीय व्यवसायों को डिजिटल उपस्थिति स्थापित करने में मदद करने वाली एक एजेंसी के रूप में शुरुआत करके, DigiMoms ने आतिथ्य क्षेत्र के लिए डिजिटल तकनीक — "DigiMoms स्मार्ट रेस्टोरेंट OS" का निर्माण किया।',
+    journeyStory: 'तन्मय जाना द्वारा स्थापित, DigiMoms मार्केटिंग एजेंसी आधुनिक आईटी समाधान और ऑपरेटिंग सिस्टम के साथ भारत में स्थानीय व्यवसायों और रेस्टोरेंट्स की मदद कर रही है। पंजीकृत पता: अंदुलिया, लछमी चक, सबंग, पश्चिम मेदिनीपुर, पश्चिम बंगाल, 721144।',
 
     visionTag: 'मूल उद्देश्य',
     visionTitle: 'हमारा विजन (Our Vision)',

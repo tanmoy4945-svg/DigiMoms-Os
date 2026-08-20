@@ -18,6 +18,7 @@ import { BillModal } from '../common/BillModal';
 import { OfflinePaymentModal } from '../common/OfflinePaymentModal';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RealtimeStatusBadge } from '../common/RealtimeStatusBadge';
+import { PayUCheckoutModal } from '../common/PayUCheckoutModal';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
 import { Order } from '../../types';
 
@@ -50,6 +51,7 @@ export const OwnerDashboard: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'tables' | 'staff' | 'payments' | 'reports' | 'feedback' | 'settings' | 'public-website'>('overview');
   const [showRenewalModal, setShowRenewalModal] = useState(false);
+  const [showPayUSubscriptionModal, setShowPayUSubscriptionModal] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
   const [selectedOfflineOrder, setSelectedOfflineOrder] = useState<Order | null>(null);
@@ -232,7 +234,8 @@ export const OwnerDashboard: React.FC = () => {
 
   const handleRenewalClick = () => {
     if (ceoPaymentConfig?.primary_gateway === 'payu') {
-      handleProcessPayURenewal();
+      setShowRenewalModal(false);
+      setShowPayUSubscriptionModal(true);
     } else {
       handleProcessPhonePeRenewal();
     }
@@ -893,6 +896,32 @@ export const OwnerDashboard: React.FC = () => {
         order={selectedOfflineOrder}
         actorName={currentOwner.owner_name}
         actorType="owner"
+      />
+
+      {/* PayU Subscription Renewal Modal */}
+      <PayUCheckoutModal
+        isOpen={showPayUSubscriptionModal}
+        onClose={() => setShowPayUSubscriptionModal(false)}
+        onSuccess={async (paymentData) => {
+          await renewRestaurantMonthly(currentOwner.id, 1, {
+            transactionId: paymentData.txnid,
+            mode: ceoPaymentConfig?.mode || 'demo'
+          });
+          setShowPayUSubscriptionModal(false);
+          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via PayU!', 'success');
+        }}
+        amount={monthlyFee}
+        title="DigiMoms Smart Restaurant OS Subscription"
+        subtitle="Monthly Standard Plan Renewal (1 Calendar Month)"
+        restaurantId={currentOwner.id}
+        restaurantName={currentOwner.name}
+        customerName={currentOwner.owner_name || currentOwner.name}
+        customerMobile={currentOwner.owner_mobile}
+        customerEmail={currentOwner.owner_email}
+        payuKey={ceoPaymentConfig?.payu_merchant_key}
+        payuSalt={ceoPaymentConfig?.payu_merchant_salt}
+        env={ceoPaymentConfig?.payu_env || 'TEST'}
+        isSubscription={true}
       />
     </div>
   );

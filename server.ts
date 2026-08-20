@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
@@ -8,7 +9,149 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  const DATA_DIR = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(DATA_DIR)) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    } catch (err) {
+      console.warn('Could not create data dir:', err);
+    }
+  }
+
+  function readJsonFile<T>(filename: string, defaultVal: T): T {
+    try {
+      const filePath = path.join(DATA_DIR, filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, JSON.stringify(defaultVal, null, 2), 'utf-8');
+        return defaultVal;
+      }
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(raw) as T;
+    } catch (err) {
+      console.warn(`Error reading ${filename}, using default:`, err);
+      return defaultVal;
+    }
+  }
+
+  function writeJsonFile<T>(filename: string, data: T): void {
+    try {
+      const filePath = path.join(DATA_DIR, filename);
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Error writing ${filename}:`, err);
+    }
+  }
+
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // API Route: Persistent CEO Payment Config
+  app.get('/api/ceo/payment-config', (req, res) => {
+    const defaultCfg = {
+      primary_gateway: 'payu',
+      mode: 'demo',
+      phonepe_merchant_id: '',
+      phonepe_salt_key: '',
+      phonepe_salt_index: '1',
+      phonepe_env: 'SANDBOX',
+      phonepe_verified: false,
+      razorpay_key_id: '',
+      razorpay_key_secret: '',
+      razorpay_verified: false,
+      payu_merchant_key: '',
+      payu_merchant_salt: '',
+      payu_env: 'TEST',
+      payu_verified: false
+    };
+    const cfg = readJsonFile('ceo_payment_config.json', defaultCfg);
+    res.json({ success: true, data: cfg });
+  });
+
+  app.post('/api/ceo/payment-config', (req, res) => {
+    const defaultCfg = {
+      primary_gateway: 'payu',
+      mode: 'demo',
+      phonepe_merchant_id: '',
+      phonepe_salt_key: '',
+      phonepe_salt_index: '1',
+      phonepe_env: 'SANDBOX',
+      phonepe_verified: false,
+      razorpay_key_id: '',
+      razorpay_key_secret: '',
+      razorpay_verified: false,
+      payu_merchant_key: '',
+      payu_merchant_salt: '',
+      payu_env: 'TEST',
+      payu_verified: false
+    };
+    const current = readJsonFile('ceo_payment_config.json', defaultCfg);
+    const updated = { ...current, ...req.body, updated_at: new Date().toISOString() };
+    writeJsonFile('ceo_payment_config.json', updated);
+    res.json({ success: true, data: updated });
+  });
+
+  // API Route: Persistent Restaurant Payment Configurations & Overrides
+  app.get('/api/restaurants-configs', (req, res) => {
+    const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+    res.json({ success: true, data: configs });
+  });
+
+  app.get('/api/restaurants/:id/config', (req, res) => {
+    const { id } = req.params;
+    const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+    res.json({ success: true, data: configs[id] || {} });
+  });
+
+  app.post('/api/restaurants/:id/config', (req, res) => {
+    const { id } = req.params;
+    const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+    configs[id] = { ...(configs[id] || {}), ...req.body, updated_at: new Date().toISOString() };
+    writeJsonFile('restaurant_configs.json', configs);
+    res.json({ success: true, data: configs[id] });
+  });
+
+  // API Route: Persistent Orders Sync & Backup
+  app.get('/api/orders/list', (req, res) => {
+    const { restaurant_id } = req.query;
+    const allOrders = readJsonFile<any[]>('orders.json', []);
+    const filtered = restaurant_id ? allOrders.filter(o => o.restaurant_id === restaurant_id) : allOrders;
+    res.json({ success: true, data: filtered });
+  });
+
+  app.post('/api/orders/save', (req, res) => {
+    const order = req.body;
+    if (!order || !order.id) {
+      return res.status(400).json({ error: 'Missing order data' });
+    }
+    const allOrders = readJsonFile<any[]>('orders.json', []);
+    const idx = allOrders.findIndex(o => o.id === order.id);
+    if (idx >= 0) {
+      allOrders[idx] = { ...allOrders[idx], ...order, updated_at: new Date().toISOString() };
+    } else {
+      allOrders.unshift({ ...order, created_at: order.created_at || new Date().toISOString() });
+    }
+    writeJsonFile('orders.json', allOrders.slice(0, 1000));
+    res.json({ success: true, data: order });
+  });
+
+  // API Route: Persistent Transactions Record
+  app.get('/api/transactions/list', (req, res) => {
+    const { restaurant_id } = req.query;
+    const allTx = readJsonFile<any[]>('transactions.json', []);
+    const filtered = restaurant_id ? allTx.filter(t => t.restaurant_id === restaurant_id) : allTx;
+    res.json({ success: true, data: filtered });
+  });
+
+  app.post('/api/transactions/record', (req, res) => {
+    const tx = req.body;
+    if (!tx || !tx.id) {
+      return res.status(400).json({ error: 'Missing transaction data' });
+    }
+    const allTx = readJsonFile<any[]>('transactions.json', []);
+    allTx.unshift({ ...tx, created_at: tx.created_at || new Date().toISOString() });
+    writeJsonFile('transactions.json', allTx.slice(0, 1000));
+    res.json({ success: true, data: tx });
+  });
 
   // API Route: Create PhonePe Payment Request for DigiMoms Subscriptions
   app.post('/api/phonepe/create-payment', async (req, res) => {
@@ -469,6 +612,161 @@ async function startServer() {
     } catch (err: any) {
       console.error('Error verifying PayU payment:', err);
       res.status(500).json({ error: 'PayU payment verification failed' });
+    }
+  });
+
+  // API Route: PayU Callback Handler (POST & GET from PayU Gateway)
+  app.all('/api/payu/callback', (req, res) => {
+    try {
+      const data = req.method === 'POST' ? req.body : req.query;
+      const status = data.status || (data.unmappedstatus === 'captured' ? 'success' : 'pending');
+      const txnid = data.txnid || '';
+      const amount = data.amount || '';
+      const mihpayid = data.mihpayid || data.payuMoneyId || '';
+      const hash = data.hash || '';
+      const udf1 = data.udf1 || ''; // restaurant_id
+      const udf2 = data.udf2 || ''; // order_id
+
+      if (status === 'success' && txnid) {
+        verifiedPayUTransactions.add(txnid);
+      }
+
+      // Return a clean HTML response that automatically notifies parent or redirects back
+      const isSuccess = status === 'success';
+      const htmlResponse = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>PayU Payment ${isSuccess ? 'Success' : 'Status'}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background-color: #020617;
+              color: #f8fafc;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              padding: 20px;
+              box-sizing: border-box;
+            }
+            .card {
+              background-color: #0f172a;
+              border: 1px solid ${isSuccess ? '#10b981' : '#f59e0b'};
+              border-radius: 24px;
+              padding: 32px;
+              max-width: 420px;
+              width: 100%;
+              text-align: center;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            }
+            .icon {
+              width: 56px;
+              height: 56px;
+              border-radius: 50%;
+              background-color: ${isSuccess ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'};
+              color: ${isSuccess ? '#34d399' : '#fbbf24'};
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 28px;
+              margin: 0 auto 16px;
+            }
+            h1 { font-size: 20px; margin: 0 0 8px; color: #fff; }
+            p { font-size: 13px; color: #94a3b8; margin: 0 0 20px; line-height: 1.5; }
+            .details {
+              background-color: #020617;
+              border-radius: 12px;
+              padding: 12px 16px;
+              margin-bottom: 20px;
+              text-align: left;
+              font-size: 12px;
+            }
+            .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+            .row:last-child { margin-bottom: 0; }
+            .btn {
+              display: inline-block;
+              width: 100%;
+              padding: 12px;
+              border-radius: 12px;
+              background-color: ${isSuccess ? '#10b981' : '#3b82f6'};
+              color: #fff;
+              text-decoration: none;
+              font-weight: bold;
+              font-size: 14px;
+              border: none;
+              cursor: pointer;
+              box-sizing: border-box;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">${isSuccess ? '✓' : '!'}</div>
+            <h1>${isSuccess ? 'Payment Successful!' : 'Payment ' + (status || 'Processed')}</h1>
+            <p>${isSuccess ? 'Your transaction has been processed securely via PayU India.' : 'Transaction response received from PayU gateway.'}</p>
+            
+            <div class="details">
+              <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${status}</strong></div>
+              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount}</strong></div>` : ''}
+              ${txnid ? `<div class="row"><span>Txn ID:</span><span style="font-family: monospace; font-size: 11px;">${txnid}</span></div>` : ''}
+              ${mihpayid ? `<div class="row"><span>PayU ID:</span><span style="font-family: monospace; font-size: 11px;">${mihpayid}</span></div>` : ''}
+            </div>
+
+            <button class="btn" onclick="closeOrRedirect()">Return to App</button>
+          </div>
+
+          <script>
+            const payload = {
+              type: 'PAYU_PAYMENT_CALLBACK',
+              status: '${status}',
+              txnid: '${txnid}',
+              amount: '${amount}',
+              mihpayid: '${mihpayid}',
+              hash: '${hash}',
+              udf1: '${udf1}',
+              udf2: '${udf2}'
+            };
+
+            // Notify parent / opener window
+            try {
+              if (window.opener) {
+                window.opener.postMessage(payload, '*');
+              }
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage(payload, '*');
+              }
+            } catch (e) {
+              console.warn('PostMessage error:', e);
+            }
+
+            function closeOrRedirect() {
+              if (window.opener) {
+                try { window.close(); } catch(e) {}
+              } else {
+                window.location.href = '/';
+              }
+            }
+
+            // Auto return if in popup after 3 seconds
+            if (window.opener) {
+              setTimeout(() => {
+                try { window.close(); } catch(e) {}
+              }, 2500);
+            }
+          </script>
+        </body>
+        </html>
+      `;
+
+      res.setHeader('Content-Type', 'text/html');
+      return res.send(htmlResponse);
+    } catch (err) {
+      console.error('PayU callback error:', err);
+      res.redirect('/');
     }
   });
 

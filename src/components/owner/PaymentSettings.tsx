@@ -84,6 +84,44 @@ export const PaymentSettings: React.FC = () => {
   );
   const [copiedUpi, setCopiedUpi] = useState(false);
 
+  // Synchronize local states when currentOwner updates from server/database
+  React.useEffect(() => {
+    if (currentOwner) {
+      setMode(currentOwner.payment_mode || 'demo');
+      setLiveGateway(currentOwner.live_gateway || 'payu');
+      setEnableOnlinePayment(currentOwner.enable_online_payment ?? true);
+      setEnableUpiQr(currentOwner.enable_upi_qr ?? true);
+      setUpiId(currentOwner.upi_id || '');
+      setUpiName(currentOwner.upi_name || currentOwner.name || '');
+      setUpiQrImage(currentOwner.upi_qr_image || '');
+      setEnableGatewayPayment(currentOwner.enable_gateway_payment ?? true);
+      setRazorpayKey(currentOwner.razorpay_key || '');
+      setRazorpaySecret(currentOwner.razorpay_secret || '');
+      setPhonepeMerchantId(currentOwner.phonepe_merchant_id || '');
+      setPhonepeSaltKey(currentOwner.phonepe_salt_key || '');
+      setPhonepeSaltIndex(currentOwner.phonepe_salt_index || '1');
+      setPhonepeEnv(currentOwner.phonepe_env || 'SANDBOX');
+      setPayuMerchantKey(currentOwner.payu_merchant_key || '');
+      setPayuMerchantSalt(currentOwner.payu_merchant_salt || '');
+      setPayuEnv(currentOwner.payu_env || 'TEST');
+      setEnableCashPayment(currentOwner.enable_cash_payment ?? true);
+      setEnableSplitPayment(currentOwner.enable_split_payment ?? true);
+      setEnableGst(currentOwner.enable_gst ?? true);
+      setGstPercentage(String(currentOwner.gst_percentage ?? 5));
+      setEnablePackaging(currentOwner.enable_packaging_charge ?? false);
+      setPackagingAmount(String(currentOwner.packaging_charge_amount ?? 10));
+      setEnableServiceCharge(currentOwner.enable_service_charge ?? false);
+      setServiceChargePercentage(String(currentOwner.service_charge_percentage ?? 2.5));
+      setEnableOnlineDiscount(currentOwner.enable_online_discount ?? true);
+      setOnlineDiscountPercentage(String(currentOwner.online_discount_percentage ?? 5));
+      setVerified(currentOwner.gateway_verified || false);
+      setVerificationMessage(currentOwner.gateway_status_message || '');
+      if (currentOwner.coupons && currentOwner.coupons.length > 0) {
+        setCoupons(currentOwner.coupons);
+      }
+    }
+  }, [currentOwner]);
+
   if (!currentOwner) return null;
 
   // Auto-generated QR code preview URL

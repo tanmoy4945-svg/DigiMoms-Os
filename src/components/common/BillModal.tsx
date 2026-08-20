@@ -238,7 +238,7 @@ export const BillModal: React.FC<BillModalProps> = ({ order, restaurant, onClose
                 Payment Settlement Breakdown
               </div>
               <div className="flex justify-between text-slate-700">
-                <span>Online Paid (Razorpay Gateway)</span>
+                <span>Online Paid ({order.payment_method === 'payu' ? 'PayU Gateway' : order.payment_method === 'phonepe' ? 'PhonePe Gateway' : 'Online Gateway'})</span>
                 <strong className="font-mono text-blue-700">₹{onlineAmt.toFixed(2)}</strong>
               </div>
               <div className="flex justify-between text-slate-700">
@@ -249,6 +249,12 @@ export const BillModal: React.FC<BillModalProps> = ({ order, restaurant, onClose
                 <div className="flex justify-between text-amber-800 font-bold">
                   <span>Cash Pending / Due</span>
                   <strong className="font-mono">₹{cashDue.toFixed(2)}</strong>
+                </div>
+              )}
+
+              {(order.payu_txnid || order.payu_mihpayid) && (
+                <div className="text-[9.5px] font-mono text-slate-500 pt-1 border-t border-slate-200">
+                  PayU Txn ID: {order.payu_txnid || order.payu_mihpayid}
                 </div>
               )}
 
