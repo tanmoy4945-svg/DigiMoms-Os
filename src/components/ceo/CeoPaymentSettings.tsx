@@ -32,24 +32,32 @@ export const CeoPaymentSettings: React.FC = () => {
 
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState('');
+  const [isSavedSuccessfully, setIsSavedSuccessfully] = useState(false);
 
-  // Synchronize local input state when ceoPaymentConfig loads from server/database
+  // Track if user has modified local fields so background polls do not wipe inputs
+  const isDirtyRef = React.useRef(false);
+  const initializedRef = React.useRef(false);
+
+  // Synchronize local input state ONLY on initial load or if user has not made unsaved edits
   React.useEffect(() => {
     if (ceoPaymentConfig) {
-      setPrimaryGateway(ceoPaymentConfig.primary_gateway || 'payu');
-      setMode(ceoPaymentConfig.mode || 'demo');
-      setPhonepeMerchantId(ceoPaymentConfig.phonepe_merchant_id || '');
-      setPhonepeSaltKey(ceoPaymentConfig.phonepe_salt_key || '');
-      setPhonepeSaltIndex(ceoPaymentConfig.phonepe_salt_index || '1');
-      setPhonepeEnv(ceoPaymentConfig.phonepe_env || 'SANDBOX');
-      setPhonepeVerified(ceoPaymentConfig.phonepe_verified || false);
-      setRazorpayKeyId(ceoPaymentConfig.razorpay_key_id || '');
-      setRazorpayKeySecret(ceoPaymentConfig.razorpay_key_secret || '');
-      setRazorpayVerified(ceoPaymentConfig.razorpay_verified || false);
-      setPayuMerchantKey(ceoPaymentConfig.payu_merchant_key || '');
-      setPayuMerchantSalt(ceoPaymentConfig.payu_merchant_salt || '');
-      setPayuEnv(ceoPaymentConfig.payu_env || 'TEST');
-      setPayuVerified(ceoPaymentConfig.payu_verified || false);
+      if (!initializedRef.current || !isDirtyRef.current) {
+        initializedRef.current = true;
+        setPrimaryGateway(ceoPaymentConfig.primary_gateway || 'payu');
+        setMode(ceoPaymentConfig.mode || 'demo');
+        setPhonepeMerchantId(ceoPaymentConfig.phonepe_merchant_id || '');
+        setPhonepeSaltKey(ceoPaymentConfig.phonepe_salt_key || '');
+        setPhonepeSaltIndex(ceoPaymentConfig.phonepe_salt_index || '1');
+        setPhonepeEnv(ceoPaymentConfig.phonepe_env || 'SANDBOX');
+        setPhonepeVerified(ceoPaymentConfig.phonepe_verified || false);
+        setRazorpayKeyId(ceoPaymentConfig.razorpay_key_id || '');
+        setRazorpayKeySecret(ceoPaymentConfig.razorpay_key_secret || '');
+        setRazorpayVerified(ceoPaymentConfig.razorpay_verified || false);
+        setPayuMerchantKey(ceoPaymentConfig.payu_merchant_key || '');
+        setPayuMerchantSalt(ceoPaymentConfig.payu_merchant_salt || '');
+        setPayuEnv(ceoPaymentConfig.payu_env || 'TEST');
+        setPayuVerified(ceoPaymentConfig.payu_verified || false);
+      }
     }
   }, [ceoPaymentConfig]);
 
@@ -205,6 +213,9 @@ export const CeoPaymentSettings: React.FC = () => {
         payu_env: payuEnv,
         payu_verified: isPayuValid
       });
+      isDirtyRef.current = false;
+      setIsSavedSuccessfully(true);
+      setTimeout(() => setIsSavedSuccessfully(false), 4000);
       alert('✅ DigiMoms CEO Payment Configuration saved successfully!');
     } catch (err: any) {
       alert(`❌ Failed to save CEO payment configuration: ${err?.message || String(err)}`);
@@ -384,6 +395,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="DIGIMOMS_ONLINE"
                 value={phonepeMerchantId}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPhonepeMerchantId(e.target.value);
                   setPhonepeVerified(false);
                 }}
@@ -398,6 +410,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="••••••••••••••••••••••••"
                 value={phonepeSaltKey}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPhonepeSaltKey(e.target.value);
                   setPhonepeVerified(false);
                 }}
@@ -412,6 +425,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="1"
                 value={phonepeSaltIndex}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPhonepeSaltIndex(e.target.value);
                   setPhonepeVerified(false);
                 }}
@@ -424,6 +438,7 @@ export const CeoPaymentSettings: React.FC = () => {
               <select
                 value={phonepeEnv}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPhonepeEnv(e.target.value as any);
                   setPhonepeVerified(false);
                 }}
@@ -473,6 +488,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="rzp_live_xxxxxxxxxxxx"
                 value={razorpayKeyId}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setRazorpayKeyId(e.target.value);
                   setRazorpayVerified(false);
                 }}
@@ -487,6 +503,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="••••••••••••••••••••••••"
                 value={razorpayKeySecret}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setRazorpayKeySecret(e.target.value);
                   setRazorpayVerified(false);
                 }}
@@ -533,6 +550,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="Merchant Key"
                 value={payuMerchantKey}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPayuMerchantKey(e.target.value);
                   setPayuVerified(false);
                 }}
@@ -547,6 +565,7 @@ export const CeoPaymentSettings: React.FC = () => {
                 placeholder="Merchant Salt"
                 value={payuMerchantSalt}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPayuMerchantSalt(e.target.value);
                   setPayuVerified(false);
                 }}
@@ -559,6 +578,7 @@ export const CeoPaymentSettings: React.FC = () => {
               <select
                 value={payuEnv}
                 onChange={(e) => {
+                  isDirtyRef.current = true;
                   setPayuEnv(e.target.value as any);
                   setPayuVerified(false);
                 }}

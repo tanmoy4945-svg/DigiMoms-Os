@@ -83,41 +83,52 @@ export const PaymentSettings: React.FC = () => {
     currentOwner?.gateway_status_message || ''
   );
   const [copiedUpi, setCopiedUpi] = useState(false);
+  const [activeGatewayTab, setActiveGatewayTab] = useState<'payu' | 'razorpay' | 'phonepe'>(
+    (currentOwner?.live_gateway as any) || 'payu'
+  );
+
+  // Track if user has modified local fields so background polls do not wipe inputs
+  const isDirtyRef = React.useRef(false);
+  const lastOwnerIdRef = React.useRef<string | null>(null);
 
   // Synchronize local states when currentOwner updates from server/database
   React.useEffect(() => {
     if (currentOwner) {
-      setMode(currentOwner.payment_mode || 'demo');
-      setLiveGateway(currentOwner.live_gateway || 'payu');
-      setEnableOnlinePayment(currentOwner.enable_online_payment ?? true);
-      setEnableUpiQr(currentOwner.enable_upi_qr ?? true);
-      setUpiId(currentOwner.upi_id || '');
-      setUpiName(currentOwner.upi_name || currentOwner.name || '');
-      setUpiQrImage(currentOwner.upi_qr_image || '');
-      setEnableGatewayPayment(currentOwner.enable_gateway_payment ?? true);
-      setRazorpayKey(currentOwner.razorpay_key || '');
-      setRazorpaySecret(currentOwner.razorpay_secret || '');
-      setPhonepeMerchantId(currentOwner.phonepe_merchant_id || '');
-      setPhonepeSaltKey(currentOwner.phonepe_salt_key || '');
-      setPhonepeSaltIndex(currentOwner.phonepe_salt_index || '1');
-      setPhonepeEnv(currentOwner.phonepe_env || 'SANDBOX');
-      setPayuMerchantKey(currentOwner.payu_merchant_key || '');
-      setPayuMerchantSalt(currentOwner.payu_merchant_salt || '');
-      setPayuEnv(currentOwner.payu_env || 'TEST');
-      setEnableCashPayment(currentOwner.enable_cash_payment ?? true);
-      setEnableSplitPayment(currentOwner.enable_split_payment ?? true);
-      setEnableGst(currentOwner.enable_gst ?? true);
-      setGstPercentage(String(currentOwner.gst_percentage ?? 5));
-      setEnablePackaging(currentOwner.enable_packaging_charge ?? false);
-      setPackagingAmount(String(currentOwner.packaging_charge_amount ?? 10));
-      setEnableServiceCharge(currentOwner.enable_service_charge ?? false);
-      setServiceChargePercentage(String(currentOwner.service_charge_percentage ?? 2.5));
-      setEnableOnlineDiscount(currentOwner.enable_online_discount ?? true);
-      setOnlineDiscountPercentage(String(currentOwner.online_discount_percentage ?? 5));
-      setVerified(currentOwner.gateway_verified || false);
-      setVerificationMessage(currentOwner.gateway_status_message || '');
-      if (currentOwner.coupons && currentOwner.coupons.length > 0) {
-        setCoupons(currentOwner.coupons);
+      if (lastOwnerIdRef.current !== currentOwner.id || !isDirtyRef.current) {
+        lastOwnerIdRef.current = currentOwner.id;
+        setMode(currentOwner.payment_mode || 'demo');
+        setLiveGateway(currentOwner.live_gateway || 'payu');
+        setActiveGatewayTab((currentOwner.live_gateway as any) || 'payu');
+        setEnableOnlinePayment(currentOwner.enable_online_payment ?? true);
+        setEnableUpiQr(currentOwner.enable_upi_qr ?? true);
+        setUpiId(currentOwner.upi_id || '');
+        setUpiName(currentOwner.upi_name || currentOwner.name || '');
+        setUpiQrImage(currentOwner.upi_qr_image || '');
+        setEnableGatewayPayment(currentOwner.enable_gateway_payment ?? true);
+        setRazorpayKey(currentOwner.razorpay_key || '');
+        setRazorpaySecret(currentOwner.razorpay_secret || '');
+        setPhonepeMerchantId(currentOwner.phonepe_merchant_id || '');
+        setPhonepeSaltKey(currentOwner.phonepe_salt_key || '');
+        setPhonepeSaltIndex(currentOwner.phonepe_salt_index || '1');
+        setPhonepeEnv(currentOwner.phonepe_env || 'SANDBOX');
+        setPayuMerchantKey(currentOwner.payu_merchant_key || '');
+        setPayuMerchantSalt(currentOwner.payu_merchant_salt || '');
+        setPayuEnv(currentOwner.payu_env || 'TEST');
+        setEnableCashPayment(currentOwner.enable_cash_payment ?? true);
+        setEnableSplitPayment(currentOwner.enable_split_payment ?? true);
+        setEnableGst(currentOwner.enable_gst ?? true);
+        setGstPercentage(String(currentOwner.gst_percentage ?? 5));
+        setEnablePackaging(currentOwner.enable_packaging_charge ?? false);
+        setPackagingAmount(String(currentOwner.packaging_charge_amount ?? 10));
+        setEnableServiceCharge(currentOwner.enable_service_charge ?? false);
+        setServiceChargePercentage(String(currentOwner.service_charge_percentage ?? 2.5));
+        setEnableOnlineDiscount(currentOwner.enable_online_discount ?? true);
+        setOnlineDiscountPercentage(String(currentOwner.online_discount_percentage ?? 5));
+        setVerified(currentOwner.gateway_verified || false);
+        setVerificationMessage(currentOwner.gateway_status_message || '');
+        if (currentOwner.coupons && currentOwner.coupons.length > 0) {
+          setCoupons(currentOwner.coupons);
+        }
       }
     }
   }, [currentOwner]);
@@ -280,6 +291,7 @@ export const PaymentSettings: React.FC = () => {
         enable_coupons: enableCoupons,
         coupons: coupons
       });
+      isDirtyRef.current = false;
       alert('✅ Restaurant Payment & Tax settings saved successfully!');
     } catch (err: any) {
       console.error("Save payment settings error:", err);
@@ -572,65 +584,148 @@ export const PaymentSettings: React.FC = () => {
                 </div>
               </div>
 
-              {/* Gateway Provider Selection Tabs */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Select Gateway Provider
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLiveGateway('razorpay');
-                      setVerified(false);
-                    }}
-                    className={`p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${
-                      liveGateway === 'razorpay'
-                        ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <Key className="w-4 h-4" /> Razorpay
-                  </button>
+              {/* Gateway Provider Selection & Configuration Tabs */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                    Active Live Gateway for Customer Orders
+                  </label>
+                  <p className="text-[11px] text-slate-400">
+                    Choose which payment gateway will be presented to guests when scanning QR codes and checking out online.
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        isDirtyRef.current = true;
+                        setLiveGateway('payu');
+                        setActiveGatewayTab('payu');
+                        setVerified(false);
+                      }}
+                      className={`p-3.5 rounded-2xl border font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5 ${
+                        liveGateway === 'payu'
+                          ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Zap className="w-4 h-4 text-emerald-400" /> PayU India
+                      </div>
+                      {liveGateway === 'payu' && (
+                        <span className="text-[9px] uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black">
+                          Active For Guests
+                        </span>
+                      )}
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLiveGateway('phonepe');
-                      setVerified(false);
-                    }}
-                    className={`p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${
-                      liveGateway === 'phonepe'
-                        ? 'bg-purple-600 text-white border-purple-500 shadow-md'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <Smartphone className="w-4 h-4" /> PhonePe
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        isDirtyRef.current = true;
+                        setLiveGateway('phonepe');
+                        setActiveGatewayTab('phonepe');
+                        setVerified(false);
+                      }}
+                      className={`p-3.5 rounded-2xl border font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5 ${
+                        liveGateway === 'phonepe'
+                          ? 'bg-purple-600/20 text-purple-300 border-purple-500 shadow-lg shadow-purple-500/10 ring-1 ring-purple-500'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Smartphone className="w-4 h-4 text-purple-400" /> PhonePe
+                      </div>
+                      {liveGateway === 'phonepe' && (
+                        <span className="text-[9px] uppercase px-2 py-0.5 rounded-full bg-purple-500 text-white font-black">
+                          Active For Guests
+                        </span>
+                      )}
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLiveGateway('payu');
-                      setVerified(false);
-                    }}
-                    className={`p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${
-                      liveGateway === 'payu'
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <Zap className="w-4 h-4" /> PayU
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        isDirtyRef.current = true;
+                        setLiveGateway('razorpay');
+                        setActiveGatewayTab('razorpay');
+                        setVerified(false);
+                      }}
+                      className={`p-3.5 rounded-2xl border font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5 ${
+                        liveGateway === 'razorpay'
+                          ? 'bg-blue-600/20 text-blue-300 border-blue-500 shadow-lg shadow-blue-500/10 ring-1 ring-blue-500'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Key className="w-4 h-4 text-blue-400" /> Razorpay
+                      </div>
+                      {liveGateway === 'razorpay' && (
+                        <span className="text-[9px] uppercase px-2 py-0.5 rounded-full bg-blue-500 text-white font-black">
+                          Active For Guests
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Edit Credentials Tabs Navigation */}
+                <div className="pt-2 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold text-slate-300">
+                      Configure Merchant Credentials:
+                    </span>
+                    <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setActiveGatewayTab('payu')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          activeGatewayTab === 'payu'
+                            ? 'bg-emerald-600 text-white shadow'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        PayU Settings
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveGatewayTab('phonepe')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          activeGatewayTab === 'phonepe'
+                            ? 'bg-purple-600 text-white shadow'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        PhonePe Settings
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveGatewayTab('razorpay')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          activeGatewayTab === 'razorpay'
+                            ? 'bg-blue-600 text-white shadow'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Razorpay Settings
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* Gateway Credentials Inputs */}
-              {liveGateway === 'razorpay' ? (
+              {activeGatewayTab === 'razorpay' ? (
                 <div className="space-y-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <h4 className="text-xs font-bold uppercase text-blue-400 flex items-center gap-2">
-                    <Key className="w-4 h-4" /> Razorpay API Credentials
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase text-blue-400 flex items-center gap-2">
+                      <Key className="w-4 h-4" /> Razorpay API Credentials
+                    </h4>
+                    {liveGateway === 'razorpay' && (
+                      <span className="text-[10px] uppercase font-bold text-blue-300 bg-blue-950 border border-blue-500/40 px-2 py-0.5 rounded-full">
+                        Selected as Live Gateway
+                      </span>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1">Razorpay Key ID *</label>
@@ -639,6 +734,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="rzp_live_xxxxxxxxxxxxxx"
                         value={razorpayKey}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setRazorpayKey(e.target.value);
                           setVerified(false);
                         }}
@@ -652,6 +748,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="xxxxxxxxxxxxxxxxxxxxxxxx"
                         value={razorpaySecret}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setRazorpaySecret(e.target.value);
                           setVerified(false);
                         }}
@@ -660,11 +757,18 @@ export const PaymentSettings: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              ) : liveGateway === 'phonepe' ? (
+              ) : activeGatewayTab === 'phonepe' ? (
                 <div className="space-y-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <h4 className="text-xs font-bold uppercase text-purple-400 flex items-center gap-2">
-                    <Smartphone className="w-4 h-4" /> PhonePe API Credentials
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase text-purple-400 flex items-center gap-2">
+                      <Smartphone className="w-4 h-4" /> PhonePe API Credentials
+                    </h4>
+                    {liveGateway === 'phonepe' && (
+                      <span className="text-[10px] uppercase font-bold text-purple-300 bg-purple-950 border border-purple-500/40 px-2 py-0.5 rounded-full">
+                        Selected as Live Gateway
+                      </span>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1">Merchant ID (MID) *</label>
@@ -673,6 +777,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="PGMERCXXXXXXXX"
                         value={phonepeMerchantId}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPhonepeMerchantId(e.target.value);
                           setVerified(false);
                         }}
@@ -686,6 +791,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                         value={phonepeSaltKey}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPhonepeSaltKey(e.target.value);
                           setVerified(false);
                         }}
@@ -699,6 +805,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="1"
                         value={phonepeSaltIndex}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPhonepeSaltIndex(e.target.value);
                           setVerified(false);
                         }}
@@ -710,6 +817,7 @@ export const PaymentSettings: React.FC = () => {
                       <select
                         value={phonepeEnv}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPhonepeEnv(e.target.value as any);
                           setVerified(false);
                         }}
@@ -723,10 +831,17 @@ export const PaymentSettings: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <h4 className="text-xs font-bold uppercase text-emerald-400 flex items-center gap-2">
-                    <Zap className="w-4 h-4" /> PayU API Credentials
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase text-emerald-400 flex items-center gap-2">
+                      <Zap className="w-4 h-4" /> PayU India API Credentials
+                    </h4>
+                    {liveGateway === 'payu' && (
+                      <span className="text-[10px] uppercase font-bold text-emerald-300 bg-emerald-950 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                        Selected as Live Gateway
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1">PayU Merchant Key *</label>
                       <input
@@ -734,6 +849,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="Merchant Key provided by PayU"
                         value={payuMerchantKey}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPayuMerchantKey(e.target.value);
                           setVerified(false);
                         }}
@@ -747,6 +863,7 @@ export const PaymentSettings: React.FC = () => {
                         placeholder="Merchant Salt provided by PayU"
                         value={payuMerchantSalt}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPayuMerchantSalt(e.target.value);
                           setVerified(false);
                         }}
@@ -758,6 +875,7 @@ export const PaymentSettings: React.FC = () => {
                       <select
                         value={payuEnv}
                         onChange={(e) => {
+                          isDirtyRef.current = true;
                           setPayuEnv(e.target.value as any);
                           setVerified(false);
                         }}
