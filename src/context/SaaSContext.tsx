@@ -15,6 +15,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { normalizeImageUrl } from '../utils/imageUrl';
 import { registerServiceWorker, triggerSystemNotification } from '../utils/notificationService';
+import { safeFetchJson } from '../lib/safeFetch';
 
 export type ActiveView = 
   | 'public-home' 
@@ -433,11 +434,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let serverRestConfigs: Record<string, any> = {};
       try {
         const [ceoRes, restRes] = await Promise.all([
-          fetch('/api/ceo/payment-config').then(r => r.ok ? r.json() : null),
-          fetch('/api/restaurants-configs').then(r => r.ok ? r.json() : null)
+          safeFetchJson<any>('/api/ceo/payment-config'),
+          safeFetchJson<any>('/api/restaurants-configs')
         ]);
-        if (ceoRes && ceoRes.success && ceoRes.data) serverCeoCfg = ceoRes.data;
-        if (restRes && restRes.success && restRes.data) serverRestConfigs = restRes.data;
+        if (ceoRes.ok && ceoRes.data && (ceoRes.data as any).success && (ceoRes.data as any).data) {
+          serverCeoCfg = (ceoRes.data as any).data;
+        }
+        if (restRes.ok && restRes.data && (restRes.data as any).success && (restRes.data as any).data) {
+          serverRestConfigs = (restRes.data as any).data;
+        }
       } catch (err) {
         console.warn("Could not fetch server configs:", err);
       }
@@ -486,7 +491,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const mergedRestaurants = restData.map((r: any) => {
-          const ov = { ...(localOverrides[r.id] || {}), ...(serverRestConfigs[r.id] || {}) };
+          let dbExt: Record<string, any> = {};
+          if (r.razorpay_secret && typeof r.razorpay_secret === 'string' && r.razorpay_secret.startsWith('{"_ext":')) {
+            try {
+              const parsedSecret = JSON.parse(r.razorpay_secret);
+              if (parsedSecret?._ext) dbExt = parsedSecret._ext;
+            } catch (e) {}
+          }
+
+          const ov = { ...dbExt, ...(localOverrides[r.id] || {}), ...(serverRestConfigs[r.id] || {}) };
           return {
             ...r,
             monthly_subscription_fee: ov.monthly_subscription_fee ?? r.monthly_subscription_fee ?? 999,
@@ -517,7 +530,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             live_gateway: ov.live_gateway !== undefined ? ov.live_gateway : (r.live_gateway || 'payu'),
             payment_mode: ov.payment_mode !== undefined ? ov.payment_mode : (r.payment_mode || 'demo'),
             razorpay_key: ov.razorpay_key !== undefined ? ov.razorpay_key : (r.razorpay_key || ''),
-            razorpay_secret: ov.razorpay_secret !== undefined ? ov.razorpay_secret : (r.razorpay_secret || ''),
+            razorpay_secret: ov.razorpay_secret !== undefined ? ov.razorpay_secret : (r.razorpay_secret && !r.razorpay_secret.startsWith('{"_ext":') ? r.razorpay_secret : ''),
             phonepe_merchant_id: ov.phonepe_merchant_id !== undefined ? ov.phonepe_merchant_id : (r.phonepe_merchant_id || ''),
             phonepe_salt_key: ov.phonepe_salt_key !== undefined ? ov.phonepe_salt_key : (r.phonepe_salt_key || ''),
             phonepe_salt_index: ov.phonepe_salt_index !== undefined ? ov.phonepe_salt_index : (r.phonepe_salt_index || '1'),
@@ -649,25 +662,31 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuditLogs(mergedAudits);
       }
       if (subHistData) setSubscriptionHistory(subHistData as SubscriptionHistory[]);
-      if (serverCeoCfg || ceoSettingsData) {
+      let localCeo: any = null;
+      try {
+        const rawCeo = localStorage.getItem('digimoms_ceo_payment_config');
+        if (rawCeo) localCeo = JSON.parse(rawCeo);
+      } catch (e) {}
+
+      if (serverCeoCfg || ceoSettingsData || localCeo) {
         const fullCeoCfg: CeoPaymentConfig = {
-          primary_gateway: serverCeoCfg?.primary_gateway || ceoSettingsData?.primary_gateway || 'payu',
-          mode: serverCeoCfg?.mode || ceoSettingsData?.mode || 'demo',
-          phonepe_merchant_id: serverCeoCfg?.phonepe_merchant_id || ceoSettingsData?.phonepe_merchant_id || '',
-          phonepe_salt_key: serverCeoCfg?.phonepe_salt_key || ceoSettingsData?.phonepe_salt_key || '',
-          phonepe_salt_index: serverCeoCfg?.phonepe_salt_index || ceoSettingsData?.phonepe_salt_index || '1',
-          phonepe_env: serverCeoCfg?.phonepe_env || ceoSettingsData?.phonepe_env || 'SANDBOX',
-          phonepe_verified: serverCeoCfg?.phonepe_verified ?? ceoSettingsData?.phonepe_verified ?? false,
-          phonepe_verified_at: serverCeoCfg?.phonepe_verified_at || ceoSettingsData?.phonepe_verified_at,
-          razorpay_key_id: serverCeoCfg?.razorpay_key_id || ceoSettingsData?.razorpay_key_id || '',
-          razorpay_key_secret: serverCeoCfg?.razorpay_key_secret || ceoSettingsData?.razorpay_key_secret || '',
-          razorpay_verified: serverCeoCfg?.razorpay_verified ?? ceoSettingsData?.razorpay_verified ?? false,
-          razorpay_verified_at: serverCeoCfg?.razorpay_verified_at || ceoSettingsData?.razorpay_verified_at,
-          payu_merchant_key: serverCeoCfg?.payu_merchant_key || ceoSettingsData?.payu_merchant_key || '',
-          payu_merchant_salt: serverCeoCfg?.payu_merchant_salt || ceoSettingsData?.payu_merchant_salt || '',
-          payu_env: serverCeoCfg?.payu_env || ceoSettingsData?.payu_env || 'TEST',
-          payu_verified: serverCeoCfg?.payu_verified ?? ceoSettingsData?.payu_verified ?? false,
-          payu_verified_at: serverCeoCfg?.payu_verified_at || ceoSettingsData?.payu_verified_at
+          primary_gateway: serverCeoCfg?.primary_gateway || localCeo?.primary_gateway || ceoSettingsData?.primary_gateway || 'payu',
+          mode: serverCeoCfg?.mode || localCeo?.mode || ceoSettingsData?.mode || 'demo',
+          phonepe_merchant_id: serverCeoCfg?.phonepe_merchant_id || localCeo?.phonepe_merchant_id || ceoSettingsData?.phonepe_merchant_id || '',
+          phonepe_salt_key: serverCeoCfg?.phonepe_salt_key || localCeo?.phonepe_salt_key || ceoSettingsData?.phonepe_salt_key || '',
+          phonepe_salt_index: serverCeoCfg?.phonepe_salt_index || localCeo?.phonepe_salt_index || ceoSettingsData?.phonepe_salt_index || '1',
+          phonepe_env: serverCeoCfg?.phonepe_env || localCeo?.phonepe_env || ceoSettingsData?.phonepe_env || 'SANDBOX',
+          phonepe_verified: serverCeoCfg?.phonepe_verified ?? localCeo?.phonepe_verified ?? ceoSettingsData?.phonepe_verified ?? false,
+          phonepe_verified_at: serverCeoCfg?.phonepe_verified_at || localCeo?.phonepe_verified_at || ceoSettingsData?.phonepe_verified_at,
+          razorpay_key_id: serverCeoCfg?.razorpay_key_id || localCeo?.razorpay_key_id || ceoSettingsData?.razorpay_key_id || '',
+          razorpay_key_secret: serverCeoCfg?.razorpay_key_secret || localCeo?.razorpay_key_secret || ceoSettingsData?.razorpay_key_secret || '',
+          razorpay_verified: serverCeoCfg?.razorpay_verified ?? localCeo?.razorpay_verified ?? ceoSettingsData?.razorpay_verified ?? false,
+          razorpay_verified_at: serverCeoCfg?.razorpay_verified_at || localCeo?.razorpay_verified_at || ceoSettingsData?.razorpay_verified_at,
+          payu_merchant_key: serverCeoCfg?.payu_merchant_key || localCeo?.payu_merchant_key || ceoSettingsData?.payu_merchant_key || '',
+          payu_merchant_salt: serverCeoCfg?.payu_merchant_salt || localCeo?.payu_merchant_salt || ceoSettingsData?.payu_merchant_salt || '',
+          payu_env: serverCeoCfg?.payu_env || localCeo?.payu_env || ceoSettingsData?.payu_env || 'TEST',
+          payu_verified: serverCeoCfg?.payu_verified ?? localCeo?.payu_verified ?? ceoSettingsData?.payu_verified ?? false,
+          payu_verified_at: serverCeoCfg?.payu_verified_at || localCeo?.payu_verified_at || ceoSettingsData?.payu_verified_at
         };
         setCeoPaymentConfigState(fullCeoCfg);
         setCeoRazorpayConfigState({
@@ -1378,15 +1397,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Persist to server disk storage (across accounts, devices, and sessions)
     try {
-      const resp = await fetch('/api/ceo/payment-config', {
+      const res = await safeFetchJson<any>('/api/ceo/payment-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated)
       });
-      const data = await resp.json();
-      if (data && data.success && data.data) {
-        setCeoPaymentConfigState(data.data);
-        localStorage.setItem('digimoms_ceo_payment_config', JSON.stringify(data.data));
+      if (res.ok && res.data && (res.data as any).success && (res.data as any).data) {
+        setCeoPaymentConfigState((res.data as any).data);
+        localStorage.setItem('digimoms_ceo_payment_config', JSON.stringify((res.data as any).data));
       }
     } catch (err) {
       console.warn("Could not persist ceo_payment_config to server API:", err);
@@ -1735,8 +1753,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }).eq('id', id);
 
     // If PGRST204 (missing column in DB table schema), fallback to core DB columns only
-    if (error && (error.code === 'PGRST204' || error.message?.includes('schema cache'))) {
-      console.warn("Extended columns missing in public.restaurants schema cache. Falling back to core columns...", error);
+    if (error && (error.code === 'PGRST204' || error.message?.includes('schema cache') || error.message?.includes('column'))) {
+      console.warn("Extended columns missing in public.restaurants schema cache. Falling back to core columns + JSON bundle...", error);
       const CORE_COLUMNS = new Set([
         'id', 'name', 'slug', 'owner_name', 'owner_mobile', 'password_hash',
         'logo', 'banner', 'address', 'gst', 'fssai', 'business_hours',
@@ -1749,6 +1767,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (CORE_COLUMNS.has(k)) coreUpdates[k] = v;
       }
       coreUpdates.updated_at = nowIso;
+      // Pack all extended fields into razorpay_secret as JSON bundle for permanent Supabase persistence
+      try {
+        coreUpdates.razorpay_secret = JSON.stringify({
+          secret: updates.razorpay_secret || '',
+          _ext: updates
+        });
+      } catch (e) {}
 
       const fallbackRes = await supabase.from('restaurants').update(coreUpdates).eq('id', id);
       error = fallbackRes.error;
@@ -1785,7 +1810,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Persist to server disk storage (retained across all browsers, new tabs, and accounts)
     try {
-      await fetch(`/api/restaurants/${id}/config`, {
+      await safeFetchJson(`/api/restaurants/${id}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)

@@ -14,6 +14,7 @@ import {
   Loader2,
   Clock
 } from 'lucide-react';
+import { safeFetchJson } from '../../lib/safeFetch';
 
 export interface PayUCheckoutModalProps {
   isOpen: boolean;
@@ -104,10 +105,9 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
         ...(payuSalt ? { payu_salt: payuSalt } : {})
       });
 
-      const res = await fetch(`/api/payu/check-status?${queryParams.toString()}`);
-      const data = await res.json();
+      const { ok, data } = await safeFetchJson<any>(`/api/payu/check-status?${queryParams.toString()}`);
 
-      if (data && data.verified && data.status === 'success') {
+      if (ok && data && data.verified && data.status === 'success') {
         setVerifiedRecord(data);
         completePayment({
           txnid: data.txnid || txnid,
@@ -154,7 +154,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
       isCompletedRef.current = false;
 
       try {
-        const res = await fetch('/api/payu/create-payment', {
+        const { ok, data, error } = await safeFetchJson<any>('/api/payu/create-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -178,9 +178,8 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
           })
         });
 
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Failed to initialize PayU payment gateway.');
+        if (!ok || !data || !data.success) {
+          throw new Error(data?.error || error || 'Failed to initialize PayU payment gateway.');
         }
 
         if (isMounted) {

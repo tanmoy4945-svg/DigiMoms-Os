@@ -17,6 +17,7 @@ import { MenuItem, MenuCategory, TableSession, Table, Language, Restaurant, Orde
 import { FileText, Printer } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { SmartImage } from '../common/SmartImage';
+import { safeFetchJson } from '../../lib/safeFetch';
 
 interface CartItem {
   menuItem: MenuItem;
@@ -254,7 +255,7 @@ export const CustomerQrApp: React.FC = () => {
     onSuccess: () => void,
     onCancel: () => void
   ) => {
-    const gateway = restaurant?.live_gateway || 'razorpay';
+    const gateway = restaurant?.live_gateway || 'payu';
 
     if (gateway === 'payu') {
       setPayuModalData({
@@ -264,9 +265,20 @@ export const CustomerQrApp: React.FC = () => {
       return;
     }
 
+    if (gateway === 'phonepe') {
+      setPendingOnlineModal({
+        gateway: 'phonepe',
+        order,
+        amountToPay,
+        orderOrTxnId: `T${Date.now()}`,
+        keyId: restaurant?.phonepe_merchant_id || 'M22PHONEPE'
+      });
+      return;
+    }
+
     // Default to Razorpay
     try {
-      const createRes = await fetch('/api/razorpay/create-order', {
+      const { ok, data: rzpOrderData } = await safeFetchJson<any>('/api/razorpay/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -279,9 +291,8 @@ export const CustomerQrApp: React.FC = () => {
         })
       });
 
-      const rzpOrderData = await createRes.json();
-      const rzpOrderId = rzpOrderData.id || `order_${Math.random().toString(36).substring(2, 10)}`;
-      const keyId = rzpOrderData.key_id || restaurant?.razorpay_key || 'rzp_test_key';
+      const rzpOrderId = rzpOrderData?.id || `order_${Math.random().toString(36).substring(2, 10)}`;
+      const keyId = rzpOrderData?.key_id || restaurant?.razorpay_key || 'rzp_test_key';
 
       const loadScript = () => {
         return new Promise<boolean>((resolve) => {
