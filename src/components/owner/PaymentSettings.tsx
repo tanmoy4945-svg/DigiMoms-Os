@@ -12,7 +12,7 @@ export const PaymentSettings: React.FC = () => {
   const { currentOwner, updateOwnerProfile } = useSaaS();
 
   const [mode, setMode] = useState<'demo' | 'live'>(currentOwner?.payment_mode || 'demo');
-  const [liveGateway, setLiveGateway] = useState<'razorpay' | 'phonepe' | 'payu'>(currentOwner?.live_gateway || 'razorpay');
+  const [liveGateway, setLiveGateway] = useState<'razorpay' | 'phonepe' | 'payu'>(currentOwner?.live_gateway || 'payu');
 
   // Master Online Payment Toggle
   const [enableOnlinePayment, setEnableOnlinePayment] = useState<boolean>(currentOwner?.enable_online_payment ?? true);
@@ -215,11 +215,35 @@ export const PaymentSettings: React.FC = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Prevent turning on 'live' mode if gateway isn't verified and gateway payments are enabled
-    if (mode === 'live' && enableGatewayPayment && !verified) {
-      alert('⚠️ Verification Required: You must verify your Live Gateway credentials before activating Live gateway mode. Falling back to Demo mode until verified.');
-      setMode('demo');
-      return;
+    let isGatewayVerified = verified;
+    if (mode === 'live' && enableGatewayPayment) {
+      // If not marked verified yet, auto-verify with current credentials
+      if (!isGatewayVerified) {
+        setIsVerifying(true);
+        const res = await verifyRestaurantGateway(
+          {
+            razorpay_key: razorpayKey,
+            razorpay_secret: razorpaySecret,
+            phonepe_merchant_id: phonepeMerchantId,
+            phonepe_salt_key: phonepeSaltKey,
+            phonepe_salt_index: phonepeSaltIndex,
+            phonepe_env: phonepeEnv,
+            payu_merchant_key: payuMerchantKey,
+            payu_merchant_salt: payuMerchantSalt,
+            payu_env: payuEnv
+          },
+          liveGateway
+        );
+        setIsVerifying(false);
+        if (res.success) {
+          isGatewayVerified = true;
+          setVerified(true);
+          setVerificationMessage(res.message);
+        } else {
+          alert(`⚠️ Verification Failed for ${liveGateway.toUpperCase()}:\n${res.message}\n\nPlease check your credentials.`);
+          return;
+        }
+      }
     }
 
     try {
@@ -241,7 +265,7 @@ export const PaymentSettings: React.FC = () => {
         payu_merchant_key: payuMerchantKey,
         payu_merchant_salt: payuMerchantSalt,
         payu_env: payuEnv,
-        gateway_verified: verified,
+        gateway_verified: isGatewayVerified,
         gateway_status_message: verificationMessage,
         enable_cash_payment: enableCashPayment,
         enable_split_payment: enableSplitPayment,
@@ -527,10 +551,6 @@ export const PaymentSettings: React.FC = () => {
 
                   <div
                     onClick={() => {
-                      if (!verified) {
-                        alert('⚠️ Verification Required: You must verify your credentials before switching to Live mode.');
-                        return;
-                      }
                       setMode('live');
                     }}
                     className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-1.5 ${

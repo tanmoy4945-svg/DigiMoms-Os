@@ -489,39 +489,44 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const ov = { ...(localOverrides[r.id] || {}), ...(serverRestConfigs[r.id] || {}) };
           return {
             ...r,
-            monthly_subscription_fee: r.monthly_subscription_fee ?? ov.monthly_subscription_fee ?? 999,
-            trial_days: r.trial_days ?? ov.trial_days ?? 0,
-            trial_status: r.trial_status ?? ov.trial_status ?? 'off',
-            contact_mobile: r.contact_mobile ?? ov.contact_mobile ?? r.owner_mobile ?? '',
-            enable_gst: r.enable_gst ?? ov.enable_gst ?? true,
-            gst_percentage: r.gst_percentage ?? ov.gst_percentage ?? 5,
-            enable_packaging_charge: r.enable_packaging_charge ?? ov.enable_packaging_charge ?? false,
-            packaging_charge_amount: r.packaging_charge_amount ?? ov.packaging_charge_amount ?? 10,
-            enable_service_charge: r.enable_service_charge ?? ov.enable_service_charge ?? false,
-            service_charge_percentage: r.service_charge_percentage ?? ov.service_charge_percentage ?? 2.5,
-            enable_online_discount: r.enable_online_discount ?? ov.enable_online_discount ?? true,
-            online_discount_percentage: r.online_discount_percentage ?? ov.online_discount_percentage ?? 5,
-            enable_coupons: r.enable_coupons ?? ov.enable_coupons ?? true,
-            coupons: r.coupons ?? ov.coupons ?? [
+            monthly_subscription_fee: ov.monthly_subscription_fee ?? r.monthly_subscription_fee ?? 999,
+            trial_days: ov.trial_days ?? r.trial_days ?? 0,
+            trial_status: ov.trial_status ?? r.trial_status ?? 'off',
+            contact_mobile: ov.contact_mobile ?? r.contact_mobile ?? r.owner_mobile ?? '',
+            enable_gst: ov.enable_gst !== undefined ? ov.enable_gst : (r.enable_gst ?? true),
+            gst_percentage: ov.gst_percentage !== undefined ? ov.gst_percentage : (r.gst_percentage ?? 5),
+            enable_packaging_charge: ov.enable_packaging_charge !== undefined ? ov.enable_packaging_charge : (r.enable_packaging_charge ?? false),
+            packaging_charge_amount: ov.packaging_charge_amount !== undefined ? ov.packaging_charge_amount : (r.packaging_charge_amount ?? 10),
+            enable_service_charge: ov.enable_service_charge !== undefined ? ov.enable_service_charge : (r.enable_service_charge ?? false),
+            service_charge_percentage: ov.service_charge_percentage !== undefined ? ov.service_charge_percentage : (r.service_charge_percentage ?? 2.5),
+            enable_online_discount: ov.enable_online_discount !== undefined ? ov.enable_online_discount : (r.enable_online_discount ?? true),
+            online_discount_percentage: ov.online_discount_percentage !== undefined ? ov.online_discount_percentage : (r.online_discount_percentage ?? 5),
+            enable_coupons: ov.enable_coupons !== undefined ? ov.enable_coupons : (r.enable_coupons ?? true),
+            coupons: ov.coupons ?? r.coupons ?? [
               { id: '1', code: 'DIGI10', discount_type: 'percent', discount_value: 10, min_order_amount: 100, is_active: true },
               { id: '2', code: 'WELCOME50', discount_type: 'flat', discount_value: 50, min_order_amount: 300, is_active: true }
             ],
-            enable_cash_payment: r.enable_cash_payment ?? ov.enable_cash_payment ?? true,
-            enable_online_payment: r.enable_online_payment ?? ov.enable_online_payment ?? true,
-            enable_split_payment: r.enable_split_payment ?? ov.enable_split_payment ?? true,
-            live_gateway: r.live_gateway ?? ov.live_gateway ?? 'payu',
-            payment_mode: r.payment_mode ?? ov.payment_mode ?? 'demo',
-            razorpay_key: r.razorpay_key ?? ov.razorpay_key ?? '',
-            razorpay_secret: r.razorpay_secret ?? ov.razorpay_secret ?? '',
-            phonepe_merchant_id: r.phonepe_merchant_id ?? ov.phonepe_merchant_id ?? '',
-            phonepe_salt_key: r.phonepe_salt_key ?? ov.phonepe_salt_key ?? '',
-            phonepe_salt_index: r.phonepe_salt_index ?? ov.phonepe_salt_index ?? '1',
-            phonepe_env: r.phonepe_env ?? ov.phonepe_env ?? 'SANDBOX',
-            payu_merchant_key: r.payu_merchant_key ?? ov.payu_merchant_key ?? '',
-            payu_merchant_salt: r.payu_merchant_salt ?? ov.payu_merchant_salt ?? '',
-            payu_env: r.payu_env ?? ov.payu_env ?? 'TEST',
-            gateway_verified: r.gateway_verified ?? ov.gateway_verified ?? false,
-            gateway_status_message: r.gateway_status_message ?? ov.gateway_status_message ?? ''
+            enable_cash_payment: ov.enable_cash_payment !== undefined ? ov.enable_cash_payment : (r.enable_cash_payment ?? true),
+            enable_online_payment: ov.enable_online_payment !== undefined ? ov.enable_online_payment : (r.enable_online_payment ?? true),
+            enable_split_payment: ov.enable_split_payment !== undefined ? ov.enable_split_payment : (r.enable_split_payment ?? true),
+            enable_gateway_payment: ov.enable_gateway_payment !== undefined ? ov.enable_gateway_payment : (r.enable_gateway_payment ?? true),
+            enable_upi_qr: ov.enable_upi_qr !== undefined ? ov.enable_upi_qr : (r.enable_upi_qr ?? true),
+            upi_id: ov.upi_id !== undefined ? ov.upi_id : (r.upi_id || ''),
+            upi_name: ov.upi_name !== undefined ? ov.upi_name : (r.upi_name || ''),
+            upi_qr_image: ov.upi_qr_image !== undefined ? ov.upi_qr_image : (r.upi_qr_image || ''),
+            live_gateway: ov.live_gateway !== undefined ? ov.live_gateway : (r.live_gateway || 'payu'),
+            payment_mode: ov.payment_mode !== undefined ? ov.payment_mode : (r.payment_mode || 'demo'),
+            razorpay_key: ov.razorpay_key !== undefined ? ov.razorpay_key : (r.razorpay_key || ''),
+            razorpay_secret: ov.razorpay_secret !== undefined ? ov.razorpay_secret : (r.razorpay_secret || ''),
+            phonepe_merchant_id: ov.phonepe_merchant_id !== undefined ? ov.phonepe_merchant_id : (r.phonepe_merchant_id || ''),
+            phonepe_salt_key: ov.phonepe_salt_key !== undefined ? ov.phonepe_salt_key : (r.phonepe_salt_key || ''),
+            phonepe_salt_index: ov.phonepe_salt_index !== undefined ? ov.phonepe_salt_index : (r.phonepe_salt_index || '1'),
+            phonepe_env: ov.phonepe_env !== undefined ? ov.phonepe_env : (r.phonepe_env || 'SANDBOX'),
+            payu_merchant_key: ov.payu_merchant_key !== undefined ? ov.payu_merchant_key : (r.payu_merchant_key || ''),
+            payu_merchant_salt: ov.payu_merchant_salt !== undefined ? ov.payu_merchant_salt : (r.payu_merchant_salt || ''),
+            payu_env: ov.payu_env !== undefined ? ov.payu_env : (r.payu_env || 'TEST'),
+            gateway_verified: ov.gateway_verified !== undefined ? ov.gateway_verified : (r.gateway_verified ?? false),
+            gateway_status_message: ov.gateway_status_message !== undefined ? ov.gateway_status_message : (r.gateway_status_message || '')
           };
         });
 
@@ -533,6 +538,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             sessionStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
             localStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
           }
+        } else {
+          try {
+            const savedLocal = localStorage.getItem('digimoms_current_owner');
+            if (savedLocal) {
+              const parsed = JSON.parse(savedLocal);
+              if (parsed?.id) {
+                const freshOwner = mergedRestaurants.find((r: any) => r.id === parsed.id);
+                if (freshOwner) {
+                  setCurrentOwner(freshOwner as Restaurant);
+                  sessionStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
+                }
+              }
+            }
+          } catch (e) {}
         }
       }
       if (staffData) setStaffList(staffData as Staff[]);
@@ -1314,7 +1333,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     return {
-      primary_gateway: 'phonepe',
+      primary_gateway: 'payu',
       mode: 'demo',
       phonepe_merchant_id: '',
       phonepe_salt_key: '',
@@ -1333,7 +1352,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateCeoPaymentConfig = async (cfg: Partial<CeoPaymentConfig>) => {
     const updated: CeoPaymentConfig = {
-      primary_gateway: cfg.primary_gateway ?? ceoPaymentConfig.primary_gateway ?? 'phonepe',
+      primary_gateway: cfg.primary_gateway ?? ceoPaymentConfig.primary_gateway ?? 'payu',
       mode: cfg.mode ?? ceoPaymentConfig.mode ?? 'demo',
       phonepe_merchant_id: cfg.phonepe_merchant_id ?? ceoPaymentConfig.phonepe_merchant_id ?? '',
       phonepe_salt_key: cfg.phonepe_salt_key ?? ceoPaymentConfig.phonepe_salt_key ?? '',
@@ -1353,15 +1372,22 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setCeoPaymentConfigState(updated);
-    localStorage.setItem('digimoms_ceo_payment_config', JSON.stringify(updated));
+    try {
+      localStorage.setItem('digimoms_ceo_payment_config', JSON.stringify(updated));
+    } catch (e) {}
 
     // Persist to server disk storage (across accounts, devices, and sessions)
     try {
-      await fetch('/api/ceo/payment-config', {
+      const resp = await fetch('/api/ceo/payment-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated)
       });
+      const data = await resp.json();
+      if (data && data.success && data.data) {
+        setCeoPaymentConfigState(data.data);
+        localStorage.setItem('digimoms_ceo_payment_config', JSON.stringify(data.data));
+      }
     } catch (err) {
       console.warn("Could not persist ceo_payment_config to server API:", err);
     }

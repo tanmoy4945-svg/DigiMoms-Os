@@ -8,7 +8,7 @@ export const CeoPaymentSettings: React.FC = () => {
   const { ceoPaymentConfig, updateCeoPaymentConfig, subscriptionHistory } = useSaaS();
 
   const [primaryGateway, setPrimaryGateway] = useState<'phonepe' | 'razorpay' | 'payu' | 'demo'>(
-    ceoPaymentConfig?.primary_gateway || 'phonepe'
+    ceoPaymentConfig?.primary_gateway || 'payu'
   );
   const [mode, setMode] = useState<'demo' | 'live'>(ceoPaymentConfig?.mode || 'demo');
 
@@ -36,7 +36,7 @@ export const CeoPaymentSettings: React.FC = () => {
   // Synchronize local input state when ceoPaymentConfig loads from server/database
   React.useEffect(() => {
     if (ceoPaymentConfig) {
-      setPrimaryGateway(ceoPaymentConfig.primary_gateway || 'phonepe');
+      setPrimaryGateway(ceoPaymentConfig.primary_gateway || 'payu');
       setMode(ceoPaymentConfig.mode || 'demo');
       setPhonepeMerchantId(ceoPaymentConfig.phonepe_merchant_id || '');
       setPhonepeSaltKey(ceoPaymentConfig.phonepe_salt_key || '');
@@ -134,38 +134,81 @@ export const CeoPaymentSettings: React.FC = () => {
   const handleSaveAll = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (mode === 'live' && primaryGateway === 'phonepe' && !phonepeVerified) {
-      alert('⚠️ Verification Required: PhonePe credentials must be verified before enabling Live Mode for DigiMoms Subscriptions.');
-      return;
+    let isPhonepeValid = phonepeVerified;
+    let isRazorpayValid = razorpayVerified;
+    let isPayuValid = payuVerified;
+
+    if (mode === 'live') {
+      if (primaryGateway === 'phonepe' && !isPhonepeValid) {
+        setIsVerifying(true);
+        const res = await verifyCeoGatewayConfig(
+          { phonepe_merchant_id: phonepeMerchantId, phonepe_salt_key: phonepeSaltKey, phonepe_salt_index: phonepeSaltIndex, phonepe_env: phonepeEnv },
+          'phonepe'
+        );
+        setIsVerifying(false);
+        if (res.success) {
+          isPhonepeValid = true;
+          setPhonepeVerified(true);
+        } else {
+          alert(`⚠️ PhonePe Verification Failed:\n${res.message}\n\nPlease check your credentials before enabling Live Mode.`);
+          return;
+        }
+      }
+
+      if (primaryGateway === 'razorpay' && !isRazorpayValid) {
+        setIsVerifying(true);
+        const res = await verifyCeoGatewayConfig(
+          { razorpay_key_id: razorpayKeyId, razorpay_key_secret: razorpayKeySecret },
+          'razorpay'
+        );
+        setIsVerifying(false);
+        if (res.success) {
+          isRazorpayValid = true;
+          setRazorpayVerified(true);
+        } else {
+          alert(`⚠️ Razorpay Verification Failed:\n${res.message}\n\nPlease check your credentials before enabling Live Mode.`);
+          return;
+        }
+      }
+
+      if (primaryGateway === 'payu' && !isPayuValid) {
+        setIsVerifying(true);
+        const res = await verifyCeoGatewayConfig(
+          { payu_merchant_key: payuMerchantKey, payu_merchant_salt: payuMerchantSalt, payu_env: payuEnv },
+          'payu'
+        );
+        setIsVerifying(false);
+        if (res.success) {
+          isPayuValid = true;
+          setPayuVerified(true);
+        } else {
+          alert(`⚠️ PayU Verification Failed:\n${res.message}\n\nPlease check your credentials before enabling Live Mode.`);
+          return;
+        }
+      }
     }
 
-    if (mode === 'live' && primaryGateway === 'razorpay' && !razorpayVerified) {
-      alert('⚠️ Verification Required: Razorpay credentials must be verified before enabling Live Mode for DigiMoms Subscriptions.');
-      return;
+    try {
+      await updateCeoPaymentConfig({
+        primary_gateway: primaryGateway,
+        mode: mode,
+        phonepe_merchant_id: phonepeMerchantId,
+        phonepe_salt_key: phonepeSaltKey,
+        phonepe_salt_index: phonepeSaltIndex,
+        phonepe_env: phonepeEnv,
+        phonepe_verified: isPhonepeValid,
+        razorpay_key_id: razorpayKeyId,
+        razorpay_key_secret: razorpayKeySecret,
+        razorpay_verified: isRazorpayValid,
+        payu_merchant_key: payuMerchantKey,
+        payu_merchant_salt: payuMerchantSalt,
+        payu_env: payuEnv,
+        payu_verified: isPayuValid
+      });
+      alert('✅ DigiMoms CEO Payment Configuration saved successfully!');
+    } catch (err: any) {
+      alert(`❌ Failed to save CEO payment configuration: ${err?.message || String(err)}`);
     }
-
-    if (mode === 'live' && primaryGateway === 'payu' && !payuVerified) {
-      alert('⚠️ Verification Required: PayU credentials must be verified before enabling Live Mode for DigiMoms Subscriptions.');
-      return;
-    }
-
-    await updateCeoPaymentConfig({
-      primary_gateway: primaryGateway,
-      mode: mode,
-      phonepe_merchant_id: phonepeMerchantId,
-      phonepe_salt_key: phonepeSaltKey,
-      phonepe_salt_index: phonepeSaltIndex,
-      phonepe_env: phonepeEnv,
-      phonepe_verified: phonepeVerified,
-      razorpay_key_id: razorpayKeyId,
-      razorpay_key_secret: razorpayKeySecret,
-      razorpay_verified: razorpayVerified,
-      payu_merchant_key: payuMerchantKey,
-      payu_merchant_salt: payuMerchantSalt,
-      payu_env: payuEnv,
-      payu_verified: payuVerified
-    });
-    alert('✅ DigiMoms CEO Payment Configuration saved successfully!');
   };
 
   return (

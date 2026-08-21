@@ -85,7 +85,30 @@ async function startServer() {
       payu_verified: false
     };
     const current = readJsonFile('ceo_payment_config.json', defaultCfg);
-    const updated = { ...current, ...req.body, updated_at: new Date().toISOString() };
+    const body = req.body || {};
+    
+    // Preserve existing saved secret salts if client sends masked placeholder
+    const resolvedPayuSalt = (typeof body.payu_merchant_salt === 'string' && !body.payu_merchant_salt.startsWith('•••'))
+      ? body.payu_merchant_salt
+      : (current.payu_merchant_salt || '');
+
+    const resolvedPhonepeSalt = (typeof body.phonepe_salt_key === 'string' && !body.phonepe_salt_key.startsWith('•••'))
+      ? body.phonepe_salt_key
+      : (current.phonepe_salt_key || '');
+
+    const resolvedRazorpaySecret = (typeof body.razorpay_key_secret === 'string' && !body.razorpay_key_secret.startsWith('•••'))
+      ? body.razorpay_key_secret
+      : (current.razorpay_key_secret || '');
+
+    const updated = {
+      ...current,
+      ...body,
+      payu_merchant_salt: resolvedPayuSalt,
+      phonepe_salt_key: resolvedPhonepeSalt,
+      razorpay_key_secret: resolvedRazorpaySecret,
+      updated_at: new Date().toISOString()
+    };
+    
     writeJsonFile('ceo_payment_config.json', updated);
     res.json({ success: true, data: updated });
   });
@@ -105,7 +128,30 @@ async function startServer() {
   app.post('/api/restaurants/:id/config', (req, res) => {
     const { id } = req.params;
     const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
-    configs[id] = { ...(configs[id] || {}), ...req.body, updated_at: new Date().toISOString() };
+    const currentRest = configs[id] || {};
+    const body = req.body || {};
+
+    // Preserve existing saved secrets if client sends masked placeholder
+    const resolvedPayuSalt = (typeof body.payu_merchant_salt === 'string' && !body.payu_merchant_salt.startsWith('•••'))
+      ? body.payu_merchant_salt
+      : (currentRest.payu_merchant_salt || '');
+
+    const resolvedPhonepeSalt = (typeof body.phonepe_salt_key === 'string' && !body.phonepe_salt_key.startsWith('•••'))
+      ? body.phonepe_salt_key
+      : (currentRest.phonepe_salt_key || '');
+
+    const resolvedRazorpaySecret = (typeof body.razorpay_secret === 'string' && !body.razorpay_secret.startsWith('•••'))
+      ? body.razorpay_secret
+      : (currentRest.razorpay_secret || '');
+
+    configs[id] = {
+      ...currentRest,
+      ...body,
+      payu_merchant_salt: resolvedPayuSalt,
+      phonepe_salt_key: resolvedPhonepeSalt,
+      razorpay_secret: resolvedRazorpaySecret,
+      updated_at: new Date().toISOString()
+    };
     writeJsonFile('restaurant_configs.json', configs);
     res.json({ success: true, data: configs[id] });
   });
@@ -411,8 +457,19 @@ async function startServer() {
     }
   });
 
-  // Track verified PayU transactions in memory to prevent double processing
-  const verifiedPayUTransactions = new Set<string>();
+  // Track verified PayU transactions in memory
+  interface VerifiedPayUPaymentRecord {
+    status: string;
+    txnid: string;
+    mihpayid: string;
+    amount: number;
+    hash?: string;
+    mode: string;
+    verified_at: string;
+    udf1?: string;
+    udf2?: string;
+  }
+  const verifiedPayUTransactions = new Map<string, VerifiedPayUPaymentRecord>();
 
   // API Route: Create PayU Payment Request (Restaurant Orders & DigiMoms Subscriptions)
   app.post('/api/payu/create-payment', async (req, res) => {
@@ -442,8 +499,27 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid payment amount' });
       }
 
-      const key = (payu_key || process.env.PAYU_MERCHANT_KEY || 'PAYU_TEST_KEY').trim();
-      const salt = (payu_salt || process.env.PAYU_MERCHANT_SALT || 'PAYU_TEST_SALT').trim();
+      let key = (payu_key || '').trim();
+      let salt = (payu_salt || '').trim();
+
+      // If salt or key not passed directly, look up from persistent server configs
+      if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = rCfg.payu_merchant_key;
+          if (rCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = rCfg.payu_merchant_salt;
+        }
+        if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = ceoCfg.payu_merchant_key;
+          if (ceoCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = ceoCfg.payu_merchant_salt;
+        }
+      }
+
+      key = key || process.env.PAYU_MERCHANT_KEY || 'PAYU_TEST_KEY';
+      salt = salt || process.env.PAYU_MERCHANT_SALT || 'PAYU_TEST_SALT';
+
       const isLive = env === 'LIVE' && key !== 'PAYU_TEST_KEY' && salt !== 'PAYU_TEST_SALT';
 
       const txnid = order_id
@@ -458,7 +534,7 @@ async function startServer() {
 
       // PayU Standard Hash Sequence:
       // sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
-      const hashSequence = `${key}|${txnid}|${formattedAmount}|${productinfo}|${firstname}|${email}|${udf1}|${udf2}|${udf3}|${udf4}|${udf5}||||||${salt}`;
+      const hashSequence = `${key}|${txnid}|${formattedAmount}|${productinfo}|${firstname}|${email}|${udf1 || (restaurant_id || '')}|${udf2 || (order_id || '')}|${udf3}|${udf4}|${udf5}||||||${salt}`;
       const hash = crypto.createHash('sha512').update(hashSequence).digest('hex');
 
       const actionUrl = isLive
@@ -471,6 +547,7 @@ async function startServer() {
         mode: isLive ? 'live' : 'demo',
         txnid,
         hash,
+        merchantKey: key,
         params: {
           key,
           txnid,
@@ -479,8 +556,8 @@ async function startServer() {
           firstname,
           email,
           phone,
-          surl: surl || 'http://localhost:3000/api/payu/callback',
-          furl: furl || 'http://localhost:3000/api/payu/callback',
+          surl: surl || `${req.protocol}://${req.get('host')}/api/payu/callback`,
+          furl: furl || `${req.protocol}://${req.get('host')}/api/payu/callback`,
           udf1: udf1 || (restaurant_id || ''),
           udf2: udf2 || (order_id || ''),
           udf3,
@@ -493,6 +570,104 @@ async function startServer() {
     } catch (err: any) {
       console.error('Error creating PayU payment request:', err);
       res.status(500).json({ error: 'Failed to create PayU payment request' });
+    }
+  });
+
+  // API Route: Real-Time PayU Payment Status Check (Polled by Frontend)
+  app.get('/api/payu/check-status', async (req, res) => {
+    try {
+      const txnid = (req.query.txnid as string || '').trim();
+      if (!txnid) {
+        return res.status(400).json({ success: false, error: 'Missing txnid parameter' });
+      }
+
+      // 1. Check if callback has already registered a verified payment
+      if (verifiedPayUTransactions.has(txnid)) {
+        const record = verifiedPayUTransactions.get(txnid)!;
+        return res.json({
+          success: true,
+          verified: true,
+          ...record
+        });
+      }
+
+      // 2. Query PayU Postservice if live credentials available
+      const restaurantId = req.query.restaurant_id as string;
+      const env = ((req.query.env as string) || 'TEST').toUpperCase();
+      let key = (req.query.payu_key as string || '').trim();
+      let salt = (req.query.payu_salt as string || '').trim();
+
+      if (!key || !salt || salt.startsWith('•••') || key === 'PAYU_TEST_KEY') {
+        if (restaurantId) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurantId] || {};
+          if (rCfg.payu_merchant_key) key = rCfg.payu_merchant_key;
+          if (rCfg.payu_merchant_salt && !rCfg.payu_merchant_salt.startsWith('•••')) salt = rCfg.payu_merchant_salt;
+        }
+        if (!key || !salt || salt.startsWith('•••') || key === 'PAYU_TEST_KEY') {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.payu_merchant_key) key = ceoCfg.payu_merchant_key;
+          if (ceoCfg.payu_merchant_salt && !ceoCfg.payu_merchant_salt.startsWith('•••')) salt = ceoCfg.payu_merchant_salt;
+        }
+      }
+
+      if (key && salt && key !== 'PAYU_TEST_KEY' && salt !== 'PAYU_TEST_SALT') {
+        try {
+          const verifyCommand = 'verify_payment';
+          const verifyHashString = `${key}|${verifyCommand}|${txnid}|${salt}`;
+          const verifyHash = crypto.createHash('sha512').update(verifyHashString).digest('hex');
+
+          const verifyApiUrl = env === 'LIVE'
+            ? 'https://info.payu.in/merchant/postservice.php?form=2'
+            : 'https://test.payu.in/merchant/postservice.php?form=2';
+
+          const formData = new URLSearchParams();
+          formData.append('key', key);
+          formData.append('command', verifyCommand);
+          formData.append('var1', txnid);
+          formData.append('hash', verifyHash);
+
+          const payuRes = await fetch(verifyApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString()
+          });
+
+          const payuData: any = await payuRes.json();
+          if (payuData && payuData.status === 1 && payuData.transaction_details && payuData.transaction_details[txnid]) {
+            const txnDetails = payuData.transaction_details[txnid];
+            if (txnDetails.status === 'success') {
+              const record: VerifiedPayUPaymentRecord = {
+                status: 'success',
+                txnid,
+                mihpayid: txnDetails.mihpayid || `mih_${Date.now()}`,
+                amount: Number(txnDetails.amt || txnDetails.transaction_amount || 0),
+                mode: env === 'LIVE' ? 'live' : 'test',
+                verified_at: new Date().toISOString()
+              };
+              verifiedPayUTransactions.set(txnid, record);
+              return res.json({
+                success: true,
+                verified: true,
+                ...record
+              });
+            }
+          }
+        } catch (postErr) {
+          console.warn('PayU check-status postservice error:', postErr);
+        }
+      }
+
+      // 3. Payment not yet confirmed by PayU gateway
+      return res.json({
+        success: false,
+        verified: false,
+        status: 'pending',
+        message: 'Waiting for PayU gateway confirmation...'
+      });
+    } catch (err: any) {
+      console.error('Error checking PayU payment status:', err);
+      res.status(500).json({ success: false, error: 'Status check failed' });
     }
   });
 
@@ -523,36 +698,48 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing PayU transaction ID (txnid)' });
       }
 
-      // Prevent duplicate replay processing
+      // Check if this transaction was already registered as verified
       if (verifiedPayUTransactions.has(txnid)) {
+        const record = verifiedPayUTransactions.get(txnid)!;
         return res.json({
           success: true,
           verified: true,
-          txnid,
-          mihpayid: mihpayid || `mih_${Date.now()}`,
-          amount: Number(amount) || 0,
-          alreadyProcessed: true,
-          verified_at: new Date().toISOString()
+          ...record
         });
       }
 
-      const key = (payu_key || process.env.PAYU_MERCHANT_KEY || 'PAYU_TEST_KEY').trim();
-      const salt = (payu_salt || process.env.PAYU_MERCHANT_SALT || 'PAYU_TEST_SALT').trim();
+      let key = (payu_key || '').trim();
+      let salt = (payu_salt || '').trim();
+
+      if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+        const restId = udf1 || req.body.restaurant_id;
+        if (restId) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restId] || {};
+          if (rCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = rCfg.payu_merchant_key;
+          if (rCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = rCfg.payu_merchant_salt;
+        }
+        if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = ceoCfg.payu_merchant_key;
+          if (ceoCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = ceoCfg.payu_merchant_salt;
+        }
+      }
+
+      key = key || process.env.PAYU_MERCHANT_KEY || 'PAYU_TEST_KEY';
+      salt = salt || process.env.PAYU_MERCHANT_SALT || 'PAYU_TEST_SALT';
       const formattedAmount = Number(amount || 0).toFixed(2);
 
       // Verify Reverse Hash if live salt and return hash provided
+      let isHashValid = false;
       if (salt && salt !== 'PAYU_TEST_SALT' && hash && status) {
         // PayU Reverse Hash Sequence:
         // sha512(salt|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
         const reverseHashSequence = `${salt}|${status}||||||${udf5}|${udf4}|${udf3}|${udf2}|${udf1}|${email}|${firstname}|${productinfo}|${formattedAmount}|${txnid}|${key}`;
         const calculatedHash = crypto.createHash('sha512').update(reverseHashSequence).digest('hex');
 
-        if (calculatedHash.toLowerCase() !== (hash || '').toLowerCase() && status !== 'success') {
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: 'Invalid PayU response signature hash'
-          });
+        if (calculatedHash.toLowerCase() === (hash || '').toLowerCase() && status === 'success') {
+          isHashValid = true;
         }
       }
 
@@ -580,34 +767,51 @@ async function startServer() {
           if (payuData && payuData.status === 1 && payuData.transaction_details && payuData.transaction_details[txnid]) {
             const txnDetails = payuData.transaction_details[txnid];
             if (txnDetails.status === 'success') {
-              verifiedPayUTransactions.add(txnid);
-              return res.json({
-                success: true,
-                verified: true,
+              const record: VerifiedPayUPaymentRecord = {
+                status: 'success',
                 txnid,
                 mihpayid: txnDetails.mihpayid || mihpayid || `mih_${Date.now()}`,
                 amount: Number(txnDetails.amt || formattedAmount),
                 mode: 'live',
                 verified_at: new Date().toISOString()
+              };
+              verifiedPayUTransactions.set(txnid, record);
+              return res.json({
+                success: true,
+                verified: true,
+                ...record
               });
             }
           }
         } catch (postErr) {
-          console.warn('PayU postservice verification network error, fallback to calculated signature check:', postErr);
+          console.warn('PayU postservice verification network error:', postErr);
         }
       }
 
-      // Mark transaction as verified
-      verifiedPayUTransactions.add(txnid);
+      // If reverse hash matched or test hash validated
+      if (isHashValid || (mode === 'demo' && status === 'success')) {
+        const record: VerifiedPayUPaymentRecord = {
+          status: 'success',
+          txnid,
+          mihpayid: mihpayid || `mih_${Date.now()}`,
+          amount: Number(formattedAmount),
+          mode: mode || 'demo',
+          verified_at: new Date().toISOString()
+        };
+        verifiedPayUTransactions.set(txnid, record);
+        return res.json({
+          success: true,
+          verified: true,
+          ...record
+        });
+      }
 
-      return res.json({
-        success: true,
-        verified: true,
-        txnid,
-        mihpayid: mihpayid || `mih_${Date.now()}`,
-        amount: Number(formattedAmount),
-        mode: mode || 'demo',
-        verified_at: new Date().toISOString()
+      // Strict rejection if PayU has not verified this transaction
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        status: 'pending',
+        error: 'PayU gateway confirmation was not received for this transaction.'
       });
     } catch (err: any) {
       console.error('Error verifying PayU payment:', err);
@@ -621,18 +825,29 @@ async function startServer() {
       const data = req.method === 'POST' ? req.body : req.query;
       const status = data.status || (data.unmappedstatus === 'captured' ? 'success' : 'pending');
       const txnid = data.txnid || '';
-      const amount = data.amount || '';
+      const amount = Number(data.amount) || 0;
       const mihpayid = data.mihpayid || data.payuMoneyId || '';
       const hash = data.hash || '';
       const udf1 = data.udf1 || ''; // restaurant_id
       const udf2 = data.udf2 || ''; // order_id
 
-      if (status === 'success' && txnid) {
-        verifiedPayUTransactions.add(txnid);
+      const isSuccess = status === 'success';
+
+      if (isSuccess && txnid) {
+        verifiedPayUTransactions.set(txnid, {
+          status: 'success',
+          txnid,
+          mihpayid: mihpayid || `mih_${Date.now()}`,
+          amount,
+          hash,
+          mode: 'payu_gateway',
+          verified_at: new Date().toISOString(),
+          udf1,
+          udf2
+        });
       }
 
       // Return a clean HTML response that automatically notifies parent or redirects back
-      const isSuccess = status === 'success';
       const htmlResponse = `
         <!DOCTYPE html>
         <html lang="en">
@@ -706,8 +921,8 @@ async function startServer() {
         <body>
           <div class="card">
             <div class="icon">${isSuccess ? '✓' : '!'}</div>
-            <h1>${isSuccess ? 'Payment Successful!' : 'Payment ' + (status || 'Processed')}</h1>
-            <p>${isSuccess ? 'Your transaction has been processed securely via PayU India.' : 'Transaction response received from PayU gateway.'}</p>
+            <h1>${isSuccess ? 'Payment Confirmed by PayU!' : 'Payment ' + (status || 'Processed')}</h1>
+            <p>${isSuccess ? 'Your transaction has been verified securely by PayU Gateway.' : 'Transaction response received from PayU gateway.'}</p>
             
             <div class="details">
               <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${status}</strong></div>
@@ -731,7 +946,7 @@ async function startServer() {
               udf2: '${udf2}'
             };
 
-            // Notify parent / opener window
+            // Notify parent / opener window via PostMessage, localStorage, and BroadcastChannel
             try {
               if (window.opener) {
                 window.opener.postMessage(payload, '*');
@@ -739,8 +954,16 @@ async function startServer() {
               if (window.parent && window.parent !== window) {
                 window.parent.postMessage(payload, '*');
               }
+              if (typeof localStorage !== 'undefined' && '${txnid}') {
+                localStorage.setItem('digimoms_payu_status_' + '${txnid}', JSON.stringify(payload));
+              }
+              if (typeof BroadcastChannel !== 'undefined') {
+                const bc = new BroadcastChannel('digimoms_payu_channel');
+                bc.postMessage(payload);
+                bc.close();
+              }
             } catch (e) {
-              console.warn('PostMessage error:', e);
+              console.warn('Callback notification error:', e);
             }
 
             function closeOrRedirect() {
@@ -751,11 +974,11 @@ async function startServer() {
               }
             }
 
-            // Auto return if in popup after 3 seconds
-            if (window.opener) {
+            // Auto close popup if successful
+            if (window.opener && '${isSuccess}' === 'true') {
               setTimeout(() => {
                 try { window.close(); } catch(e) {}
-              }, 2500);
+              }, 2000);
             }
           </script>
         </body>
