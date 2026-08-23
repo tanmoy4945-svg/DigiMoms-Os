@@ -242,7 +242,10 @@ export const CeoPaymentSettings: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div
-              onClick={() => setPrimaryGateway('phonepe')}
+              onClick={() => {
+                isDirtyRef.current = true;
+                setPrimaryGateway('phonepe');
+              }}
               className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
                 primaryGateway === 'phonepe'
                   ? 'border-purple-500 bg-purple-950/30 text-white shadow-lg shadow-purple-500/10'
@@ -261,7 +264,10 @@ export const CeoPaymentSettings: React.FC = () => {
             </div>
 
             <div
-              onClick={() => setPrimaryGateway('razorpay')}
+              onClick={() => {
+                isDirtyRef.current = true;
+                setPrimaryGateway('razorpay');
+              }}
               className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
                 primaryGateway === 'razorpay'
                   ? 'border-indigo-500 bg-indigo-950/30 text-white shadow-lg shadow-indigo-500/10'
@@ -280,7 +286,10 @@ export const CeoPaymentSettings: React.FC = () => {
             </div>
 
             <div
-              onClick={() => setPrimaryGateway('payu')}
+              onClick={() => {
+                isDirtyRef.current = true;
+                setPrimaryGateway('payu');
+              }}
               className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
                 primaryGateway === 'payu'
                   ? 'border-emerald-500 bg-emerald-950/30 text-white shadow-lg shadow-emerald-500/10'
@@ -299,7 +308,10 @@ export const CeoPaymentSettings: React.FC = () => {
             </div>
 
             <div
-              onClick={() => setPrimaryGateway('demo')}
+              onClick={() => {
+                isDirtyRef.current = true;
+                setPrimaryGateway('demo');
+              }}
               className={`p-5 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
                 primaryGateway === 'demo'
                   ? 'border-blue-500 bg-blue-950/30 text-white shadow-lg shadow-blue-500/10'
@@ -328,7 +340,10 @@ export const CeoPaymentSettings: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <button
               type="button"
-              onClick={() => setMode('demo')}
+              onClick={() => {
+                isDirtyRef.current = true;
+                setMode('demo');
+              }}
               className={`p-4 rounded-2xl border text-left transition-all ${
                 mode === 'demo'
                   ? 'bg-blue-950/40 border-blue-500 text-white font-bold'
@@ -343,7 +358,10 @@ export const CeoPaymentSettings: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setMode('live')}
+              onClick={() => {
+                isDirtyRef.current = true;
+                setMode('live');
+              }}
               className={`p-4 rounded-2xl border text-left transition-all ${
                 mode === 'live'
                   ? 'bg-emerald-950/40 border-emerald-500 text-white font-bold'

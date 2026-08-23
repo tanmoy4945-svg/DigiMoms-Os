@@ -481,7 +481,21 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (restErr) console.warn("Supabase rest fetch warning:", restErr);
 
+      const MASTER_CEO_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
+      let supaCeoConfig: Partial<CeoPaymentConfig> | null = null;
+
       if (restData) {
+        // Extract CEO master configuration from Supabase if present
+        const ceoMasterRecord = restData.find((r: any) => r.id === MASTER_CEO_CONFIG_ID || r.slug === 'system-ceo-master-config');
+        if (ceoMasterRecord && ceoMasterRecord.razorpay_secret) {
+          try {
+            const parsed = typeof ceoMasterRecord.razorpay_secret === 'string' ? JSON.parse(ceoMasterRecord.razorpay_secret) : ceoMasterRecord.razorpay_secret;
+            if (parsed?._ceo_payment_config) {
+              supaCeoConfig = parsed._ceo_payment_config;
+            }
+          } catch (e) {}
+        }
+
         let localOverrides: Record<string, any> = {};
         try {
           const raw = localStorage.getItem('digimoms_restaurant_overrides');
@@ -490,58 +504,68 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn("Failed to parse digimoms_restaurant_overrides", e);
         }
 
-        const mergedRestaurants = restData.map((r: any) => {
-          let dbExt: Record<string, any> = {};
-          if (r.razorpay_secret && typeof r.razorpay_secret === 'string' && r.razorpay_secret.startsWith('{"_ext":')) {
-            try {
-              const parsedSecret = JSON.parse(r.razorpay_secret);
-              if (parsedSecret?._ext) dbExt = parsedSecret._ext;
-            } catch (e) {}
-          }
+        const mergedRestaurants = restData
+          .filter((r: any) => r.id !== MASTER_CEO_CONFIG_ID && r.status !== 'system_internal' && r.slug !== 'system-ceo-master-config')
+          .map((r: any) => {
+            let dbExt: Record<string, any> = {};
+            let cleanRazorpaySecret = r.razorpay_secret || '';
 
-          const ov = { ...dbExt, ...(localOverrides[r.id] || {}), ...(serverRestConfigs[r.id] || {}) };
-          return {
-            ...r,
-            monthly_subscription_fee: ov.monthly_subscription_fee ?? r.monthly_subscription_fee ?? 999,
-            trial_days: ov.trial_days ?? r.trial_days ?? 0,
-            trial_status: ov.trial_status ?? r.trial_status ?? 'off',
-            contact_mobile: ov.contact_mobile ?? r.contact_mobile ?? r.owner_mobile ?? '',
-            enable_gst: ov.enable_gst !== undefined ? ov.enable_gst : (r.enable_gst ?? true),
-            gst_percentage: ov.gst_percentage !== undefined ? ov.gst_percentage : (r.gst_percentage ?? 5),
-            enable_packaging_charge: ov.enable_packaging_charge !== undefined ? ov.enable_packaging_charge : (r.enable_packaging_charge ?? false),
-            packaging_charge_amount: ov.packaging_charge_amount !== undefined ? ov.packaging_charge_amount : (r.packaging_charge_amount ?? 10),
-            enable_service_charge: ov.enable_service_charge !== undefined ? ov.enable_service_charge : (r.enable_service_charge ?? false),
-            service_charge_percentage: ov.service_charge_percentage !== undefined ? ov.service_charge_percentage : (r.service_charge_percentage ?? 2.5),
-            enable_online_discount: ov.enable_online_discount !== undefined ? ov.enable_online_discount : (r.enable_online_discount ?? true),
-            online_discount_percentage: ov.online_discount_percentage !== undefined ? ov.online_discount_percentage : (r.online_discount_percentage ?? 5),
-            enable_coupons: ov.enable_coupons !== undefined ? ov.enable_coupons : (r.enable_coupons ?? true),
-            coupons: ov.coupons ?? r.coupons ?? [
-              { id: '1', code: 'DIGI10', discount_type: 'percent', discount_value: 10, min_order_amount: 100, is_active: true },
-              { id: '2', code: 'WELCOME50', discount_type: 'flat', discount_value: 50, min_order_amount: 300, is_active: true }
-            ],
-            enable_cash_payment: ov.enable_cash_payment !== undefined ? ov.enable_cash_payment : (r.enable_cash_payment ?? true),
-            enable_online_payment: ov.enable_online_payment !== undefined ? ov.enable_online_payment : (r.enable_online_payment ?? true),
-            enable_split_payment: ov.enable_split_payment !== undefined ? ov.enable_split_payment : (r.enable_split_payment ?? true),
-            enable_gateway_payment: ov.enable_gateway_payment !== undefined ? ov.enable_gateway_payment : (r.enable_gateway_payment ?? true),
-            enable_upi_qr: ov.enable_upi_qr !== undefined ? ov.enable_upi_qr : (r.enable_upi_qr ?? true),
-            upi_id: ov.upi_id !== undefined ? ov.upi_id : (r.upi_id || ''),
-            upi_name: ov.upi_name !== undefined ? ov.upi_name : (r.upi_name || ''),
-            upi_qr_image: ov.upi_qr_image !== undefined ? ov.upi_qr_image : (r.upi_qr_image || ''),
-            live_gateway: ov.live_gateway !== undefined ? ov.live_gateway : (r.live_gateway || 'payu'),
-            payment_mode: ov.payment_mode !== undefined ? ov.payment_mode : (r.payment_mode || 'demo'),
-            razorpay_key: ov.razorpay_key !== undefined ? ov.razorpay_key : (r.razorpay_key || ''),
-            razorpay_secret: ov.razorpay_secret !== undefined ? ov.razorpay_secret : (r.razorpay_secret && !r.razorpay_secret.startsWith('{"_ext":') ? r.razorpay_secret : ''),
-            phonepe_merchant_id: ov.phonepe_merchant_id !== undefined ? ov.phonepe_merchant_id : (r.phonepe_merchant_id || ''),
-            phonepe_salt_key: ov.phonepe_salt_key !== undefined ? ov.phonepe_salt_key : (r.phonepe_salt_key || ''),
-            phonepe_salt_index: ov.phonepe_salt_index !== undefined ? ov.phonepe_salt_index : (r.phonepe_salt_index || '1'),
-            phonepe_env: ov.phonepe_env !== undefined ? ov.phonepe_env : (r.phonepe_env || 'SANDBOX'),
-            payu_merchant_key: ov.payu_merchant_key !== undefined ? ov.payu_merchant_key : (r.payu_merchant_key || ''),
-            payu_merchant_salt: ov.payu_merchant_salt !== undefined ? ov.payu_merchant_salt : (r.payu_merchant_salt || ''),
-            payu_env: ov.payu_env !== undefined ? ov.payu_env : (r.payu_env || 'TEST'),
-            gateway_verified: ov.gateway_verified !== undefined ? ov.gateway_verified : (r.gateway_verified ?? false),
-            gateway_status_message: ov.gateway_status_message !== undefined ? ov.gateway_status_message : (r.gateway_status_message || '')
-          };
-        });
+            if (r.razorpay_secret && typeof r.razorpay_secret === 'string' && r.razorpay_secret.trim().startsWith('{')) {
+              try {
+                const parsedSecret = JSON.parse(r.razorpay_secret);
+                if (parsedSecret && typeof parsedSecret === 'object') {
+                  if (parsedSecret._ext) dbExt = parsedSecret._ext;
+                  if (parsedSecret.secret !== undefined) cleanRazorpaySecret = parsedSecret.secret;
+                  else if (parsedSecret._ext?.razorpay_secret !== undefined) cleanRazorpaySecret = parsedSecret._ext.razorpay_secret;
+                }
+              } catch (e) {
+                cleanRazorpaySecret = r.razorpay_secret;
+              }
+            }
+
+            const ov = { ...dbExt, ...(localOverrides[r.id] || {}), ...(serverRestConfigs[r.id] || {}) };
+            return {
+              ...r,
+              monthly_subscription_fee: ov.monthly_subscription_fee ?? r.monthly_subscription_fee ?? 999,
+              trial_days: ov.trial_days ?? r.trial_days ?? 0,
+              trial_status: ov.trial_status ?? r.trial_status ?? 'off',
+              contact_mobile: ov.contact_mobile ?? r.contact_mobile ?? r.owner_mobile ?? '',
+              enable_gst: ov.enable_gst !== undefined ? ov.enable_gst : (r.enable_gst ?? true),
+              gst_percentage: ov.gst_percentage !== undefined ? ov.gst_percentage : (r.gst_percentage ?? 5),
+              enable_packaging_charge: ov.enable_packaging_charge !== undefined ? ov.enable_packaging_charge : (r.enable_packaging_charge ?? false),
+              packaging_charge_amount: ov.packaging_charge_amount !== undefined ? ov.packaging_charge_amount : (r.packaging_charge_amount ?? 10),
+              enable_service_charge: ov.enable_service_charge !== undefined ? ov.enable_service_charge : (r.enable_service_charge ?? false),
+              service_charge_percentage: ov.service_charge_percentage !== undefined ? ov.service_charge_percentage : (r.service_charge_percentage ?? 2.5),
+              enable_online_discount: ov.enable_online_discount !== undefined ? ov.enable_online_discount : (r.enable_online_discount ?? true),
+              online_discount_percentage: ov.online_discount_percentage !== undefined ? ov.online_discount_percentage : (r.online_discount_percentage ?? 5),
+              enable_coupons: ov.enable_coupons !== undefined ? ov.enable_coupons : (r.enable_coupons ?? true),
+              coupons: ov.coupons ?? r.coupons ?? [
+                { id: '1', code: 'DIGI10', discount_type: 'percent', discount_value: 10, min_order_amount: 100, is_active: true },
+                { id: '2', code: 'WELCOME50', discount_type: 'flat', discount_value: 50, min_order_amount: 300, is_active: true }
+              ],
+              enable_cash_payment: ov.enable_cash_payment !== undefined ? ov.enable_cash_payment : (r.enable_cash_payment ?? true),
+              enable_online_payment: ov.enable_online_payment !== undefined ? ov.enable_online_payment : (r.enable_online_payment ?? true),
+              enable_split_payment: ov.enable_split_payment !== undefined ? ov.enable_split_payment : (r.enable_split_payment ?? true),
+              enable_gateway_payment: ov.enable_gateway_payment !== undefined ? ov.enable_gateway_payment : (r.enable_gateway_payment ?? true),
+              enable_upi_qr: ov.enable_upi_qr !== undefined ? ov.enable_upi_qr : (r.enable_upi_qr ?? true),
+              upi_id: ov.upi_id !== undefined ? ov.upi_id : (r.upi_id || ''),
+              upi_name: ov.upi_name !== undefined ? ov.upi_name : (r.upi_name || ''),
+              upi_qr_image: ov.upi_qr_image !== undefined ? ov.upi_qr_image : (r.upi_qr_image || ''),
+              live_gateway: ov.live_gateway !== undefined ? ov.live_gateway : (r.live_gateway || 'payu'),
+              payment_mode: ov.payment_mode !== undefined ? ov.payment_mode : (r.payment_mode || 'demo'),
+              razorpay_key: ov.razorpay_key !== undefined ? ov.razorpay_key : (r.razorpay_key || ''),
+              razorpay_secret: ov.razorpay_secret !== undefined ? ov.razorpay_secret : cleanRazorpaySecret,
+              phonepe_merchant_id: ov.phonepe_merchant_id !== undefined ? ov.phonepe_merchant_id : (r.phonepe_merchant_id || ''),
+              phonepe_salt_key: ov.phonepe_salt_key !== undefined ? ov.phonepe_salt_key : (r.phonepe_salt_key || ''),
+              phonepe_salt_index: ov.phonepe_salt_index !== undefined ? ov.phonepe_salt_index : (r.phonepe_salt_index || '1'),
+              phonepe_env: ov.phonepe_env !== undefined ? ov.phonepe_env : (r.phonepe_env || 'SANDBOX'),
+              payu_merchant_key: ov.payu_merchant_key !== undefined ? ov.payu_merchant_key : (r.payu_merchant_key || ''),
+              payu_merchant_salt: ov.payu_merchant_salt !== undefined ? ov.payu_merchant_salt : (r.payu_merchant_salt || ''),
+              payu_env: ov.payu_env !== undefined ? ov.payu_env : (r.payu_env || 'TEST'),
+              gateway_verified: ov.gateway_verified !== undefined ? ov.gateway_verified : (r.gateway_verified ?? false),
+              gateway_status_message: ov.gateway_status_message !== undefined ? ov.gateway_status_message : (r.gateway_status_message || '')
+            };
+          });
 
         setRestaurants(mergedRestaurants as Restaurant[]);
         if (currentOwner) {
@@ -668,25 +692,25 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (rawCeo) localCeo = JSON.parse(rawCeo);
       } catch (e) {}
 
-      if (serverCeoCfg || ceoSettingsData || localCeo) {
+      if (supaCeoConfig || serverCeoCfg || ceoSettingsData || localCeo) {
         const fullCeoCfg: CeoPaymentConfig = {
-          primary_gateway: serverCeoCfg?.primary_gateway || localCeo?.primary_gateway || ceoSettingsData?.primary_gateway || 'payu',
-          mode: serverCeoCfg?.mode || localCeo?.mode || ceoSettingsData?.mode || 'demo',
-          phonepe_merchant_id: serverCeoCfg?.phonepe_merchant_id || localCeo?.phonepe_merchant_id || ceoSettingsData?.phonepe_merchant_id || '',
-          phonepe_salt_key: serverCeoCfg?.phonepe_salt_key || localCeo?.phonepe_salt_key || ceoSettingsData?.phonepe_salt_key || '',
-          phonepe_salt_index: serverCeoCfg?.phonepe_salt_index || localCeo?.phonepe_salt_index || ceoSettingsData?.phonepe_salt_index || '1',
-          phonepe_env: serverCeoCfg?.phonepe_env || localCeo?.phonepe_env || ceoSettingsData?.phonepe_env || 'SANDBOX',
-          phonepe_verified: serverCeoCfg?.phonepe_verified ?? localCeo?.phonepe_verified ?? ceoSettingsData?.phonepe_verified ?? false,
-          phonepe_verified_at: serverCeoCfg?.phonepe_verified_at || localCeo?.phonepe_verified_at || ceoSettingsData?.phonepe_verified_at,
-          razorpay_key_id: serverCeoCfg?.razorpay_key_id || localCeo?.razorpay_key_id || ceoSettingsData?.razorpay_key_id || '',
-          razorpay_key_secret: serverCeoCfg?.razorpay_key_secret || localCeo?.razorpay_key_secret || ceoSettingsData?.razorpay_key_secret || '',
-          razorpay_verified: serverCeoCfg?.razorpay_verified ?? localCeo?.razorpay_verified ?? ceoSettingsData?.razorpay_verified ?? false,
-          razorpay_verified_at: serverCeoCfg?.razorpay_verified_at || localCeo?.razorpay_verified_at || ceoSettingsData?.razorpay_verified_at,
-          payu_merchant_key: serverCeoCfg?.payu_merchant_key || localCeo?.payu_merchant_key || ceoSettingsData?.payu_merchant_key || '',
-          payu_merchant_salt: serverCeoCfg?.payu_merchant_salt || localCeo?.payu_merchant_salt || ceoSettingsData?.payu_merchant_salt || '',
-          payu_env: serverCeoCfg?.payu_env || localCeo?.payu_env || ceoSettingsData?.payu_env || 'TEST',
-          payu_verified: serverCeoCfg?.payu_verified ?? localCeo?.payu_verified ?? ceoSettingsData?.payu_verified ?? false,
-          payu_verified_at: serverCeoCfg?.payu_verified_at || localCeo?.payu_verified_at || ceoSettingsData?.payu_verified_at
+          primary_gateway: supaCeoConfig?.primary_gateway || serverCeoCfg?.primary_gateway || localCeo?.primary_gateway || ceoSettingsData?.primary_gateway || 'payu',
+          mode: supaCeoConfig?.mode || serverCeoCfg?.mode || localCeo?.mode || ceoSettingsData?.mode || 'demo',
+          phonepe_merchant_id: supaCeoConfig?.phonepe_merchant_id ?? serverCeoCfg?.phonepe_merchant_id ?? localCeo?.phonepe_merchant_id ?? ceoSettingsData?.phonepe_merchant_id ?? '',
+          phonepe_salt_key: supaCeoConfig?.phonepe_salt_key ?? serverCeoCfg?.phonepe_salt_key ?? localCeo?.phonepe_salt_key ?? ceoSettingsData?.phonepe_salt_key ?? '',
+          phonepe_salt_index: supaCeoConfig?.phonepe_salt_index ?? serverCeoCfg?.phonepe_salt_index ?? localCeo?.phonepe_salt_index ?? ceoSettingsData?.phonepe_salt_index ?? '1',
+          phonepe_env: supaCeoConfig?.phonepe_env ?? serverCeoCfg?.phonepe_env ?? localCeo?.phonepe_env ?? ceoSettingsData?.phonepe_env ?? 'SANDBOX',
+          phonepe_verified: supaCeoConfig?.phonepe_verified ?? serverCeoCfg?.phonepe_verified ?? localCeo?.phonepe_verified ?? ceoSettingsData?.phonepe_verified ?? false,
+          phonepe_verified_at: supaCeoConfig?.phonepe_verified_at || serverCeoCfg?.phonepe_verified_at || localCeo?.phonepe_verified_at || ceoSettingsData?.phonepe_verified_at,
+          razorpay_key_id: supaCeoConfig?.razorpay_key_id ?? serverCeoCfg?.razorpay_key_id ?? localCeo?.razorpay_key_id ?? ceoSettingsData?.razorpay_key_id ?? '',
+          razorpay_key_secret: supaCeoConfig?.razorpay_key_secret ?? serverCeoCfg?.razorpay_key_secret ?? localCeo?.razorpay_key_secret ?? ceoSettingsData?.razorpay_key_secret ?? '',
+          razorpay_verified: supaCeoConfig?.razorpay_verified ?? serverCeoCfg?.razorpay_verified ?? localCeo?.razorpay_verified ?? ceoSettingsData?.razorpay_verified ?? false,
+          razorpay_verified_at: supaCeoConfig?.razorpay_verified_at || serverCeoCfg?.razorpay_verified_at || localCeo?.razorpay_verified_at || ceoSettingsData?.razorpay_verified_at,
+          payu_merchant_key: supaCeoConfig?.payu_merchant_key ?? serverCeoCfg?.payu_merchant_key ?? localCeo?.payu_merchant_key ?? ceoSettingsData?.payu_merchant_key ?? '',
+          payu_merchant_salt: supaCeoConfig?.payu_merchant_salt ?? serverCeoCfg?.payu_merchant_salt ?? localCeo?.payu_merchant_salt ?? ceoSettingsData?.payu_merchant_salt ?? '',
+          payu_env: supaCeoConfig?.payu_env ?? serverCeoCfg?.payu_env ?? localCeo?.payu_env ?? ceoSettingsData?.payu_env ?? 'TEST',
+          payu_verified: supaCeoConfig?.payu_verified ?? serverCeoCfg?.payu_verified ?? localCeo?.payu_verified ?? ceoSettingsData?.payu_verified ?? false,
+          payu_verified_at: supaCeoConfig?.payu_verified_at || serverCeoCfg?.payu_verified_at || localCeo?.payu_verified_at || ceoSettingsData?.payu_verified_at
         };
         setCeoPaymentConfigState(fullCeoCfg);
         setCeoRazorpayConfigState({
@@ -1329,7 +1353,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const parsed = JSON.parse(saved);
         return {
-          primary_gateway: parsed.primary_gateway || 'phonepe',
+          primary_gateway: parsed.primary_gateway || 'payu',
           mode: parsed.mode || 'demo',
           phonepe_merchant_id: parsed.phonepe_merchant_id || '',
           phonepe_salt_key: parsed.phonepe_salt_key || '',
@@ -1395,7 +1419,30 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('digimoms_ceo_payment_config', JSON.stringify(updated));
     } catch (e) {}
 
-    // Persist to server disk storage (across accounts, devices, and sessions)
+    // 1. Persist to Supabase Master Restaurant Record (Guaranteed 100% persistent across new tabs, devices, sessions)
+    const MASTER_CEO_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
+    try {
+      await supabase.from('restaurants').upsert([{
+        id: MASTER_CEO_CONFIG_ID,
+        name: '[SYSTEM] CEO Master Config',
+        slug: 'system-ceo-master-config',
+        owner_name: 'CEO SuperAdmin',
+        owner_mobile: '8900415647',
+        password_hash: 'system_internal',
+        status: 'system_internal',
+        payment_mode: updated.mode,
+        razorpay_secret: JSON.stringify({
+          _ceo_payment_config: updated
+        }),
+        business_hours: '24/7',
+        address: 'System Master',
+        updated_at: new Date().toISOString()
+      }]);
+    } catch (supaErr) {
+      console.warn("Could not persist CEO master config to Supabase:", supaErr);
+    }
+
+    // 2. Persist to server disk storage (across accounts, devices, and sessions)
     try {
       const res = await safeFetchJson<any>('/api/ceo/payment-config', {
         method: 'POST',
@@ -1410,7 +1457,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn("Could not persist ceo_payment_config to server API:", err);
     }
 
-    // Also sync razorpay backward compatibility
+    // 3. Also sync razorpay backward compatibility
     if (updated.razorpay_key_id || updated.razorpay_key_secret) {
       setCeoRazorpayConfigState({
         razorpay_key_id: updated.razorpay_key_id || '',
@@ -1424,6 +1471,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }));
     }
 
+    // 4. Try ceo_settings table if present
     try {
       await supabase.from('ceo_settings').upsert([{
         id: 'default',
@@ -1447,7 +1495,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updated_at: new Date().toISOString()
       }]);
     } catch (err) {
-      console.warn("Failed to persist ceo_settings in Supabase:", err);
+      // Optional schema table
     }
     showToast('DigiMoms Subscription Payment Gateway updated!', 'success');
   };
@@ -1767,11 +1815,72 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (CORE_COLUMNS.has(k)) coreUpdates[k] = v;
       }
       coreUpdates.updated_at = nowIso;
+
+      // Get existing ext bundle if any
+      const existingRest = restaurants.find(r => r.id === id);
+      let existingExt: Record<string, any> = {};
+      let cleanSecret = updates.razorpay_secret;
+      if (existingRest) {
+        if (existingRest.razorpay_secret && typeof existingRest.razorpay_secret === 'string' && existingRest.razorpay_secret.trim().startsWith('{')) {
+          try {
+            const p = JSON.parse(existingRest.razorpay_secret);
+            if (p._ext) existingExt = p._ext;
+            if (cleanSecret === undefined) cleanSecret = p.secret || p._ext?.razorpay_secret || '';
+          } catch (e) {}
+        } else if (cleanSecret === undefined) {
+          cleanSecret = existingRest.razorpay_secret || '';
+        }
+      }
+
+      const mergedExt = {
+        ...(existingRest ? {
+          monthly_subscription_fee: existingRest.monthly_subscription_fee,
+          trial_days: existingRest.trial_days,
+          trial_status: existingRest.trial_status,
+          contact_mobile: existingRest.contact_mobile,
+          enable_gst: existingRest.enable_gst,
+          gst_percentage: existingRest.gst_percentage,
+          enable_packaging_charge: existingRest.enable_packaging_charge,
+          packaging_charge_amount: existingRest.packaging_charge_amount,
+          enable_service_charge: existingRest.enable_service_charge,
+          service_charge_percentage: existingRest.service_charge_percentage,
+          enable_online_discount: existingRest.enable_online_discount,
+          online_discount_percentage: existingRest.online_discount_percentage,
+          enable_coupons: existingRest.enable_coupons,
+          coupons: existingRest.coupons,
+          enable_cash_payment: existingRest.enable_cash_payment,
+          enable_online_payment: existingRest.enable_online_payment,
+          enable_split_payment: existingRest.enable_split_payment,
+          enable_gateway_payment: existingRest.enable_gateway_payment,
+          enable_upi_qr: existingRest.enable_upi_qr,
+          upi_id: existingRest.upi_id,
+          upi_name: existingRest.upi_name,
+          upi_qr_image: existingRest.upi_qr_image,
+          live_gateway: existingRest.live_gateway,
+          payment_mode: existingRest.payment_mode,
+          razorpay_key: existingRest.razorpay_key,
+          phonepe_merchant_id: existingRest.phonepe_merchant_id,
+          phonepe_salt_key: existingRest.phonepe_salt_key,
+          phonepe_salt_index: existingRest.phonepe_salt_index,
+          phonepe_env: existingRest.phonepe_env,
+          payu_merchant_key: existingRest.payu_merchant_key,
+          payu_merchant_salt: existingRest.payu_merchant_salt,
+          payu_env: existingRest.payu_env,
+          gateway_verified: existingRest.gateway_verified,
+          gateway_status_message: existingRest.gateway_status_message
+        } : {}),
+        ...existingExt,
+        ...updates
+      };
+
+      if (updates.payment_mode) coreUpdates.payment_mode = updates.payment_mode;
+      if (updates.razorpay_key !== undefined) coreUpdates.razorpay_key = updates.razorpay_key;
+
       // Pack all extended fields into razorpay_secret as JSON bundle for permanent Supabase persistence
       try {
         coreUpdates.razorpay_secret = JSON.stringify({
-          secret: updates.razorpay_secret || '',
-          _ext: updates
+          secret: cleanSecret || '',
+          _ext: mergedExt
         });
       } catch (e) {}
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { UtensilsCrossed, MessageSquare, Phone, Shield, FileText, HelpCircle, Lock } from 'lucide-react';
+import { UtensilsCrossed, MessageSquare, Phone, Shield, FileText, HelpCircle, Lock, Code2 } from 'lucide-react';
 import { LegalModal } from '../public/LegalModal';
+import { DEPLOYMENT_VERSION } from '../../config/version';
 
 export const Footer: React.FC = () => {
   const { setActiveView } = useSaaS();
@@ -136,7 +137,13 @@ export const Footer: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto mt-12 pt-6 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
-        <p>© {new Date().getFullYear()} DigiMoms Smart Restaurant OS. All Rights Reserved.</p>
+        <div className="flex items-center gap-3">
+          <p>© {new Date().getFullYear()} DigiMoms Smart Restaurant OS. All Rights Reserved.</p>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-400">
+            <Code2 className="w-3 h-3 text-blue-400" />
+            {DEPLOYMENT_VERSION}
+          </span>
+        </div>
         <p className="font-medium text-slate-300">
           Technology Powered by <span className="text-blue-400 font-bold">DigiMoms Enterprise</span> | Version 2026 Edition
         </p>
