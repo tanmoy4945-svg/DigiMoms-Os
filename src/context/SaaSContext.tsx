@@ -230,7 +230,7 @@ const parseRouteFromPath = (
   if (cleanPath === '/login-ceo' || cleanPath === '/ceo') {
     return { view: isCeoAuth ? 'ceo-dashboard' : 'ceo-login', shortCode: '', slug: '' };
   }
-  if (cleanPath === '/login-owner' || cleanPath === '/owner') {
+  if (cleanPath === '/login-owner' || cleanPath === '/owner' || cleanPath === '/login') {
     return { view: owner ? 'owner-dashboard' : 'owner-login', shortCode: '', slug: '' };
   }
   if (cleanPath === '/login-staff' || cleanPath === '/staff' || cleanPath === '/login-worker' || cleanPath === '/worker') {
@@ -240,10 +240,21 @@ const parseRouteFromPath = (
       slug: ''
     };
   }
-  if (cleanPath === '/ceo-dashboard') {
+  if (cleanPath === '/ceo-dashboard' || cleanPath === '/ceo-settings') {
     return { view: isCeoAuth ? 'ceo-dashboard' : 'ceo-login', shortCode: '', slug: '' };
   }
-  if (cleanPath === '/owner-dashboard') {
+  if (
+    cleanPath === '/owner-dashboard' ||
+    cleanPath === '/owner-payment' ||
+    cleanPath === '/subscription' ||
+    cleanPath === '/renew' ||
+    cleanPath === '/billing' ||
+    cleanPath === '/payment' ||
+    cleanPath === '/pay' ||
+    cleanPath === '/checkout' ||
+    cleanPath === '/payment-success' ||
+    cleanPath === '/payment-failure'
+  ) {
     return { view: owner ? 'owner-dashboard' : 'owner-login', shortCode: '', slug: '' };
   }
   if (cleanPath === '/waiter-terminal' || cleanPath === '/waiter') {
@@ -268,6 +279,15 @@ const parseRouteFromPath = (
   }
   if (cleanPath === '/contact' || cleanPath === '/public-contact') {
     return { view: 'public-contact', shortCode: '', slug: '' };
+  }
+  if (
+    cleanPath === '/privacy-policy' ||
+    cleanPath === '/terms-and-conditions' ||
+    cleanPath === '/refund-policy' ||
+    cleanPath === '/shipping-policy' ||
+    cleanPath === '/legal'
+  ) {
+    return { view: 'public-about', shortCode: '', slug: '' };
   }
 
   return { view: 'public-home', shortCode: '', slug: '' };

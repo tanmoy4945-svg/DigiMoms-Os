@@ -232,10 +232,99 @@ export const OwnerDashboard: React.FC = () => {
     }
   };
 
+  const handleProcessRazorpayRenewal = async () => {
+    setIsProcessingPayment(true);
+    try {
+      const createRes = await fetch('/api/razorpay/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: monthlyFee,
+          restaurant_id: currentOwner.id,
+          order_id: `sub_${Date.now()}`,
+          razorpay_key: ceoPaymentConfig?.razorpay_key_id,
+          razorpay_secret: ceoPaymentConfig?.razorpay_key_secret
+        })
+      });
+      const orderData = await createRes.json();
+      if (!createRes.ok || !orderData.id) {
+        showToast('Failed to initialize Razorpay payment', 'error');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      if ((window as any).Razorpay && ceoPaymentConfig?.mode === 'live' && ceoPaymentConfig?.razorpay_key_id) {
+        const options = {
+          key: ceoPaymentConfig.razorpay_key_id,
+          amount: orderData.amount,
+          currency: 'INR',
+          name: 'DigiMoms Smart Restaurant OS',
+          description: `Subscription Renewal (1 Month) - ${currentOwner.name}`,
+          order_id: orderData.id,
+          prefill: {
+            name: currentOwner.owner_name,
+            contact: currentOwner.owner_mobile,
+            email: currentOwner.owner_email || 'owner@restaurant.local'
+          },
+          theme: { color: '#10b981' },
+          handler: async (response: any) => {
+            const verifyRes = await fetch('/api/razorpay/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                razorpay_secret: ceoPaymentConfig?.razorpay_key_secret
+              })
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyRes.ok && verifyData.verified) {
+              await renewRestaurantMonthly(currentOwner.id, 1, {
+                transactionId: response.razorpay_payment_id,
+                mode: 'live',
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature
+              });
+              setShowRenewalModal(false);
+              showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via Razorpay!', 'success');
+            } else {
+              showToast('Razorpay payment verification failed', 'error');
+            }
+            setIsProcessingPayment(false);
+          },
+          modal: {
+            ondismiss: () => {
+              setIsProcessingPayment(false);
+            }
+          }
+        };
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
+      } else {
+        // Simulated / Demo mode renewal
+        await renewRestaurantMonthly(currentOwner.id, 1, {
+          transactionId: `rzp_demo_${Date.now()}`,
+          mode: 'demo'
+        });
+        setIsProcessingPayment(false);
+        setShowRenewalModal(false);
+        showToast('🎉 DigiMoms OS subscription extended by 1 month (Demo Mode)!', 'success');
+      }
+    } catch (err: any) {
+      console.error('Razorpay renewal error:', err);
+      showToast(`Razorpay Renewal Error: ${err.message || 'Payment failed'}`, 'error');
+      setIsProcessingPayment(false);
+    }
+  };
+
   const handleRenewalClick = () => {
     if (ceoPaymentConfig?.primary_gateway === 'payu') {
       setShowRenewalModal(false);
       setShowPayUSubscriptionModal(true);
+    } else if (ceoPaymentConfig?.primary_gateway === 'razorpay') {
+      handleProcessRazorpayRenewal();
     } else {
       handleProcessPhonePeRenewal();
     }
@@ -802,7 +891,13 @@ export const OwnerDashboard: React.FC = () => {
                   <CreditCard className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-white text-base">PhonePe Business Gateway</h3>
+                  <h3 className="font-extrabold text-white text-base">
+                    {ceoPaymentConfig?.primary_gateway === 'payu'
+                      ? 'PayU India Gateway'
+                      : ceoPaymentConfig?.primary_gateway === 'razorpay'
+                      ? 'Razorpay Gateway'
+                      : 'PhonePe Business Gateway'}
+                  </h3>
                   <p className="text-[11px] text-slate-400">DigiMoms SaaS Official Renewal</p>
                 </div>
               </div>
@@ -836,19 +931,40 @@ export const OwnerDashboard: React.FC = () => {
             {(ceoPaymentConfig?.mode || 'demo') === 'demo' ? (
               <div className="p-3.5 rounded-xl bg-purple-950/50 border border-purple-500/30 text-xs text-purple-200 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-purple-300">
-                  <Sparkles className="w-4 h-4 text-purple-400" /> {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU' : 'PhonePe'} Demo / Sandbox Mode
+                  <Sparkles className="w-4 h-4 text-purple-400" />{' '}
+                  {ceoPaymentConfig?.primary_gateway === 'payu'
+                    ? 'PayU'
+                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
+                    ? 'Razorpay'
+                    : 'PhonePe'}{' '}
+                  Demo / Sandbox Mode
                 </div>
                 <p className="text-[11px] text-purple-200/80">
-                  {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU' : 'PhonePe Business'} gateway is active in Demo mode. Proceeding will execute server-side verification and extend subscription by 1 calendar month instantly.
+                  {ceoPaymentConfig?.primary_gateway === 'payu'
+                    ? 'PayU India'
+                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
+                    ? 'Razorpay'
+                    : 'PhonePe Business'}{' '}
+                  gateway is active in Demo mode. Proceeding will execute server-side verification and extend subscription by 1 calendar month instantly.
                 </p>
               </div>
             ) : (
               <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-emerald-300">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU India Live' : 'PhonePe Live Business'}
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />{' '}
+                  {ceoPaymentConfig?.primary_gateway === 'payu'
+                    ? 'PayU India Live'
+                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
+                    ? 'Razorpay Live'
+                    : 'PhonePe Live Business'}
                 </div>
                 <p className="text-[11px] text-emerald-200/80">
-                  Payment will be routed via {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU Merchant' : `PhonePe Business Merchant ID: ${ceoPaymentConfig?.phonepe_merchant_id || 'DIGIMOMS_ONLINE'}`}.
+                  Payment will be routed via{' '}
+                  {ceoPaymentConfig?.primary_gateway === 'payu'
+                    ? `PayU Merchant Key: ${ceoPaymentConfig?.payu_merchant_key || 'Configured'}`
+                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
+                    ? `Razorpay Key ID: ${ceoPaymentConfig?.razorpay_key_id || 'Configured'}`
+                    : `PhonePe Business Merchant ID: ${ceoPaymentConfig?.phonepe_merchant_id || 'DIGIMOMS_ONLINE'}`}.
                 </p>
               </div>
             )}
@@ -873,7 +989,12 @@ export const OwnerDashboard: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    💳 Pay ₹{monthlyFee} via {ceoPaymentConfig?.primary_gateway === 'payu' ? 'PayU' : 'PhonePe'}
+                    💳 Pay ₹{monthlyFee} via{' '}
+                    {ceoPaymentConfig?.primary_gateway === 'payu'
+                      ? 'PayU'
+                      : ceoPaymentConfig?.primary_gateway === 'razorpay'
+                      ? 'Razorpay'
+                      : 'PhonePe'}
                   </>
                 )}
               </button>
