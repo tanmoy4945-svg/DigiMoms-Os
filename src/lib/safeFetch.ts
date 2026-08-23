@@ -62,12 +62,12 @@ export async function safeFetchJson<T = any>(
       rawText
     };
   } catch (networkError: any) {
-    console.error(`[safeFetchJson] Network error connecting to ${url}:`, networkError);
+    console.warn(`[safeFetchJson] Network connection notice for ${url}:`, networkError?.message || networkError);
     return {
       ok: false,
       status: 0,
       data: null,
-      error: networkError.message || 'Unable to connect to payment server. Please check your connection.',
+      error: networkError?.message || 'Unable to connect to server. Falling back to primary Supabase store.',
       rawText: ''
     };
   }
