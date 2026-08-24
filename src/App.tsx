@@ -76,12 +76,14 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 const AppContent: React.FC = () => {
   const { activeView } = useSaaS();
 
-  // Special full-screen views (no standard header/footer overlay needed if customer QR or Kitchen KDS)
+  // Special views: Customer QR app is mobile-first (centered phone frame on desktop, full-width on mobile)
   if (activeView === 'customer-qr') {
     return (
-      <main className="min-h-screen bg-slate-950">
-        <NotificationToast />
-        <CustomerQrApp />
+      <main className="min-h-screen bg-slate-950 flex justify-center selection:bg-blue-600 selection:text-white">
+        <div className="w-full max-w-md min-h-screen bg-slate-950 shadow-2xl border-x border-slate-800/40 relative flex flex-col">
+          <NotificationToast />
+          <CustomerQrApp />
+        </div>
       </main>
     );
   }

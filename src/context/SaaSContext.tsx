@@ -152,6 +152,7 @@ interface SaaSContextType {
   submitUpiPaymentConfirmation: (orderId: string, upiRef?: string) => Promise<boolean>;
   processRazorpayOnlinePayment: (orderId: string, onlineAmountToPay: number, razorpayResponse: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }, customerMobile?: string) => Promise<boolean>;
   processPayUOnlinePayment: (orderId: string, onlineAmountToPay: number, payuResponse: { txnid: string; mihpayid?: string; hash?: string; status?: string }, customerMobile?: string) => Promise<boolean>;
+  processPhonePeOnlinePayment: (orderId: string, onlineAmountToPay: number, phonePeResponse: { transactionId: string; mode?: string }, customerMobile?: string) => Promise<boolean>;
   updateOrderPaymentMethod: (orderId: string, newMode: 'cash' | 'online' | 'partial' | 'upi_qr', partialOnlineAmount?: number) => Promise<void>;
   paymentTransactions: PaymentTransaction[];
   acceptOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
@@ -3659,6 +3660,144 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const processPhonePeOnlinePayment = async (
+    orderId: string,
+    onlineAmountToPay: number,
+    phonePeResponse: { transactionId: string; mode?: string },
+    customerMobile?: string
+  ): Promise<boolean> => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      showToast("Order not found for online payment.", "error");
+      return false;
+    }
+
+    const rest = restaurants.find(r => r.id === existingOrd.restaurant_id);
+
+    try {
+      const verifyRes = await fetch('/api/phonepe/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          merchant_id: rest?.phonepe_merchant_id,
+          merchant_transaction_id: phonePeResponse.transactionId,
+          salt_key: rest?.phonepe_salt_key,
+          salt_index: rest?.phonepe_salt_index,
+          env: rest?.phonepe_env || 'SANDBOX',
+          mode: rest?.payment_mode || 'demo'
+        })
+      });
+
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.verified) {
+        showToast("PhonePe payment verification failed: " + (verifyData.message || "Could not verify transaction"), "error");
+        return false;
+      }
+
+      const grandTotal = existingOrd.grand_total;
+      const prevOnlineAmt = Number(existingOrd.online_amount || 0);
+      const newOnlineTotal = Number((prevOnlineAmt + onlineAmountToPay).toFixed(2));
+      const cashAmt = Number(existingOrd.cash_amount || 0);
+      const totalPaid = Number((newOnlineTotal + cashAmt).toFixed(2));
+      const newCashDue = Math.max(0, Number((grandTotal - totalPaid).toFixed(2)));
+
+      let newPaymentStatus: any = 'pending';
+      let newOrderStatus: any = existingOrd.order_status;
+
+      if (totalPaid >= grandTotal) {
+        newPaymentStatus = 'paid_live';
+        newOrderStatus = 'completed';
+      } else if (totalPaid > 0) {
+        newPaymentStatus = 'partially_paid';
+      }
+
+      const confirmedAtIso = new Date().toISOString();
+
+      const updatePayload = {
+        online_amount: newOnlineTotal,
+        cash_due: newCashDue,
+        payment_status: newPaymentStatus,
+        order_status: newOrderStatus,
+        payment_actor_id: customerMobile || 'phonepe_gateway',
+        payment_actor_type: 'customer',
+        payment_actor_name: 'Online Payment (PhonePe)',
+        payment_confirmed_at: confirmedAtIso,
+        updated_at: confirmedAtIso
+      };
+
+      let { error: updateErr } = await supabase.from('orders').update(updatePayload).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+      if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('column'))) {
+        const retry1 = await supabase.from('orders').update({
+          payment_status: newPaymentStatus,
+          online_amount: newOnlineTotal,
+          cash_due: newCashDue,
+          order_status: newOrderStatus,
+          updated_at: confirmedAtIso
+        }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+        updateErr = retry1.error;
+      }
+
+      const updatedOrderObj = { ...existingOrd, ...updatePayload };
+      setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+
+      // Persist to server API store
+      try {
+        await fetch('/api/orders/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedOrderObj)
+        });
+      } catch (err) {
+        console.warn("Could not save order to server API:", err);
+      }
+
+      // Credit Hotel Wallet
+      await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, onlineAmountToPay || grandTotal, 'online');
+
+      const txPayload = {
+        id: crypto.randomUUID(),
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number,
+        order_number: existingOrd.order_number,
+        payment_method: 'online',
+        amount: onlineAmountToPay,
+        transaction_id: phonePeResponse.transactionId,
+        status: 'paid',
+        actor_id: customerMobile || 'customer',
+        actor_type: 'customer',
+        actor_name: 'Online Payment (PhonePe)',
+        confirmed_at: confirmedAtIso
+      };
+
+      try {
+        await supabase.from('payment_transactions').insert([txPayload]);
+      } catch (err) {
+        console.warn("payment_transactions insert warning:", err);
+      }
+
+      logAudit({
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        actor_type: 'customer',
+        actor_name: 'Customer (PhonePe)',
+        action: 'PHONEPE_PAYMENT_VERIFIED',
+        previous_status: existingOrd.payment_status,
+        new_status: newPaymentStatus,
+        description: `PhonePe payment ₹${onlineAmountToPay} verified for Order ${existingOrd.order_number} (Txn: ${phonePeResponse.transactionId})`
+      });
+
+      await fetchAllFromSupabase();
+      playNotificationSound('new_order');
+      showToast(`Online payment ₹${onlineAmountToPay} verified via PhonePe!`, 'success');
+      return true;
+    } catch (err: any) {
+      console.error("PhonePe verification error:", err);
+      showToast("Server connection error during payment verification.", "error");
+      return false;
+    }
+  };
+
   const updateOrderPaymentMethod = async (
     orderId: string,
     newMode: 'cash' | 'online' | 'partial' | 'upi_qr',
@@ -4425,7 +4564,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       restaurants, staffList, tables, tableSessions, categories, menuItems,
       orders, feedbackList, callRequests, activityLogs, auditLogs, logAudit,
       subscriptionHistory,
-      paymentTransactions, confirmCashPayment, processRazorpayOnlinePayment, processPayUOnlinePayment, updateOrderPaymentMethod,
+      paymentTransactions, confirmCashPayment, processRazorpayOnlinePayment, processPayUOnlinePayment, processPhonePeOnlinePayment, updateOrderPaymentMethod,
       loginCeo, logoutCeo, ceoRazorpayConfig, updateCeoRazorpayConfig, ceoPaymentConfig, updateCeoPaymentConfig,
       addRestaurant, updateRestaurant, suspendRestaurant,
       resumeRestaurant, grantTrial, endTrial, extendTrial, grantFreeOffer, endFreeOffer, extendFreeOffer, grantFreeExtension, renewSubscription, renewRestaurantMonthly, archiveRestaurant, deleteRestaurantPermanently,

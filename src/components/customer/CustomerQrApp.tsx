@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
 import {
   QrCode, Search, Bell, ShoppingBag, Plus, Minus, CheckCircle2,
@@ -11,6 +11,8 @@ import { CallWaiterModal } from './CallWaiterModal';
 import { FeedbackModal } from './FeedbackModal';
 import { BillModal } from '../common/BillModal';
 import { PayUCheckoutModal } from '../common/PayUCheckoutModal';
+import { PhonePeCheckoutModal } from '../common/PhonePeCheckoutModal';
+import { RazorpayCheckoutModal } from '../common/RazorpayCheckoutModal';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
 import { MenuItem, MenuCategory, TableSession, Table, Language, Restaurant, Order, CouponConfig } from '../../types';
@@ -39,6 +41,7 @@ export const CustomerQrApp: React.FC = () => {
     getOrCreateTableSession,
     processRazorpayOnlinePayment,
     processPayUOnlinePayment,
+    processPhonePeOnlinePayment,
     submitUpiPaymentConfirmation,
     sendCallWaiterRequest,
     showToast,
@@ -142,9 +145,11 @@ export const CustomerQrApp: React.FC = () => {
 
   // Active Session for Table (Loaded once per table/restaurant, stable & persistent)
   const [session, setSession] = useState<TableSession | null>(null);
+  const isDeviceSessionCreator = useRef<boolean>(false);
 
   useEffect(() => {
     let isMounted = true;
+
     if (!table || !restaurant) {
       setSession(null);
       setPinVerified(true);
@@ -152,14 +157,15 @@ export const CustomerQrApp: React.FC = () => {
     }
 
     const loadSession = async () => {
-      // Check ONLY if an active session ALREADY exists in DB (meaning an order was already placed)
       const activeSess = await getActiveTableSession(restaurant.id, table.id);
       if (isMounted) {
         if (activeSess) {
           setSession(activeSess);
           localStorage.setItem(`digimoms_device_session_${table.id}`, activeSess.id);
 
-          const isCreator = localStorage.getItem(`digimoms_session_creator_${activeSess.id}`) === 'true';
+          const isCreator = localStorage.getItem(`digimoms_session_creator_${activeSess.id}`) === 'true' ||
+                            localStorage.getItem(`digimoms_table_creator_${table.id}`) === 'true' ||
+                            isDeviceSessionCreator.current;
           const isVerified = localStorage.getItem(`digimoms_pin_verified_${activeSess.id}`) === 'true';
 
           if (isCreator || isVerified) {
@@ -171,6 +177,8 @@ export const CustomerQrApp: React.FC = () => {
           // NO active session -> customer browsing menu before placing first order!
           setSession(null);
           setPinVerified(true);
+          isDeviceSessionCreator.current = true;
+          localStorage.setItem(`digimoms_table_creator_${table.id}`, 'true');
         }
       }
     };
@@ -190,17 +198,23 @@ export const CustomerQrApp: React.FC = () => {
 
   const [pinVerified, setPinVerified] = useState<boolean>(() => {
     if (!session) return true;
-    const isCreator = localStorage.getItem(`digimoms_session_creator_${session.id}`) === 'true';
+    const isCreator = localStorage.getItem(`digimoms_session_creator_${session.id}`) === 'true' ||
+                      (table ? localStorage.getItem(`digimoms_table_creator_${table.id}`) === 'true' : false) ||
+                      isDeviceSessionCreator.current;
     const isVerified = localStorage.getItem(`digimoms_pin_verified_${session.id}`) === 'true';
     return isCreator || isVerified;
   });
 
   useEffect(() => {
     if (!session) return;
-    const isCreator = localStorage.getItem(`digimoms_session_creator_${session.id}`) === 'true';
+    const isCreator = localStorage.getItem(`digimoms_session_creator_${session.id}`) === 'true' ||
+                      (table ? localStorage.getItem(`digimoms_table_creator_${table.id}`) === 'true' : false) ||
+                      isDeviceSessionCreator.current;
     const isVerified = localStorage.getItem(`digimoms_pin_verified_${session.id}`) === 'true';
-    setPinVerified(isCreator || isVerified);
-  }, [session]);
+    if (isCreator || isVerified) {
+      setPinVerified(true);
+    }
+  }, [session, table]);
 
   const [pinInput, setPinInput] = useState<string>('');
   const [pinError, setPinError] = useState<string>('');
@@ -229,147 +243,21 @@ export const CustomerQrApp: React.FC = () => {
   const [appliedCoupon, setAppliedCoupon] = useState<CouponConfig | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
 
-  // Modals & Online Payment Gateway State
+  // Modals & Online Payment Gateway State (Pay First, Confirm Order)
   const [showCallModal, setShowCallModal] = useState<boolean>(false);
   const [feedbackOrder, setFeedbackOrder] = useState<string | null>(null);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
-  const [payuModalData, setPayuModalData] = useState<{
-    order: Order;
+  const [onlinePaymentModalData, setOnlinePaymentModalData] = useState<{
+    gateway: 'payu' | 'razorpay' | 'phonepe';
     amountToPay: number;
+    title: string;
+    subtitle: string;
+    effectivePaymentMode: 'online' | 'partial';
+    onlineAmt: number;
+    cashAmt: number;
+    items: any[];
+    financialBreakdown: any;
   } | null>(null);
-  const [pendingOnlineModal, setPendingOnlineModal] = useState<{
-    gateway: 'razorpay' | 'payu' | 'phonepe';
-    order: Order;
-    amountToPay: number;
-    orderOrTxnId: string;
-    keyId: string;
-    hash?: string;
-    actionUrl?: string;
-  } | null>(null);
-  const [onlinePayMethod, setOnlinePayMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
-  const [isVerifyingOnline, setIsVerifyingOnline] = useState<boolean>(false);
-
-  const triggerOnlinePayment = async (
-    order: Order,
-    amountToPay: number,
-    onSuccess: () => void,
-    onCancel: () => void
-  ) => {
-    const gateway = restaurant?.live_gateway || 'payu';
-
-    if (gateway === 'payu') {
-      setPayuModalData({
-        order,
-        amountToPay
-      });
-      return;
-    }
-
-    if (gateway === 'phonepe') {
-      setPendingOnlineModal({
-        gateway: 'phonepe',
-        order,
-        amountToPay,
-        orderOrTxnId: `T${Date.now()}`,
-        keyId: restaurant?.phonepe_merchant_id || 'M22PHONEPE'
-      });
-      return;
-    }
-
-    // Default to Razorpay
-    try {
-      const { ok, data: rzpOrderData } = await safeFetchJson<any>('/api/razorpay/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: amountToPay,
-          currency: 'INR',
-          restaurant_id: order.restaurant_id,
-          order_id: order.id,
-          razorpay_key: restaurant?.razorpay_key,
-          razorpay_secret: restaurant?.razorpay_secret
-        })
-      });
-
-      const rzpOrderId = rzpOrderData?.id || `order_${Math.random().toString(36).substring(2, 10)}`;
-      const keyId = rzpOrderData?.key_id || restaurant?.razorpay_key || 'rzp_test_key';
-
-      const loadScript = () => {
-        return new Promise<boolean>((resolve) => {
-          if ((window as any).Razorpay) {
-            resolve(true);
-            return;
-          }
-          const script = document.createElement('script');
-          script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-          script.onload = () => resolve(true);
-          script.onerror = () => resolve(false);
-          document.body.appendChild(script);
-        });
-      };
-
-      const scriptLoaded = await loadScript();
-
-      if (scriptLoaded && (window as any).Razorpay) {
-        const options = {
-          key: keyId,
-          amount: Math.round(amountToPay * 100),
-          currency: 'INR',
-          name: restaurant?.name || 'Restaurant Order',
-          description: `Order ${order.order_number} (Table ${order.table_number})`,
-          order_id: rzpOrderId,
-          handler: async function (response: any) {
-            const verified = await processRazorpayOnlinePayment(
-              order.id,
-              amountToPay,
-              {
-                razorpay_order_id: response.razorpay_order_id || rzpOrderId,
-                razorpay_payment_id: response.razorpay_payment_id || `pay_${Date.now()}`,
-                razorpay_signature: response.razorpay_signature || 'verified'
-              },
-              customerMobile
-            );
-            if (verified) {
-              onSuccess();
-            } else {
-              onCancel();
-            }
-          },
-          modal: {
-            ondismiss: function () {
-              onCancel();
-            }
-          },
-          prefill: {
-            contact: customerMobile || ''
-          },
-          theme: {
-            color: '#3B82F6'
-          }
-        };
-
-        const rzp = new (window as any).Razorpay(options);
-        rzp.open();
-      } else {
-        setPendingOnlineModal({
-          gateway: 'razorpay',
-          order,
-          amountToPay,
-          orderOrTxnId: rzpOrderId,
-          keyId
-        });
-      }
-    } catch (err) {
-      console.error("Razorpay init error:", err);
-      setPendingOnlineModal({
-        gateway: 'razorpay',
-        order,
-        amountToPay,
-        orderOrTxnId: `order_${Math.random().toString(36).substring(2, 10)}`,
-        keyId: restaurant?.razorpay_key || 'rzp_test_key'
-      });
-    }
-  };
 
   const restCategories = restaurant ? categories.filter(c => c.restaurant_id === restaurant.id && !c.is_hidden) : [];
   const restMenu = restaurant ? menuItems.filter(m => m.restaurant_id === restaurant.id && m.is_available) : [];
@@ -519,6 +407,34 @@ export const CustomerQrApp: React.FC = () => {
       const onlineAmt = effectivePaymentMode === 'partial' ? (Number(partialOnlineAmount) || Math.round(cartGrandTotal / 2)) : (effectivePaymentMode === 'online' ? cartGrandTotal : 0);
       const cashAmt = effectivePaymentMode === 'partial' ? Number((cartGrandTotal - onlineAmt).toFixed(2)) : (effectivePaymentMode === 'cash' ? cartGrandTotal : 0);
 
+      // PAY FIRST FLOW FOR ONLINE / PARTIAL GATEWAY PAYMENTS:
+      if (effectivePaymentMode === 'online' || effectivePaymentMode === 'partial') {
+        const activeGw = (restaurant.live_gateway || 'payu') as 'payu' | 'razorpay' | 'phonepe';
+        setOnlinePaymentModalData({
+          gateway: activeGw,
+          amountToPay: onlineAmt,
+          title: `Table #${table.table_number.replace(/^Table\s+/i, '')} • ${effectivePaymentMode === 'partial' ? 'Advance Payment' : 'Food Order'}`,
+          subtitle: `${restaurant.name} (${items.length} items)`,
+          effectivePaymentMode,
+          onlineAmt,
+          cashAmt,
+          items,
+          financialBreakdown: {
+            subtotal: cartSubtotal,
+            tax: cartTax,
+            discount: cartTotalDiscount,
+            packaging_charge: cartPackagingCharge,
+            service_charge: cartServiceCharge,
+            online_discount: cartOnlineDiscount,
+            coupon_discount: cartCouponDiscount,
+            coupon_code: appliedCoupon?.code || undefined,
+            grand_total: cartGrandTotal
+          }
+        });
+        setIsPlacingOrder(false);
+        return;
+      }
+
       const createdOrder = await placeOrder(
         restaurant.id,
         activeSess.id,
@@ -527,7 +443,7 @@ export const CustomerQrApp: React.FC = () => {
         items,
         effectivePaymentMode,
         customerMobile,
-        effectivePaymentMode === 'partial' ? { online_amount: onlineAmt, cash_amount: cashAmt } : undefined,
+        undefined,
         undefined,
         undefined,
         {
@@ -549,21 +465,7 @@ export const CustomerQrApp: React.FC = () => {
 
       setLastPlacedOrder(createdOrder);
 
-      if (effectivePaymentMode === 'online' || effectivePaymentMode === 'partial') {
-        setIsCartOpen(false);
-        await triggerOnlinePayment(
-          createdOrder,
-          onlineAmt,
-          () => {
-            setCart([]);
-            setIsPlacingOrder(false);
-          },
-          () => {
-            setCart([]);
-            setIsPlacingOrder(false);
-          }
-        );
-      } else if (effectivePaymentMode === 'upi_qr') {
+      if (effectivePaymentMode === 'upi_qr') {
         setCart([]);
         setIsCartOpen(false);
         setUpiPaymentModalOrder(createdOrder);
@@ -653,8 +555,9 @@ export const CustomerQrApp: React.FC = () => {
   }
 
   // FRIEND JOIN SECURITY GATE
-  // Require PIN verification ONLY if session exists AND active orders exist on this table:
-  if (session && !pinVerified && tableActiveOrders.length > 0) {
+  // Require PIN verification ONLY if session exists AND active orders exist on this table AND device is not the creator AND not in ordering process:
+  const isCurrentlyOrderingOrCheckingOut = isPlacingOrder || isCartOpen || !!onlinePaymentModalData || !!upiPaymentModalOrder || !!lastPlacedOrder || cart.length > 0;
+  if (session && !pinVerified && !isDeviceSessionCreator.current && tableActiveOrders.length > 0 && !isCurrentlyOrderingOrCheckingOut) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 selection:bg-amber-600 selection:text-white">
         <div className="max-w-md w-full bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-6 sm:p-8 space-y-6 text-center shadow-2xl">
@@ -1160,12 +1063,27 @@ export const CustomerQrApp: React.FC = () => {
                             {!isFullyPaid && isOnlinePaymentActive && (
                               <button
                                 onClick={() => {
-                                  triggerOnlinePayment(
-                                    order,
-                                    dueAmt,
-                                    () => {},
-                                    () => {}
-                                  );
+                                  const activeGw = (restaurant?.live_gateway || 'payu') as 'payu' | 'razorpay' | 'phonepe';
+                                  setOnlinePaymentModalData({
+                                    gateway: activeGw,
+                                    amountToPay: dueAmt,
+                                    title: `Order #${order.order_number || ''} • Table ${order.table_number || ''}`,
+                                    subtitle: `Payment for ${restaurant?.name || ''}`,
+                                    effectivePaymentMode: 'online',
+                                    onlineAmt: dueAmt,
+                                    cashAmt: 0,
+                                    items: [],
+                                    financialBreakdown: {
+                                      subtotal: dueAmt,
+                                      tax: 0,
+                                      discount: 0,
+                                      packaging_charge: 0,
+                                      service_charge: 0,
+                                      online_discount: 0,
+                                      coupon_discount: 0,
+                                      grand_total: dueAmt
+                                    }
+                                  });
                                 }}
                                 className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shadow-md transition-all flex items-center gap-1"
                               >
@@ -1906,132 +1824,6 @@ export const CustomerQrApp: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 4: ONLINE PAYMENT VERIFICATION MODAL (PayU / Razorpay) */}
-      {pendingOnlineModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className={`bg-slate-900 border ${pendingOnlineModal.gateway === 'payu' ? 'border-emerald-500/40' : 'border-blue-500/40'} rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl`}>
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-xl ${pendingOnlineModal.gateway === 'payu' ? 'bg-emerald-600/20 text-emerald-400' : 'bg-blue-600/20 text-blue-400'} flex items-center justify-center font-bold`}>
-                  {pendingOnlineModal.gateway === 'payu' ? <Zap className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-white text-sm">
-                    Secure Online Checkout (UPI, Cards, Net Banking)
-                  </h3>
-                  <p className="text-[10px] text-slate-400">Order {pendingOnlineModal.order.order_number} • Table {pendingOnlineModal.order.table_number}</p>
-                </div>
-              </div>
-              <button onClick={() => setPendingOnlineModal(null)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-              <div className="flex justify-between text-xs text-slate-400">
-                <span>Restaurant</span>
-                <strong className="text-white">{restaurant?.name}</strong>
-              </div>
-              <div className="flex justify-between text-xs text-slate-400">
-                <span>Gateway Adapter</span>
-                <span className="font-mono text-[10px] uppercase text-slate-300 font-bold">{pendingOnlineModal.gateway} ({restaurant?.payment_mode || 'demo'})</span>
-              </div>
-              <div className="flex justify-between text-xs text-slate-400">
-                <span>Txn / Key ID</span>
-                <span className="font-mono text-[10px] text-emerald-400">{pendingOnlineModal.keyId.substring(0, 12)}...</span>
-              </div>
-              <div className="flex justify-between text-sm font-extrabold text-white pt-2 border-t border-slate-800">
-                <span>Amount to Pay</span>
-                <span className="text-emerald-400">₹{pendingOnlineModal.amountToPay}</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Select Payment Method</label>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                {(['upi', 'card', 'netbanking'] as const).map(method => (
-                  <button
-                    key={method}
-                    type="button"
-                    onClick={() => setOnlinePayMethod(method)}
-                    className={`p-2.5 rounded-xl border font-bold uppercase transition-all ${
-                      onlinePayMethod === method
-                        ? pendingOnlineModal.gateway === 'payu'
-                          ? 'bg-emerald-600 text-white border-emerald-500'
-                          : 'bg-blue-600 text-white border-blue-500'
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    {method}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button
-              disabled={isVerifyingOnline}
-              onClick={async () => {
-                setIsVerifyingOnline(true);
-
-                if (pendingOnlineModal.gateway === 'payu') {
-                  const mihpayid = `mih_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-                  const success = await processPayUOnlinePayment(
-                    pendingOnlineModal.order.id,
-                    pendingOnlineModal.amountToPay,
-                    {
-                      txnid: pendingOnlineModal.orderOrTxnId,
-                      mihpayid,
-                      hash: pendingOnlineModal.hash,
-                      status: 'success'
-                    },
-                    customerMobile
-                  );
-
-                  setIsVerifyingOnline(false);
-                  if (success) {
-                    setCart([]);
-                    setIsCartOpen(false);
-                    setPendingOnlineModal(null);
-                  }
-                } else {
-                  const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-                  const signature = `sig_${Math.random().toString(36).substring(2, 12)}`;
-
-                  const success = await processRazorpayOnlinePayment(
-                    pendingOnlineModal.order.id,
-                    pendingOnlineModal.amountToPay,
-                    {
-                      razorpay_order_id: pendingOnlineModal.orderOrTxnId,
-                      razorpay_payment_id: paymentId,
-                      razorpay_signature: signature
-                    },
-                    customerMobile
-                  );
-
-                  setIsVerifyingOnline(false);
-                  if (success) {
-                    setCart([]);
-                    setIsCartOpen(false);
-                    setPendingOnlineModal(null);
-                  }
-                }
-              }}
-              className={`w-full py-3.5 rounded-2xl ${
-                pendingOnlineModal.gateway === 'payu'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
-                  : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30'
-              } disabled:bg-slate-800 text-white font-extrabold text-xs shadow-xl flex items-center justify-center gap-2`}
-            >
-              {isVerifyingOnline ? (
-                <span>Verifying Payment (UPI / Card / Net Banking)...</span>
-              ) : (
-                <>
-                  <ShieldCheck className="w-4 h-4" /> Pay ₹{pendingOnlineModal.amountToPay} Online (UPI / Card / Net Banking)
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* VERIFIED ORDER SUCCESS MODAL */}
       {lastPlacedOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
@@ -2108,47 +1900,204 @@ export const CustomerQrApp: React.FC = () => {
       )}
 
       {/* PayU Food Order Payment Gateway Modal */}
-      {payuModalData && restaurant && (
+      {onlinePaymentModalData && onlinePaymentModalData.gateway === 'payu' && restaurant && (
         <PayUCheckoutModal
-          isOpen={!!payuModalData}
-          onClose={() => setPayuModalData(null)}
+          isOpen={true}
+          onClose={() => {
+            setOnlinePaymentModalData(null);
+            setIsPlacingOrder(false);
+          }}
           onSuccess={async (paymentData) => {
-            const currentOrderId = payuModalData.order.id;
-            const currentAmt = payuModalData.amountToPay;
-            const currentOrder = payuModalData.order;
+            try {
+              let activeSess = session;
+              if (!activeSess) {
+                activeSess = await getOrCreateTableSession(restaurant.id, table.id, table.table_number);
+                setSession(activeSess);
+              }
 
-            const success = await processPayUOnlinePayment(
-              currentOrderId,
-              currentAmt,
-              {
-                txnid: paymentData.txnid,
-                mihpayid: paymentData.mihpayid || `mih_${Date.now()}`,
-                hash: paymentData.hash,
-                status: 'success'
-              },
-              customerMobile
-            );
+              const { effectivePaymentMode, onlineAmt, cashAmt, items, financialBreakdown } = onlinePaymentModalData;
 
-            if (success) {
-              setCart([]);
-              setIsCartOpen(false);
-              setPayuModalData(null);
-              setLastPlacedOrder(currentOrder);
-              showToast('🎉 PayU payment confirmed! Your food order is being prepared.', 'success');
+              const createdOrder = await placeOrder(
+                restaurant.id,
+                activeSess.id,
+                table.id,
+                table.table_number,
+                items,
+                effectivePaymentMode,
+                customerMobile,
+                effectivePaymentMode === 'partial' ? { online_amount: onlineAmt, cash_amount: cashAmt } : undefined,
+                undefined,
+                undefined,
+                financialBreakdown
+              );
+
+              if (createdOrder && createdOrder.id) {
+                await processPayUOnlinePayment(
+                  createdOrder.id,
+                  onlineAmt,
+                  {
+                    txnid: paymentData.txnid,
+                    mihpayid: paymentData.mihpayid || `mih_${Date.now()}`,
+                    hash: paymentData.hash,
+                    status: 'success'
+                  },
+                  customerMobile
+                );
+
+                setCart([]);
+                setIsCartOpen(false);
+                setOnlinePaymentModalData(null);
+                setLastPlacedOrder(createdOrder);
+                showToast('🎉 PayU payment confirmed! Your food order is placed and being prepared.', 'success');
+              }
+            } catch (err: any) {
+              console.error("PayU Order Placement Error:", err);
+              showToast('Payment received! Finalizing order...', 'info');
             }
           }}
-          amount={payuModalData.amountToPay}
-          title={`Order #${payuModalData.order.order_number || ''} • Table ${payuModalData.order.table_number || ''}`}
-          subtitle={`Payment for ${restaurant.name}`}
-          orderId={payuModalData.order.id}
+          amount={onlinePaymentModalData.amountToPay}
+          title={onlinePaymentModalData.title}
+          subtitle={onlinePaymentModalData.subtitle}
+          orderId={`ORD_${Date.now()}`}
           restaurantId={restaurant.id}
           restaurantName={restaurant.name}
-          customerName={customerMobile ? `Customer (${customerMobile})` : `Table ${payuModalData.order.table_number}`}
+          customerName={customerMobile ? `Customer (${customerMobile})` : `Table ${table.table_number}`}
           customerMobile={customerMobile || '9999999999'}
           customerEmail="customer@digimoms.in"
           payuKey={restaurant.payu_merchant_key}
           payuSalt={restaurant.payu_merchant_salt}
           env={restaurant.payu_env || 'TEST'}
+          isSubscription={false}
+        />
+      )}
+
+      {/* PhonePe Food Order Payment Gateway Modal */}
+      {onlinePaymentModalData && onlinePaymentModalData.gateway === 'phonepe' && restaurant && (
+        <PhonePeCheckoutModal
+          isOpen={true}
+          onClose={() => {
+            setOnlinePaymentModalData(null);
+            setIsPlacingOrder(false);
+          }}
+          onSuccess={async (paymentData) => {
+            try {
+              let activeSess = session;
+              if (!activeSess) {
+                activeSess = await getOrCreateTableSession(restaurant.id, table.id, table.table_number);
+                setSession(activeSess);
+              }
+
+              const { effectivePaymentMode, onlineAmt, cashAmt, items, financialBreakdown } = onlinePaymentModalData;
+
+              const createdOrder = await placeOrder(
+                restaurant.id,
+                activeSess.id,
+                table.id,
+                table.table_number,
+                items,
+                effectivePaymentMode,
+                customerMobile,
+                effectivePaymentMode === 'partial' ? { online_amount: onlineAmt, cash_amount: cashAmt } : undefined,
+                undefined,
+                undefined,
+                financialBreakdown
+              );
+
+              if (createdOrder && createdOrder.id) {
+                await processPhonePeOnlinePayment(
+                  createdOrder.id,
+                  onlineAmt,
+                  {
+                    transactionId: paymentData.transactionId,
+                    merchantId: paymentData.merchantId,
+                    status: 'PAYMENT_SUCCESS'
+                  },
+                  customerMobile
+                );
+
+                setCart([]);
+                setIsCartOpen(false);
+                setOnlinePaymentModalData(null);
+                setLastPlacedOrder(createdOrder);
+                showToast('🎉 PhonePe payment confirmed! Your food order is placed and being prepared.', 'success');
+              }
+            } catch (err: any) {
+              console.error("PhonePe Order Placement Error:", err);
+            }
+          }}
+          amount={onlinePaymentModalData.amountToPay}
+          title={onlinePaymentModalData.title}
+          subtitle={onlinePaymentModalData.subtitle}
+          merchantId={restaurant.phonepe_merchant_id}
+          saltKey={restaurant.phonepe_salt_key}
+          saltIndex={restaurant.phonepe_salt_index}
+          env={restaurant.phonepe_env || 'TEST'}
+          customerMobile={customerMobile || '9999999999'}
+          customerName={customerMobile ? `Customer (${customerMobile})` : `Table ${table.table_number}`}
+          isSubscription={false}
+        />
+      )}
+
+      {/* Razorpay Food Order Payment Gateway Modal */}
+      {onlinePaymentModalData && onlinePaymentModalData.gateway === 'razorpay' && restaurant && (
+        <RazorpayCheckoutModal
+          isOpen={true}
+          onClose={() => {
+            setOnlinePaymentModalData(null);
+            setIsPlacingOrder(false);
+          }}
+          onSuccess={async (paymentData) => {
+            try {
+              let activeSess = session;
+              if (!activeSess) {
+                activeSess = await getOrCreateTableSession(restaurant.id, table.id, table.table_number);
+                setSession(activeSess);
+              }
+
+              const { effectivePaymentMode, onlineAmt, cashAmt, items, financialBreakdown } = onlinePaymentModalData;
+
+              const createdOrder = await placeOrder(
+                restaurant.id,
+                activeSess.id,
+                table.id,
+                table.table_number,
+                items,
+                effectivePaymentMode,
+                customerMobile,
+                effectivePaymentMode === 'partial' ? { online_amount: onlineAmt, cash_amount: cashAmt } : undefined,
+                undefined,
+                undefined,
+                financialBreakdown
+              );
+
+              if (createdOrder && createdOrder.id) {
+                await processRazorpayOnlinePayment(
+                  createdOrder.id,
+                  onlineAmt,
+                  {
+                    razorpay_payment_id: paymentData.razorpay_payment_id,
+                    razorpay_order_id: paymentData.razorpay_order_id,
+                    razorpay_signature: paymentData.razorpay_signature
+                  },
+                  customerMobile
+                );
+
+                setCart([]);
+                setIsCartOpen(false);
+                setOnlinePaymentModalData(null);
+                setLastPlacedOrder(createdOrder);
+                showToast('🎉 Razorpay payment confirmed! Your food order is placed and being prepared.', 'success');
+              }
+            } catch (err: any) {
+              console.error("Razorpay Order Placement Error:", err);
+            }
+          }}
+          amount={onlinePaymentModalData.amountToPay}
+          title={onlinePaymentModalData.title}
+          subtitle={onlinePaymentModalData.subtitle}
+          razorpayKey={restaurant.razorpay_key}
+          customerMobile={customerMobile || '9999999999'}
+          customerName={customerMobile ? `Customer (${customerMobile})` : `Table ${table.table_number}`}
           isSubscription={false}
         />
       )}

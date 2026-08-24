@@ -19,6 +19,8 @@ import { OfflinePaymentModal } from '../common/OfflinePaymentModal';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RealtimeStatusBadge } from '../common/RealtimeStatusBadge';
 import { PayUCheckoutModal } from '../common/PayUCheckoutModal';
+import { PhonePeCheckoutModal } from '../common/PhonePeCheckoutModal';
+import { RazorpayCheckoutModal } from '../common/RazorpayCheckoutModal';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
 import { Order } from '../../types';
 
@@ -52,6 +54,8 @@ export const OwnerDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'tables' | 'staff' | 'payments' | 'reports' | 'feedback' | 'settings' | 'public-website'>('overview');
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [showPayUSubscriptionModal, setShowPayUSubscriptionModal] = useState(false);
+  const [showPhonePeSubscriptionModal, setShowPhonePeSubscriptionModal] = useState(false);
+  const [showRazorpaySubscriptionModal, setShowRazorpaySubscriptionModal] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
   const [selectedOfflineOrder, setSelectedOfflineOrder] = useState<Order | null>(null);
@@ -320,13 +324,13 @@ export const OwnerDashboard: React.FC = () => {
   };
 
   const handleRenewalClick = () => {
+    setShowRenewalModal(false);
     if (ceoPaymentConfig?.primary_gateway === 'payu') {
-      setShowRenewalModal(false);
       setShowPayUSubscriptionModal(true);
     } else if (ceoPaymentConfig?.primary_gateway === 'razorpay') {
-      handleProcessRazorpayRenewal();
+      setShowRazorpaySubscriptionModal(true);
     } else {
-      handleProcessPhonePeRenewal();
+      setShowPhonePeSubscriptionModal(true);
     }
   };
 
@@ -1042,6 +1046,61 @@ export const OwnerDashboard: React.FC = () => {
         payuKey={ceoPaymentConfig?.payu_merchant_key}
         payuSalt={ceoPaymentConfig?.payu_merchant_salt}
         env={ceoPaymentConfig?.payu_env || 'TEST'}
+        isSubscription={true}
+      />
+
+      {/* PhonePe Subscription Renewal Modal */}
+      <PhonePeCheckoutModal
+        isOpen={showPhonePeSubscriptionModal}
+        onClose={() => setShowPhonePeSubscriptionModal(false)}
+        onSuccess={async (paymentData) => {
+          await renewRestaurantMonthly(currentOwner.id, 1, {
+            transactionId: paymentData.transactionId,
+            mode: ceoPaymentConfig?.mode || 'demo'
+          });
+          setShowPhonePeSubscriptionModal(false);
+          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via PhonePe!', 'success');
+        }}
+        amount={monthlyFee}
+        title="DigiMoms Smart Restaurant OS Subscription"
+        subtitle="Monthly Standard Plan Renewal (1 Calendar Month)"
+        restaurantId={currentOwner.id}
+        restaurantName={currentOwner.name}
+        customerName={currentOwner.owner_name || currentOwner.name}
+        customerMobile={currentOwner.owner_mobile}
+        customerEmail={currentOwner.owner_email}
+        merchantId={ceoPaymentConfig?.phonepe_merchant_id}
+        saltKey={ceoPaymentConfig?.phonepe_salt_key}
+        saltIndex={ceoPaymentConfig?.phonepe_salt_index}
+        env={ceoPaymentConfig?.phonepe_env === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX'}
+        isSubscription={true}
+      />
+
+      {/* Razorpay Subscription Renewal Modal */}
+      <RazorpayCheckoutModal
+        isOpen={showRazorpaySubscriptionModal}
+        onClose={() => setShowRazorpaySubscriptionModal(false)}
+        onSuccess={async (paymentData) => {
+          await renewRestaurantMonthly(currentOwner.id, 1, {
+            transactionId: paymentData.razorpay_payment_id,
+            mode: 'live',
+            razorpay_order_id: paymentData.razorpay_order_id,
+            razorpay_payment_id: paymentData.razorpay_payment_id,
+            razorpay_signature: paymentData.razorpay_signature
+          });
+          setShowRazorpaySubscriptionModal(false);
+          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via Razorpay!', 'success');
+        }}
+        amount={monthlyFee}
+        title="DigiMoms Smart Restaurant OS Subscription"
+        subtitle="Monthly Standard Plan Renewal (1 Calendar Month)"
+        restaurantId={currentOwner.id}
+        restaurantName={currentOwner.name}
+        customerName={currentOwner.owner_name || currentOwner.name}
+        customerMobile={currentOwner.owner_mobile}
+        customerEmail={currentOwner.owner_email}
+        razorpayKey={ceoPaymentConfig?.razorpay_key_id}
+        razorpaySecret={ceoPaymentConfig?.razorpay_key_secret}
         isSubscription={true}
       />
     </div>
