@@ -36,7 +36,15 @@ export const KitchenTerminal: React.FC = () => {
       </div>
     );
   }
-  const restOrders = orders.filter(o => o.restaurant_id === currentStaff.restaurant_id && o.order_status !== 'completed' && o.order_status !== 'cancelled');
+  const restOrders = orders.filter(o => {
+    if (o.restaurant_id !== currentStaff.restaurant_id) return false;
+    if (o.order_status === 'completed' || o.order_status === 'cancelled') return false;
+    // Exclude unverified online checkout attempts so Kitchen only receives confirmed orders
+    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      return false;
+    }
+    return true;
+  });
 
   const incomingOrders = restOrders.filter(o => o.order_status === 'pending' || o.order_status === 'received' || o.order_status === 'accepted');
   const cookingOrders = restOrders.filter(o => o.order_status === 'cooking');

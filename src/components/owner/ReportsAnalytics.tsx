@@ -33,20 +33,93 @@ export const ReportsAnalytics: React.FC = () => {
 
   if (!currentOwner) return null;
 
-  // --- SALES DATA ---
+  // --- SALES DATA & REVENUE CALCULATION ---
   const restOrders = useMemo(() => {
     return orders.filter(o => o.restaurant_id === currentOwner.id);
   }, [orders, currentOwner.id]);
 
-  const filteredOrders = useMemo(() => {
-    return restOrders.filter(o => salesFilterMode === 'all' || o.payment_mode === salesFilterMode);
-  }, [restOrders, salesFilterMode]);
+  // Valid non-cancelled orders that are either placed (cash/split/upi) or verified paid (online)
+  const validOrders = useMemo(() => {
+    return restOrders.filter(o => {
+      if (o.order_status === 'cancelled') return false;
+      // If payment mode is online and payment has not been verified/paid, ignore as uncompleted gateway checkout
+      if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+        return false;
+      }
+      return true;
+    });
+  }, [restOrders]);
 
-  const totalSales = restOrders.reduce((sum, o) => sum + Number(o.grand_total || 0), 0);
-  const onlineSales = restOrders.reduce((sum, o) => sum + Number(o.online_amount || 0), 0);
-  const cashSales = restOrders.reduce((sum, o) => sum + Number(o.cash_amount || 0), 0);
-  const pendingSales = restOrders.reduce((sum, o) => sum + Number(o.cash_due ?? (o.grand_total - (o.online_amount || 0) - (o.cash_amount || 0))), 0);
-  const totalOrdersCount = restOrders.length;
+  const filteredOrders = useMemo(() => {
+    return validOrders.filter(o => salesFilterMode === 'all' || o.payment_mode === salesFilterMode);
+  }, [validOrders, salesFilterMode]);
+
+  // 1. Online Revenue: All auto-verified online transactions (Razorpay, PayU, PhonePe, Demo, verified UPI)
+  const onlineSales = useMemo(() => {
+    return restOrders.reduce((sum, o) => {
+      if (o.order_status === 'cancelled') return sum;
+      if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+        return sum + Number(o.online_amount || o.grand_total);
+      }
+      if (o.payment_mode === 'demo') {
+        return sum + Number(o.online_amount || o.grand_total);
+      }
+      if (o.payment_mode === 'partial') {
+        if (['paid_live', 'paid', 'paid_demo', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
+          return sum + Number(o.online_amount || 0);
+        }
+      }
+      if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+        return sum + Number(o.online_amount || o.grand_total);
+      }
+      return sum;
+    }, 0);
+  }, [restOrders]);
+
+  // 2. Cash Revenue: Confirmed cash payments received and marked by Owner or Staff
+  const cashSales = useMemo(() => {
+    return restOrders.reduce((sum, o) => {
+      if (o.order_status === 'cancelled') return sum;
+      if (o.payment_mode === 'cash') {
+        if (['paid_cash', 'paid', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
+          return sum + Number(o.cash_amount || o.grand_total);
+        } else if ((o.cash_amount || 0) > 0) {
+          return sum + Number(o.cash_amount || 0);
+        }
+      }
+      if (o.payment_mode === 'partial') {
+        if (['paid', 'paid_cash'].includes(o.payment_status)) {
+          const onlinePaid = Number(o.online_amount || 0);
+          return sum + Number(o.cash_amount || (o.grand_total - onlinePaid));
+        } else if ((o.cash_amount || 0) > 0) {
+          return sum + Number(o.cash_amount || 0);
+        }
+      }
+      return sum;
+    }, 0);
+  }, [restOrders]);
+
+  // 3. Total Realized Revenue: Strictly the actual collected money (Online Auto + Confirmed Cash)
+  const totalSales = useMemo(() => {
+    return onlineSales + cashSales;
+  }, [onlineSales, cashSales]);
+
+  // 4. Pending Payment: Real uncollected cash due on active placed orders (excludes cancelled and abandoned online)
+  const pendingSales = useMemo(() => {
+    return validOrders.reduce((sum, o) => {
+      if (['paid', 'paid_live', 'paid_cash', 'paid_demo'].includes(o.payment_status)) {
+        return sum; // Fully paid
+      }
+      const onlinePaid = (o.payment_mode === 'online' || o.payment_mode === 'upi_qr' || o.payment_mode === 'demo')
+        ? (['paid_live', 'paid', 'paid_demo'].includes(o.payment_status) ? o.grand_total : 0)
+        : Number(o.online_amount || 0);
+      const cashPaid = Number(o.cash_amount || 0);
+      const remainingDue = Math.max(0, o.grand_total - (onlinePaid + cashPaid));
+      return sum + remainingDue;
+    }, 0);
+  }, [validOrders]);
+
+  const totalOrdersCount = validOrders.length;
 
   // --- DERIVED PAYMENT TRANSACTIONS (Guaranteed Complete Real Data) ---
   const derivedTransactions = useMemo(() => {
@@ -73,13 +146,13 @@ export const ReportsAnalytics: React.FC = () => {
       });
     });
 
-    // Next derive transactions from orders to ensure every single order is tracked
-    restOrders.forEach(ord => {
+    // Next derive transactions from valid orders to ensure every single order is tracked
+    validOrders.forEach(ord => {
       const hasExplicit = explicitTxs.some(pt => pt.order_id === ord.id);
       if (hasExplicit) return; // avoid duplication if explicit transaction row exists
 
       const isSplit = ord.payment_mode === 'partial' || ((ord.online_amount || 0) > 0 && (ord.cash_amount || 0) > 0);
-      const method = isSplit ? 'split' : (ord.payment_mode === 'online' ? 'online' : (ord.payment_mode === 'demo' ? 'demo' : 'cash'));
+      const method = isSplit ? 'split' : (ord.payment_mode === 'online' ? 'online' : (ord.payment_mode === 'demo' ? 'demo' : (ord.payment_mode === 'upi_qr' ? 'upi_qr' : 'cash')));
 
       let statusNormalized: 'paid' | 'pending' | 'partially_paid' | 'failed' = 'pending';
       if (['paid', 'paid_live', 'paid_cash', 'paid_demo'].includes(ord.payment_status)) {
@@ -92,16 +165,24 @@ export const ReportsAnalytics: React.FC = () => {
         statusNormalized = 'pending';
       }
 
-      const txId = ord.razorpay_payment_id || ord.razorpay_order_id || (statusNormalized === 'paid' ? `CASH_${ord.order_number}` : '-');
+      const txId = ord.razorpay_payment_id || ord.razorpay_order_id || ord.upi_ref_number || (statusNormalized === 'paid' ? `TXN_${ord.order_number.replace('#', '')}` : '-');
 
       const confirmedBy = ord.verified_by
         ? ord.verified_by
         : (ord.payment_actor_name
             ? `${ord.payment_actor_name} (${ord.payment_actor_type || 'staff'})`
-            : (method === 'online' ? 'Online Gateway (Razorpay)' : (statusNormalized === 'paid' ? 'Staff / Owner' : 'Pending Confirmation'))
+            : (['paid_live', 'paid_demo'].includes(ord.payment_status) || method === 'online' ? 'Online Gateway (Auto Verified)' : (statusNormalized === 'paid' ? 'Staff / Owner' : 'Awaiting Cash Collection'))
           );
 
       const derivedId = `ord_tx_${ord.id}`;
+      const onlineAmt = ['paid_live', 'paid_demo'].includes(ord.payment_status) && method === 'online'
+        ? Number(ord.grand_total)
+        : Number(ord.online_amount || 0);
+      const cashAmt = statusNormalized === 'paid' && method === 'cash'
+        ? Number(ord.grand_total)
+        : Number(ord.cash_amount || 0);
+      const cashDue = Math.max(0, Number(ord.grand_total) - (onlineAmt + cashAmt));
+
       txMap.set(derivedId, {
         id: derivedId,
         order_id: ord.id,
@@ -110,9 +191,9 @@ export const ReportsAnalytics: React.FC = () => {
         customer_mobile: ord.customer_mobile || undefined,
         payment_method: method,
         total_amount: Number(ord.grand_total || 0),
-        online_amount: Number(ord.online_amount || 0),
-        cash_amount: Number(ord.cash_amount || 0),
-        cash_due: Number(ord.cash_due ?? (ord.grand_total - (ord.online_amount || 0) - (ord.cash_amount || 0))),
+        online_amount: onlineAmt,
+        cash_amount: cashAmt,
+        cash_due: statusNormalized === 'paid' ? 0 : cashDue,
         status: statusNormalized,
         transaction_id: txId,
         confirmed_by: confirmedBy,
@@ -123,7 +204,7 @@ export const ReportsAnalytics: React.FC = () => {
 
     const result = Array.from(txMap.values());
     return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [orders, paymentTransactions, currentOwner.id, restOrders]);
+  }, [orders, paymentTransactions, currentOwner.id, validOrders]);
 
   const filteredTransactions = useMemo(() => {
     return derivedTransactions.filter(tx => {

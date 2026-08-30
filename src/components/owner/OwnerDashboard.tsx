@@ -78,9 +78,51 @@ export const OwnerDashboard: React.FC = () => {
   const restTables = tables.filter(t => t.restaurant_id === currentOwner.id);
   const restCalls = callRequests.filter(c => c.restaurant_id === currentOwner.id && c.status === 'pending');
 
-  const todaySales = restOrders.reduce((sum, o) => sum + o.grand_total, 0);
-  const pendingOrders = restOrders.filter(o => o.order_status === 'pending');
-  const cookingOrders = restOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted');
+  // Filter confirmed orders (excluding cancelled & unverified online checkout attempts)
+  const confirmedRestOrders = restOrders.filter(o => {
+    if (o.order_status === 'cancelled') return false;
+    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      return false; // Do not show online orders until gateway confirms payment
+    }
+    return true;
+  });
+
+  // Total Realized Revenue: Increases ONLY when customer pays online (auto) or cash is confirmed by staff/owner
+  const todaySales = restOrders.reduce((sum, o) => {
+    if (o.order_status === 'cancelled') return sum;
+    if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      return sum + Number(o.online_amount || o.grand_total);
+    }
+    if (o.payment_mode === 'demo') {
+      return sum + Number(o.online_amount || o.grand_total);
+    }
+    if (o.payment_mode === 'partial') {
+      let paidAmt = 0;
+      if (['paid_live', 'paid', 'paid_demo', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
+        paidAmt += Number(o.online_amount || 0);
+      }
+      if (['paid', 'paid_cash'].includes(o.payment_status)) {
+        paidAmt += Number(o.cash_amount || (o.grand_total - (o.online_amount || 0)));
+      } else if ((o.cash_amount || 0) > 0) {
+        paidAmt += Number(o.cash_amount || 0);
+      }
+      return sum + Math.min(o.grand_total, paidAmt);
+    }
+    if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      return sum + Number(o.online_amount || o.grand_total);
+    }
+    // Cash payment
+    if (['paid', 'paid_cash', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
+      return sum + Number(o.cash_amount || o.grand_total);
+    }
+    return sum + Number(o.cash_amount || 0);
+  }, 0);
+
+  const pendingOrders = confirmedRestOrders.filter(o => {
+    if (['paid', 'paid_live', 'paid_cash', 'paid_demo'].includes(o.payment_status)) return false;
+    return (o.cash_due ?? (o.grand_total - (o.online_amount || 0) - (o.cash_amount || 0))) > 0;
+  });
+  const cookingOrders = confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted');
   const occupiedTables = restTables.filter(t => t.status === 'occupied').length;
 
   const now = Date.now();
@@ -710,78 +752,105 @@ export const OwnerDashboard: React.FC = () => {
 
           {/* Active Orders Section */}
           <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 space-y-4">
-            <h3 className="text-lg font-bold text-white">Live Orders Stream ({restOrders.length})</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white">Live Orders Stream ({confirmedRestOrders.length})</h3>
+              <span className="text-xs text-slate-400">Auto-synced with Online Gateway & Floor Waiters</span>
+            </div>
 
             <div className="space-y-3">
-              {restOrders.map(order => (
-                <div key={order.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="font-bold text-white text-base font-mono">{order.order_number}</span>
-                      <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-200 text-xs font-bold">{order.table_number}</span>
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        order.order_status === 'pending' ? 'bg-amber-950 text-amber-400 border-amber-500/30' :
-                        order.order_status === 'accepted' ? 'bg-blue-950 text-blue-400 border-blue-500/30' :
-                        order.order_status === 'cooking' ? 'bg-indigo-950 text-indigo-400 border-indigo-500/30' :
-                        order.order_status === 'ready' ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' :
-                        order.order_status === 'served' ? 'bg-purple-950 text-purple-300 border-purple-500/30' :
-                        'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}>
-                        {order.order_status}
-                      </span>
+              {confirmedRestOrders.length === 0 ? (
+                <div className="p-8 text-center bg-slate-950/60 rounded-2xl border border-slate-800 text-slate-500 text-xs">
+                  No active orders at this moment. Placed cash and verified online orders will appear here automatically.
+                </div>
+              ) : (
+                confirmedRestOrders.map(order => (
+                  <div key={order.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="font-bold text-white text-base font-mono">{order.order_number}</span>
+                        <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-200 text-xs font-bold">{order.table_number}</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                          order.order_status === 'pending' ? 'bg-amber-950 text-amber-400 border-amber-500/30' :
+                          order.order_status === 'accepted' ? 'bg-blue-950 text-blue-400 border-blue-500/30' :
+                          order.order_status === 'cooking' ? 'bg-indigo-950 text-indigo-400 border-indigo-500/30' :
+                          order.order_status === 'ready' ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' :
+                          order.order_status === 'served' ? 'bg-purple-950 text-purple-300 border-purple-500/30' :
+                          'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}>
+                          {order.order_status}
+                        </span>
+
+                        {['paid_live', 'paid', 'paid_demo'].includes(order.payment_status) && (order.payment_mode === 'online' || order.payment_mode === 'demo') ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> PAID ONLINE (AUTO)
+                          </span>
+                        ) : ['paid_cash', 'paid'].includes(order.payment_status) && order.payment_mode === 'cash' ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> PAID (CASH)
+                          </span>
+                        ) : order.payment_status === 'partially_paid' ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold uppercase">
+                            PARTIAL (DUE: ₹{order.cash_due || 0})
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-400 border border-amber-500/40 text-[10px] font-bold uppercase">
+                            CASH DUE: ₹{order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0))}
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-slate-400">
+                        {order.items.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
+                      </p>
                     </div>
 
-                    <p className="text-xs text-slate-400">
-                      {order.items.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
-                    </p>
-                  </div>
+                    <div className="flex items-center justify-between md:justify-end gap-4 flex-wrap">
+                      <div className="text-right">
+                        <div className="font-bold text-white text-base font-mono">₹{order.grand_total}</div>
+                        <div className="text-[10px] text-slate-400 uppercase">{order.payment_mode}</div>
+                      </div>
 
-                  <div className="flex items-center justify-between md:justify-end gap-4 flex-wrap">
-                    <div className="text-right">
-                      <div className="font-bold text-white text-base">₹{order.grand_total}</div>
-                      <div className="text-[10px] text-slate-400 uppercase">{order.payment_mode} ({order.payment_status})</div>
-                    </div>
+                      {/* Operational Override Buttons */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {order.payment_status === 'payment_verification_pending' && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => verifyUpiPayment(order.id, currentOwner.owner_name, 'owner')}
+                              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md flex items-center gap-1"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> [Verify UPI Paid]
+                            </button>
+                            <button
+                              onClick={() => rejectUpiPayment(order.id, currentOwner.owner_name, 'owner')}
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/80 text-rose-300 font-bold text-xs border border-slate-700"
+                              title="Decline UPI and request cash"
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        )}
 
-                    {/* Operational Override Buttons */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {order.payment_status === 'payment_verification_pending' && (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => verifyUpiPayment(order.id, currentOwner.owner_name, 'owner')}
-                            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md flex items-center gap-1"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> [Verify UPI Paid]
-                          </button>
-                          <button
-                            onClick={() => rejectUpiPayment(order.id, currentOwner.owner_name, 'owner')}
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/80 text-rose-300 font-bold text-xs border border-slate-700"
-                            title="Decline UPI and request cash"
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      )}
-
-                      {(order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0))) > 0 &&
-                       order.payment_status !== 'paid_live' && order.payment_status !== 'paid' && order.payment_status !== 'paid_demo' && order.payment_status !== 'paid_cash' && order.payment_status !== 'payment_verification_pending' && (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setSelectedOfflineOrder(order)}
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs border border-slate-700 flex items-center gap-1 transition-all"
-                            title="Record Cash, Counter UPI, Card or Mixed payment"
-                          >
-                            <Banknote className="w-3 h-3 text-emerald-400" />
-                            <span>Split / Pay</span>
-                          </button>
-                          <button
-                            onClick={() => verifyCashOrder(order.id, currentOwner.owner_name, 'owner')}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md flex items-center gap-1"
-                          >
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Mark Cash Paid</span>
-                          </button>
-                        </div>
-                      )}
+                        {order.payment_mode !== 'online' &&
+                         (order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0))) > 0 &&
+                         order.payment_status !== 'paid_live' && order.payment_status !== 'paid' && order.payment_status !== 'paid_demo' && order.payment_status !== 'paid_cash' && order.payment_status !== 'payment_verification_pending' && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setSelectedOfflineOrder(order)}
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs border border-slate-700 flex items-center gap-1 transition-all"
+                              title="Record Cash, Counter UPI, Card or Mixed payment"
+                            >
+                              <Banknote className="w-3 h-3 text-emerald-400" />
+                              <span>Split / Pay</span>
+                            </button>
+                            <button
+                              onClick={() => verifyCashOrder(order.id, currentOwner.owner_name, 'owner')}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md flex items-center gap-1"
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Mark Cash Paid</span>
+                            </button>
+                          </div>
+                        )}
 
                       {(order.order_status === 'pending' || order.order_status === 'received') && (
                         <button
@@ -857,7 +926,8 @@ export const OwnerDashboard: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              ))}
+              ))
+            )}
             </div>
           </div>
         </div>
