@@ -22,6 +22,8 @@ export const CeoStorageViewer: React.FC = () => {
   const [tableStats, setTableStats] = useState<TableStorageStat[]>([]);
   const [bucketStats, setBucketStats] = useState<BucketStorageStat[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [dbLatencyMs, setDbLatencyMs] = useState<number | null>(null);
+  const [apiHealthStatus, setApiHealthStatus] = useState<'healthy' | 'warning' | 'offline'>('healthy');
 
   // Standard Supabase Tier Quota References
   const DB_CAPACITY_BYTES = 524288000; // 500 MB Free Tier Limit
@@ -31,6 +33,7 @@ export const CeoStorageViewer: React.FC = () => {
   const fetchStorageInfo = async () => {
     setIsLoading(true);
     setErrorMsg(null);
+    const startTime = performance.now();
     try {
       // 1. Fetch Real Table Record Counts & Estimate Size in Bytes
       const tablesList = [
@@ -72,6 +75,10 @@ export const CeoStorageViewer: React.FC = () => {
           tStats.push({ tableName: tName, count: 0, estimatedBytes: 0 });
         }
       }
+
+      const elapsed = Math.round(performance.now() - startTime);
+      setDbLatencyMs(elapsed);
+      setApiHealthStatus(elapsed < 800 ? 'healthy' : 'warning');
 
       setDbBytes(totalCalculatedDbBytes);
       setTableStats(tStats);
@@ -116,6 +123,7 @@ export const CeoStorageViewer: React.FC = () => {
       setLastRefreshed(new Date().toLocaleTimeString());
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to load real storage metrics");
+      setApiHealthStatus('offline');
     } finally {
       setIsLoading(false);
     }
@@ -316,18 +324,62 @@ export const CeoStorageViewer: React.FC = () => {
           </div>
         </div>
 
-        {/* 5. Health Status */}
+      {/* 5. Health Status */}
         <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
-            <span>Health Status</span>
+            <span>Health & Latency</span>
             {isWarningState ? <AlertTriangle className="w-4 h-4 text-amber-400" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
           </div>
           <div className={`text-base font-extrabold ${isWarningState ? 'text-amber-400' : 'text-emerald-400'}`}>
             {isCriticalState ? 'CRITICAL' : isWarningState ? 'WARNING' : 'HEALTHY'}
           </div>
           <div className="text-[10px] font-mono text-slate-400">
-            {isWarningState ? 'Satarko: Action Required' : 'Supabase Active & Stable'}
+            {dbLatencyMs !== null ? `Query Latency: ${dbLatencyMs}ms` : 'Supabase Active & Stable'}
           </div>
+        </div>
+      </div>
+
+      {/* System Hosting & Provider Information */}
+      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 space-y-4">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-blue-400" />
+          <span>System Infrastructure & Hosting Status</span>
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
+            <span className="text-slate-500 uppercase text-[10px] font-bold block">Backend Runtime</span>
+            <div className="text-white font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+              Node.js (Express + Vite)
+            </div>
+            <p className="text-[11px] text-slate-400">Production Mode: Active Port 3000</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
+            <span className="text-slate-500 uppercase text-[10px] font-bold block">Database Provider</span>
+            <div className="text-white font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+              Supabase PostgreSQL
+            </div>
+            <p className="text-[11px] text-slate-400">Status: Connected ({dbLatencyMs ?? '—'} ms)</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
+            <span className="text-slate-500 uppercase text-[10px] font-bold block">AI Intelligence Engine</span>
+            <div className="text-white font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
+              Gemini 3.6 Flash
+            </div>
+            <p className="text-[11px] text-slate-400">Endpoint: /api/ai-help (Active)</p>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-blue-950/30 border border-blue-800/50 text-blue-300 text-xs flex items-center gap-3">
+          <AlertCircle className="w-4 h-4 text-blue-400 shrink-0" />
+          <span>
+            <strong>Provider Telemetry Notice:</strong> Live CPU, memory usage, and egress bandwidth are available in your cloud hosting provider dashboard (Google Cloud Run / Supabase Dashboard).
+          </span>
         </div>
       </div>
 

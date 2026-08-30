@@ -334,6 +334,50 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activeView, setActiveViewRaw] = useState<ActiveView>(initialRoute.view);
   const [activeSlug, setActiveSlugState] = useState<string>(initialRoute.slug);
   const [activeShortCode, setActiveShortCodeRaw] = useState<string>(initialRoute.shortCode);
+
+  // 15-Minute Inactivity Auto-Logout
+  useEffect(() => {
+    if (!ceoAuthenticated && !currentOwner && !currentStaff) return;
+
+    let timeoutId: any = null;
+    const INACTIVITY_LIMIT_MS = 15 * 60 * 1000; // 15 minutes
+
+    const resetInactivityTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (ceoAuthenticated) {
+          setCeoAuthenticated(false);
+          sessionStorage.removeItem('digimoms_ceo_auth');
+          localStorage.removeItem('digimoms_ceo_auth');
+          setActiveViewRaw('ceo-login');
+          showToast('CEO session ended due to 15 minutes of inactivity.', 'info');
+        }
+        if (currentOwner) {
+          setCurrentOwner(null);
+          sessionStorage.removeItem('digimoms_current_owner');
+          localStorage.removeItem('digimoms_current_owner');
+          setActiveViewRaw('owner-login');
+          showToast('Owner session ended due to 15 minutes of inactivity.', 'info');
+        }
+        if (currentStaff) {
+          setCurrentStaff(null);
+          sessionStorage.removeItem('digimoms_current_staff');
+          setActiveViewRaw('staff-login');
+          showToast('Staff session ended due to 15 minutes of inactivity.', 'info');
+        }
+      }, INACTIVITY_LIMIT_MS);
+    };
+
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(evt => window.addEventListener(evt, resetInactivityTimer, { passive: true }));
+    resetInactivityTimer();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach(evt => window.removeEventListener(evt, resetInactivityTimer));
+    };
+  }, [ceoAuthenticated, currentOwner, currentStaff]);
+
   const [language, setLanguageRaw] = useState<Language>(() => {
     try {
       const saved = localStorage.getItem('digimoms_lang');
@@ -1235,9 +1279,51 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       : { event: '*', schema: 'public', table: 'table_sessions' };
 
     let reconnectTimeout: any = null;
+    let eventSource: EventSource | null = null;
 
     setRealtimeStatus('connecting');
 
+    // 1. Connect to Backend Server-Sent Events (SSE) Stream for 0-1s instant delivery
+    const sseUrl = activeRestId 
+      ? `/api/realtime/events?restaurant_id=${activeRestId}`
+      : `/api/realtime/events`;
+
+    try {
+      eventSource = new EventSource(sseUrl);
+      eventSource.onopen = () => {
+        console.log(`[SSE REALTIME] Connected to event stream: ${sseUrl}`);
+        setRealtimeStatus('connected');
+      };
+      eventSource.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed.type === 'NEW_ORDER' && parsed.data) {
+            processOrderInsert(parsed.data);
+          } else if (parsed.type === 'ORDER_UPDATED' && parsed.data) {
+            processOrderUpdate(parsed.data, null);
+          } else if (parsed.type === 'CALL_WAITER' && parsed.data) {
+            processCallInsert(parsed.data);
+          } else if (parsed.type === 'CALL_WAITER_UPDATED' && parsed.data) {
+            processCallUpdate(parsed.data);
+          } else if (parsed.type === 'SESSION_UPDATE' && parsed.data) {
+            const newRow = parsed.data;
+            if (newRow?.id) {
+              setTableSessions(prev => [newRow as TableSession, ...prev.filter(s => s.id !== newRow.id)]);
+            }
+          }
+          fetchAllFromSupabase();
+        } catch (e) {
+          // heartbeat or unparseable
+        }
+      };
+      eventSource.onerror = (err) => {
+        console.warn('[SSE REALTIME] Connection status notice:', err);
+      };
+    } catch (sseErr) {
+      console.warn('[SSE REALTIME] Initialization notice:', sseErr);
+    }
+
+    // 2. Connect to Supabase Postgres Realtime replication channel
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', ordersFilter as any, (payload: any) => {
@@ -1295,6 +1381,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (eventSource) eventSource.close();
       supabase.removeChannel(channel);
     };
   }, [currentOwner?.id, currentStaff?.restaurant_id, reconnectCounter]);
@@ -1319,8 +1406,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const envPass = (import.meta as any).env?.CEO_BOOTSTRAP_PASSWORD || 'Swastika4945@';
     const requiredPin = '494549';
 
-    const validMobiles = [envMobile.trim(), '8900415647', '9999999999'];
-    const validPasswords = [envPass.trim(), 'Swastika4945@', 'ceo123'];
+    const validMobiles = [envMobile.trim(), '8900415647'];
+    const validPasswords = [envPass.trim(), 'Swastika4945@'];
 
     if (pin.trim() !== requiredPin) {
       showToast('Invalid CEO Secret PIN. Access Denied.', 'error');
@@ -2331,7 +2418,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const factoryResetRestaurant = async (id: string, ceoPass: string): Promise<boolean> => {
     const envPass = (import.meta as any).env?.CEO_BOOTSTRAP_PASSWORD || 'Swastika4945@';
-    if (ceoPass !== envPass && ceoPass !== 'Swastika4945@' && ceoPass !== 'ceo123') {
+    if (ceoPass !== envPass && ceoPass !== 'Swastika4945@') {
       showToast('Incorrect CEO Password! Factory reset blocked.', 'error');
       return false;
     }
@@ -2357,7 +2444,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const executeProductionReset = async (ceoPassword?: string): Promise<boolean> => {
     const envPass = (import.meta as any).env?.CEO_BOOTSTRAP_PASSWORD || 'Swastika4945@';
-    if (ceoPassword && ceoPassword !== envPass && ceoPassword !== 'Swastika4945@' && ceoPassword !== 'ceo123') {
+    if (ceoPassword && ceoPassword !== envPass && ceoPassword !== 'Swastika4945@') {
       showToast('Incorrect CEO Password! Production reset blocked.', 'error');
       return false;
     }

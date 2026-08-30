@@ -156,6 +156,73 @@ async function startServer() {
     res.json({ success: true, data: configs[id] });
   });
 
+  // Realtime Server-Sent Events (SSE) Manager for Ultra-Fast Instant Multi-Device Notifications
+  const sseClients = new Map<string, Set<express.Response>>();
+
+  function broadcastRealtimeOrderEvent(restaurantId: string | undefined, eventPayload: any) {
+    const targetIds = ['all'];
+    if (restaurantId) targetIds.push(restaurantId);
+
+    targetIds.forEach(rid => {
+      const clients = sseClients.get(rid);
+      if (clients) {
+        const msg = `data: ${JSON.stringify(eventPayload)}\n\n`;
+        clients.forEach(res => {
+          try {
+            res.write(msg);
+          } catch (e) {
+            clients.delete(res);
+          }
+        });
+      }
+    });
+  }
+
+  // API Route: Realtime SSE Stream for Dashboards & Terminals
+  app.get('/api/realtime/events', (req, res) => {
+    const restaurantId = (req.query.restaurant_id as string) || 'all';
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    if (!sseClients.has(restaurantId)) {
+      sseClients.set(restaurantId, new Set());
+    }
+    sseClients.get(restaurantId)!.add(res);
+
+    // Initial connection acknowledgement
+    res.write(`data: ${JSON.stringify({ type: 'CONNECTED', restaurant_id: restaurantId, timestamp: new Date().toISOString() })}\n\n`);
+
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(keepAlive);
+      }
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      sseClients.get(restaurantId)?.delete(res);
+    });
+  });
+
+  // API Route: Cross-Device Realtime Broadcast Endpoint
+  app.post('/api/realtime/broadcast', (req, res) => {
+    const { restaurant_id, type, order, call_request, payload } = req.body;
+    broadcastRealtimeOrderEvent(restaurant_id, {
+      type: type || 'EVENT',
+      restaurant_id,
+      order,
+      call_request,
+      payload,
+      timestamp: new Date().toISOString()
+    });
+    res.json({ success: true });
+  });
+
   // API Route: Persistent Orders Sync & Backup
   app.get('/api/orders/list', (req, res) => {
     const { restaurant_id } = req.query;
@@ -171,12 +238,23 @@ async function startServer() {
     }
     const allOrders = readJsonFile<any[]>('orders.json', []);
     const idx = allOrders.findIndex(o => o.id === order.id);
+    let isNew = false;
     if (idx >= 0) {
       allOrders[idx] = { ...allOrders[idx], ...order, updated_at: new Date().toISOString() };
     } else {
+      isNew = true;
       allOrders.unshift({ ...order, created_at: order.created_at || new Date().toISOString() });
     }
     writeJsonFile('orders.json', allOrders.slice(0, 1000));
+
+    // Immediately broadcast to all connected Owner & Staff dashboards via SSE
+    broadcastRealtimeOrderEvent(order.restaurant_id, {
+      type: isNew ? 'NEW_ORDER' : 'ORDER_UPDATED',
+      restaurant_id: order.restaurant_id,
+      order,
+      timestamp: new Date().toISOString()
+    });
+
     res.json({ success: true, data: order });
   });
 
@@ -375,6 +453,7 @@ async function startServer() {
   app.all('/api/phonepe/callback', (req, res) => {
     try {
       const data = req.method === 'POST' ? req.body : req.query;
+      const reqQuery = req.query || {};
       let transactionId = '';
       let merchantTransactionId = '';
       let code = 'PAYMENT_SUCCESS';
@@ -399,6 +478,48 @@ async function startServer() {
         code = String(data?.code || 'PAYMENT_SUCCESS');
         isSuccess = code === 'PAYMENT_SUCCESS' || data?.status === 'SUCCESS' || data?.status === 'success';
         amount = Number(data?.amount) || 0;
+      }
+
+      const orderId = String(reqQuery.order_id || (req.body && req.body.order_id) || '');
+      const tableCode = String(reqQuery.table_code || (req.body && req.body.table_code) || '');
+      const paymentType = String(reqQuery.type || (req.body && req.body.type) || '');
+      const isSubscription = paymentType === 'subscription' || merchantTransactionId.startsWith('SUB_') || merchantTransactionId.startsWith('RENEW_');
+
+      let targetRedirectUrl = '/';
+      if (isSubscription) {
+        targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+      } else if (tableCode || orderId) {
+        targetRedirectUrl = `/q/${encodeURIComponent(tableCode || 'table')}?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+      } else {
+        targetRedirectUrl = '/owner-dashboard';
+      }
+
+      // Update server order record if payment was successful
+      if (isSuccess && orderId) {
+        try {
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const idx = allOrders.findIndex(o => o.id === orderId);
+          if (idx >= 0) {
+            allOrders[idx] = {
+              ...allOrders[idx],
+              payment_status: 'paid_live',
+              order_status: allOrders[idx].order_status === 'pending' ? 'accepted' : allOrders[idx].order_status,
+              online_amount: amount || allOrders[idx].grand_total,
+              cash_due: 0,
+              transaction_id: merchantTransactionId || transactionId,
+              updated_at: new Date().toISOString()
+            };
+            writeJsonFile('orders.json', allOrders.slice(0, 1000));
+            broadcastRealtimeOrderEvent(allOrders[idx].restaurant_id, {
+              type: 'ORDER_UPDATED',
+              restaurant_id: allOrders[idx].restaurant_id,
+              order: allOrders[idx],
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          console.warn('Could not sync order on PhonePe callback:', e);
+        }
       }
 
       const htmlResponse = `
@@ -484,7 +605,7 @@ async function startServer() {
               ${transactionId ? `<div class="row"><span>PhonePe ID:</span><span style="font-family: monospace; font-size: 11px;">${transactionId}</span></div>` : ''}
             </div>
 
-            <button class="btn" onclick="closeOrRedirect()">Return to Dashboard</button>
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Return to Dashboard' : 'Return to Order'}</button>
           </div>
 
           <script>
@@ -494,7 +615,9 @@ async function startServer() {
               code: '${code}',
               merchantTransactionId: '${merchantTransactionId}',
               transactionId: '${transactionId}',
-              amount: '${amount}'
+              amount: '${amount}',
+              order_id: '${orderId}',
+              table_code: '${tableCode}'
             };
 
             try {
@@ -520,7 +643,7 @@ async function startServer() {
               if (window.opener) {
                 try { window.close(); } catch(e) {}
               } else {
-                window.location.href = '/owner-dashboard';
+                window.location.href = '${targetRedirectUrl}';
               }
             }
 
@@ -528,6 +651,10 @@ async function startServer() {
               setTimeout(() => {
                 try { window.close(); } catch(e) {}
               }, 2000);
+            } else if (!window.opener && '${isSuccess}' === 'true') {
+              setTimeout(() => {
+                window.location.href = '${targetRedirectUrl}';
+              }, 2500);
             }
           </script>
         </body>
@@ -640,6 +767,9 @@ async function startServer() {
     verified_at: string;
     udf1?: string;
     udf2?: string;
+    udf3?: string;
+    udf4?: string;
+    udf5?: string;
   }
   const verifiedPayUTransactions = new Map<string, VerifiedPayUPaymentRecord>();
 
@@ -1002,6 +1132,9 @@ async function startServer() {
       const hash = data.hash || '';
       const udf1 = data.udf1 || ''; // restaurant_id
       const udf2 = data.udf2 || ''; // order_id
+      const udf3 = data.udf3 || ''; // table_short_code
+      const udf4 = data.udf4 || ''; // session_id
+      const udf5 = data.udf5 || ''; // is_subscription: '1' if subscription
 
       const isSuccess = status === 'success';
 
@@ -1015,8 +1148,50 @@ async function startServer() {
           mode: 'payu_gateway',
           verified_at: new Date().toISOString(),
           udf1,
-          udf2
+          udf2,
+          udf3,
+          udf4,
+          udf5
         });
+      }
+
+      const isSubscription = udf5 === '1' || txnid.startsWith('SUB_') || txnid.startsWith('RENEW_');
+
+      let targetRedirectUrl = '/';
+      if (isSubscription) {
+        targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
+      } else if (udf3 || udf2) {
+        targetRedirectUrl = `/q/${encodeURIComponent(udf3 || 'table')}?order_id=${encodeURIComponent(udf2)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
+      } else {
+        targetRedirectUrl = '/';
+      }
+
+      // Update server order record if payment was successful
+      if (isSuccess && udf2) {
+        try {
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const idx = allOrders.findIndex(o => o.id === udf2);
+          if (idx >= 0) {
+            allOrders[idx] = {
+              ...allOrders[idx],
+              payment_status: 'paid_live',
+              order_status: allOrders[idx].order_status === 'pending' ? 'accepted' : allOrders[idx].order_status,
+              online_amount: amount || allOrders[idx].grand_total,
+              cash_due: 0,
+              transaction_id: txnid || mihpayid,
+              updated_at: new Date().toISOString()
+            };
+            writeJsonFile('orders.json', allOrders.slice(0, 1000));
+            broadcastRealtimeOrderEvent(allOrders[idx].restaurant_id, {
+              type: 'ORDER_UPDATED',
+              restaurant_id: allOrders[idx].restaurant_id,
+              order: allOrders[idx],
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          console.warn('Could not sync order on PayU callback:', e);
+        }
       }
 
       // Return a clean HTML response that automatically notifies parent or redirects back
@@ -1103,7 +1278,7 @@ async function startServer() {
               ${mihpayid ? `<div class="row"><span>PayU ID:</span><span style="font-family: monospace; font-size: 11px;">${mihpayid}</span></div>` : ''}
             </div>
 
-            <button class="btn" onclick="closeOrRedirect()">Return to App</button>
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Return to Dashboard' : 'Return to Order'}</button>
           </div>
 
           <script>
@@ -1115,7 +1290,10 @@ async function startServer() {
               mihpayid: '${mihpayid}',
               hash: '${hash}',
               udf1: '${udf1}',
-              udf2: '${udf2}'
+              udf2: '${udf2}',
+              udf3: '${udf3}',
+              udf4: '${udf4}',
+              udf5: '${udf5}'
             };
 
             // Notify parent / opener window via PostMessage, localStorage, and BroadcastChannel
@@ -1142,7 +1320,7 @@ async function startServer() {
               if (window.opener) {
                 try { window.close(); } catch(e) {}
               } else {
-                window.location.href = '/';
+                window.location.href = '${targetRedirectUrl}';
               }
             }
 
@@ -1151,6 +1329,10 @@ async function startServer() {
               setTimeout(() => {
                 try { window.close(); } catch(e) {}
               }, 2000);
+            } else if (!window.opener && '${isSuccess}' === 'true') {
+              setTimeout(() => {
+                window.location.href = '${targetRedirectUrl}';
+              }, 2500);
             }
           </script>
         </body>
@@ -1198,18 +1380,30 @@ async function startServer() {
 You are the AI Help Assistant for "DigiMoms Smart Restaurant OS", an India-based enterprise multi-tenant restaurant management software.
 Respond strictly in ${langFull}.
 
+Reasoning Workflow:
+1. IDENTIFY USER ROLE & INTENT: Understand whether user is Customer, Waiter, Kitchen, Owner, or CEO, and what specific action they want to accomplish.
+2. CHECK CONTEXT & ACCURACY: Check current restaurant, view, and role permissions. If user asks for DigiMoms support, contact number, or WhatsApp number, provide official DigiMoms channels:
+   - Official WhatsApp Support Line / Contact: 9475388085 (+91 9475388085)
+   - Official Support Email: digimomsagency@gmail.com
+   - Official Web Portals: https://www.digmoms.in or https://os.digimoms.in
+   - Company: DigiMoms Marketing Agency (Sub: DigiMoms Restaurant OS / DigiMoms Smart Restaurant OS)
+   - Founder & Owner: Tanmoy Jana (Sabang, Paschim Medinipur, West Bengal, India)
+   - Supported Payment Gateways: PayU, PhonePe, Razorpay, plus Direct UPI QR and Cash on Counter / Table
+   - Support Operating Hours: Monday to Saturday, 9:00 AM - 9:00 PM IST
+   Never invent random phone numbers or personal mobile numbers.
+3. ANSWER DIRECTLY: Provide actionable, step-by-step guidance without unrelated answers, hallucinations, or unrequested conversational fluff.
+
 Country & Currency Rules:
 - Default Country: India
 - Default Currency: Indian Rupee (INR / ₹) (e.g. ₹499, ₹999, ₹1,099, ₹2,500)
 - Timezone: Asia/Kolkata
 - NEVER use Bangladesh or BDT (৳) currency or Bangladesh payment services (bKash/Nagad/Rocket/Bangladesh Bank).
-- Even if the user selects Bengali (বাংলা), respond strictly within the Indian context (India, ₹ INR, PhonePe/UPI, Indian restaurant rules).
+- Even if the user selects Bengali (বাংলা), respond strictly within the Indian context (India, ₹ INR, PayU/PhonePe/Razorpay/UPI, Indian restaurant rules).
 
 Payment Gateway Context:
-- Primary Payment Gateway: PhonePe (India's leading UPI, Card & NetBanking gateway) & Razorpay.
-- PhonePe is a selected payment service provider (NOT a sponsor).
+- Supported Payment Gateways in DigiMoms OS: PayU, PhonePe, and Razorpay, plus Direct UPI QR and Cash settlements.
 - Demo Payment Mode: Permanent simulated mode inside app for safe testing without real money transfer. Always label as DEMO PAYMENT.
-- Live Payment Mode: Requires valid PhonePe credentials. Live payments MUST be verified server-side via PhonePe gateway verification API before marking as paid.
+- Live Payment Mode: Requires valid merchant gateway credentials. Live payments MUST be verified server-side via gateway verification API before marking as paid.
 - Never mark live online payments as paid without server verification.
 
 Indian Business Details:
@@ -1232,7 +1426,7 @@ Safety Rule:
 - STRICT PRIVACY: NEVER output passwords, authentication tokens, API secrets, Razorpay/PhonePe secret keys, Supabase service-role keys, private customer payment credentials, or sensitive database credentials.
 
 DigiMoms OS Workflows:
-- Online Payment: Customer/Owner selects Online Payment -> PhonePe checkout -> Server verifies transaction checksum/status -> Payment marked as paid -> Order/Subscription updated.
+- Online Payment: Customer/Owner selects Online Payment -> Gateway checkout -> Server verifies transaction status -> Payment marked as paid -> Order/Subscription updated.
 - Cash Payment: Customer selects cash -> Order shows 'Pending Cash Payment' -> Staff clicks 'Confirm Cash Payment' button on order card -> Status changes to 'Paid (Cash)'.
 - Call Waiter: Customer clicks 'Call Waiter' on QR menu -> Waiter Terminal plays alert -> Waiter clicks 'Accept', visits table, then clicks 'Complete'.
 - Kitchen KDS: Pending -> Accept -> Start Cooking -> Mark Ready -> Waiter serves.

@@ -337,42 +337,8 @@ export async function runAudioDiagnosticTest(): Promise<{
  * @param type Sound tone preset
  * @param eventId Unique ID to prevent duplicate audio plays for the same event
  */
-export function playNotificationSound(type: SoundType, eventId?: string): void {
-  if (!isSoundEnabled()) return;
-
-  if (eventId) {
-    if (playedSoundEventIds.has(eventId)) {
-      console.log(`[Sound] Event ${eventId} sound already played, skipping duplicate.`);
-      return;
-    }
-    playedSoundEventIds.add(eventId);
-    if (playedSoundEventIds.size > 300) {
-      const arr = Array.from(playedSoundEventIds);
-      arr.slice(0, 100).forEach(id => playedSoundEventIds.delete(id));
-    }
-  }
-
-  const volume = getSoundVolume();
-  if (volume <= 0) return;
-
-  // Always attempt to unlock context on trigger
-  unlockAudioContext();
-
+function playSynthSound(ctx: AudioContext, type: SoundType, volume: number): void {
   try {
-    const ctx = getAudioContext();
-    if (!ctx) {
-      playFallbackAudio(type);
-      return;
-    }
-
-    if (ctx.state === 'suspended') {
-      ctx.resume().then(() => {
-        playFallbackAudio(type);
-      }).catch(() => {
-        playFallbackAudio(type);
-      });
-    }
-
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -380,7 +346,7 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
     osc.connect(gain);
     gain.connect(ctx.destination);
 
-    const masterGain = volume * 0.65; // High, crisp volume
+    const masterGain = volume * 0.7; // High, crisp volume
 
     switch (type) {
       case 'new_order':
@@ -398,7 +364,6 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
         osc.start(now);
         osc.stop(now + 1.2);
-        playFallbackAudio(type);
         break;
 
       case 'cash_request':
@@ -412,7 +377,6 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
         osc.start(now);
         osc.stop(now + 0.8);
-        playFallbackAudio(type);
         break;
 
       case 'payment_confirmed':
@@ -425,7 +389,6 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
         osc.start(now);
         osc.stop(now + 0.6);
-        playFallbackAudio(type);
         break;
 
       case 'call_waiter':
@@ -442,7 +405,6 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
         osc.start(now);
         osc.stop(now + 0.7);
-        playFallbackAudio(type);
         break;
 
       case 'kitchen_ready':
@@ -454,7 +416,6 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
         osc.start(now);
         osc.stop(now + 0.7);
-        playFallbackAudio(type);
         break;
 
       case 'order_accepted':
@@ -544,7 +505,58 @@ export function playNotificationSound(type: SoundType, eventId?: string): void {
         break;
     }
   } catch (err) {
-    console.warn('[Sound] Primary synth error, using fallback:', err);
+    console.warn('[Sound] Primary synth error:', err);
+  }
+}
+
+/**
+ * Plays a synthesized notification sound for any event
+ * @param type Sound tone preset
+ * @param eventId Unique ID to prevent duplicate audio plays for the same event
+ */
+export function playNotificationSound(type: SoundType, eventId?: string): void {
+  if (!isSoundEnabled()) return;
+
+  if (eventId) {
+    if (playedSoundEventIds.has(eventId)) {
+      return;
+    }
+    playedSoundEventIds.add(eventId);
+    if (playedSoundEventIds.size > 300) {
+      const arr = Array.from(playedSoundEventIds);
+      arr.slice(0, 100).forEach(id => playedSoundEventIds.delete(id));
+    }
+  }
+
+  const volume = getSoundVolume();
+  if (volume <= 0) return;
+
+  // Always attempt to unlock context on trigger
+  unlockAudioContext();
+
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) {
+      playFallbackAudio(type);
+      return;
+    }
+
+    if (ctx.state === 'suspended') {
+      playFallbackAudio(type);
+      ctx.resume().then(() => {
+        if (ctx.state === 'running') {
+          playSynthSound(ctx, type, volume);
+        }
+      }).catch(() => {
+        playFallbackAudio(type);
+      });
+      return;
+    }
+
+    playSynthSound(ctx, type, volume);
+    playFallbackAudio(type);
+  } catch (err) {
+    console.warn('[Sound] Playback error, trying fallback:', err);
     playFallbackAudio(type);
   }
 }

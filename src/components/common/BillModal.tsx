@@ -79,8 +79,9 @@ export const BillModal: React.FC<BillModalProps> = ({ order, restaurant, onClose
             className="bg-white text-slate-950 p-6 md:p-8 rounded-2xl shadow-xl font-sans text-xs space-y-4 max-w-md mx-auto border border-slate-200"
           >
             {/* Header / Restaurant Info */}
-            <div className="text-center space-y-1 pb-3 border-b border-slate-300">
-              <div className="text-[10px] uppercase font-black tracking-widest text-slate-500">
+            <div className="text-center space-y-1.5 pb-3.5 border-b border-slate-200">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[9px] uppercase font-bold tracking-widest text-slate-600">
+                <ShieldCheck className="w-3 h-3 text-emerald-600" />
                 DigiMoms Smart Restaurant OS
               </div>
 
@@ -88,54 +89,54 @@ export const BillModal: React.FC<BillModalProps> = ({ order, restaurant, onClose
                 <SmartImage
                   src={restaurant.logo}
                   alt={restaurant.name}
-                  className="w-12 h-12 rounded-xl object-cover mx-auto my-1.5 border border-slate-200"
+                  className="w-14 h-14 rounded-2xl object-cover mx-auto my-2 border border-slate-200 shadow-sm"
                 />
               )}
 
-              <h2 className="text-base font-extrabold text-slate-900 tracking-tight uppercase">
+              <h2 className="text-lg font-black text-slate-900 tracking-tight uppercase">
                 {restaurant.name}
               </h2>
 
               {restaurant.address && (
-                <p className="text-[11px] text-slate-600 leading-tight">
+                <p className="text-[11px] text-slate-600 leading-tight max-w-xs mx-auto">
                   {restaurant.address}
                 </p>
               )}
 
               {(restaurant.contact_mobile || restaurant.owner_mobile || restaurant.contact_email) && (
-                <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500 font-medium pt-0.5">
+                <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] text-slate-500 font-medium pt-0.5">
                   {(restaurant.contact_mobile || restaurant.owner_mobile) && (
-                    <span>Ph: <strong>{restaurant.contact_mobile || restaurant.owner_mobile}</strong></span>
+                    <span>Ph: <strong className="text-slate-700">{restaurant.contact_mobile || restaurant.owner_mobile}</strong></span>
                   )}
                   {restaurant.contact_email && (
-                    <span>Email: <strong>{restaurant.contact_email}</strong></span>
+                    <span>Email: <strong className="text-slate-700">{restaurant.contact_email}</strong></span>
                   )}
                 </div>
               )}
 
               <div className="flex items-center justify-center gap-3 text-[10px] text-slate-500 font-medium pt-0.5">
-                {restaurant.gst && <span>GSTIN: <strong>{restaurant.gst}</strong></span>}
-                {restaurant.fssai && <span>FSSAI Lic: <strong>{restaurant.fssai}</strong></span>}
+                {restaurant.gst && <span>GSTIN: <strong className="font-mono text-slate-700">{restaurant.gst}</strong></span>}
+                {restaurant.fssai && <span>FSSAI Lic: <strong className="font-mono text-slate-700">{restaurant.fssai}</strong></span>}
               </div>
             </div>
 
             {/* Invoice Meta Bar */}
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 grid grid-cols-2 gap-2 text-[11px]">
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 grid grid-cols-2 gap-2 text-[11px]">
               <div>
-                <span className="text-slate-500 block text-[9px] uppercase font-bold">Bill Reference</span>
-                <strong className="text-slate-900 font-mono text-xs">{billNumber}</strong>
+                <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Bill Reference</span>
+                <strong className="text-slate-950 font-mono text-xs">{billNumber}</strong>
               </div>
               <div className="text-right">
-                <span className="text-slate-500 block text-[9px] uppercase font-bold">Order & Table</span>
-                <strong className="text-slate-900 font-mono text-xs">{order.order_number} • Table {order.table_number}</strong>
+                <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Order & Table</span>
+                <strong className="text-slate-950 font-mono text-xs">{order.order_number} • Table {order.table_number}</strong>
               </div>
               <div>
-                <span className="text-slate-500 block text-[9px] uppercase font-bold">Date & Time</span>
+                <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Date & Time</span>
                 <span className="text-slate-700 font-medium">{new Date(order.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
               </div>
               <div className="text-right">
-                <span className="text-slate-500 block text-[9px] uppercase font-bold">Payment Status</span>
-                <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase inline-block border ${
+                <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Payment Status</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase inline-block border ${
                   isPaid ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
                   isPartiallyPaid ? 'bg-purple-100 text-purple-800 border-purple-300' :
                   'bg-amber-100 text-amber-800 border-amber-300'
@@ -144,16 +145,16 @@ export const BillModal: React.FC<BillModalProps> = ({ order, restaurant, onClose
                 </span>
               </div>
               {order.customer_mobile && (
-                <div className="col-span-2 pt-1 border-t border-slate-200 flex items-center justify-between text-[10px]">
+                <div className="col-span-2 pt-1.5 border-t border-slate-200 flex items-center justify-between text-[10px]">
                   <span className="text-slate-500">Guest Contact:</span>
-                  <strong className="text-slate-900">{order.customer_mobile}</strong>
+                  <strong className="text-slate-900 font-mono">{order.customer_mobile}</strong>
                 </div>
               )}
             </div>
 
             {/* Food Items Table */}
-            <div className="space-y-1">
-              <div className="grid grid-cols-12 gap-1 font-bold text-[10px] text-slate-500 uppercase pb-1 border-b border-slate-300">
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-12 gap-1 font-bold text-[10px] text-slate-500 uppercase pb-1.5 border-b border-slate-200">
                 <div className="col-span-6">Food Item</div>
                 <div className="col-span-2 text-center">Qty</div>
                 <div className="col-span-2 text-right">Price</div>
@@ -162,16 +163,16 @@ export const BillModal: React.FC<BillModalProps> = ({ order, restaurant, onClose
 
               <div className="divide-y divide-slate-100">
                 {(order.items || []).map((item, idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-1 py-1.5 text-[11px] text-slate-800 items-center">
+                  <div key={idx} className="grid grid-cols-12 gap-1 py-2 text-[11px] text-slate-800 items-center">
                     <div className="col-span-6 font-semibold">
                       {item.menu_name}
                       {item.special_instructions && (
                         <span className="block text-[9px] text-slate-500 italic">Note: {item.special_instructions}</span>
                       )}
                     </div>
-                    <div className="col-span-2 text-center font-mono font-bold">{item.quantity}</div>
+                    <div className="col-span-2 text-center font-mono font-bold text-slate-900">{item.quantity}</div>
                     <div className="col-span-2 text-right font-mono text-slate-600">₹{item.price}</div>
-                    <div className="col-span-2 text-right font-mono font-bold text-slate-900">₹{(item.quantity * item.price).toFixed(2)}</div>
+                    <div className="col-span-2 text-right font-mono font-bold text-slate-950">₹{(item.quantity * item.price).toFixed(2)}</div>
                   </div>
                 ))}
               </div>

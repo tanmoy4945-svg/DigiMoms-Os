@@ -39,7 +39,7 @@ export const CeoLogin: React.FC = () => {
               <input
                 type="tel"
                 required
-                placeholder="e.g. 8900415647"
+                placeholder="Enter registered mobile number"
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:border-purple-500 outline-none"
@@ -54,7 +54,7 @@ export const CeoLogin: React.FC = () => {
               <input
                 type="password"
                 required
-                placeholder="Enter Admin Password"
+                placeholder="Enter Master Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:border-purple-500 outline-none"
@@ -70,7 +70,7 @@ export const CeoLogin: React.FC = () => {
                 type="password"
                 required
                 maxLength={6}
-                placeholder="e.g. 494549"
+                placeholder="Enter 6-Digit PIN"
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
                 className="w-full bg-slate-950 border border-amber-500/40 rounded-xl pl-10 pr-4 py-2.5 text-sm text-amber-300 font-mono tracking-widest focus:border-amber-400 outline-none placeholder:text-slate-600 placeholder:tracking-normal"

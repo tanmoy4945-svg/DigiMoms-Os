@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { ChefHat, Plus, KeyRound, Trash2, UserCheck, ShieldOff, AlertTriangle } from 'lucide-react';
+import { ChefHat, Plus, KeyRound, Trash2, UserCheck, ShieldOff, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { Staff } from '../../types';
 
 export const StaffManagement: React.FC = () => {
@@ -10,9 +10,16 @@ export const StaffManagement: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     mobile: '',
-    password: 'waiter123',
+    password: '',
     role: 'waiter' as 'waiter' | 'kitchen'
   });
+
+  // Toggle reveal password for specific staff card
+  const [revealedStaffIds, setRevealedStaffIds] = useState<Record<string, boolean>>({});
+
+  const togglePasswordReveal = (staffId: string) => {
+    setRevealedStaffIds(prev => ({ ...prev, [staffId]: !prev[staffId] }));
+  };
 
   // Password Change State
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
@@ -27,10 +34,10 @@ export const StaffManagement: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.name && formData.mobile) {
-      addStaffMember(formData.name, formData.mobile, formData.password || 'waiter123', formData.role);
+    if (formData.name.trim() && formData.mobile.trim() && formData.password.trim()) {
+      addStaffMember(formData.name.trim(), formData.mobile.trim(), formData.password.trim(), formData.role);
       setShowAddModal(false);
-      setFormData({ name: '', mobile: '', password: 'waiter123', role: 'waiter' });
+      setFormData({ name: '', mobile: '', password: '', role: 'waiter' });
     }
   };
 
@@ -101,7 +108,23 @@ export const StaffManagement: React.FC = () => {
               </div>
               <div className="flex items-center justify-between text-slate-400">
                 <span>Password:</span>
-                <strong className="text-emerald-400 font-mono">{staff.password_hash}</strong>
+                <div className="flex items-center gap-2">
+                  <strong className="text-emerald-400 font-mono">
+                    {revealedStaffIds[staff.id] ? staff.password_hash : '••••••••'}
+                  </strong>
+                  <button
+                    type="button"
+                    onClick={() => togglePasswordReveal(staff.id)}
+                    className="text-slate-500 hover:text-slate-300 transition-colors p-0.5"
+                    title={revealedStaffIds[staff.id] ? 'Hide password' : 'Show password'}
+                  >
+                    {revealedStaffIds[staff.id] ? (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -110,7 +133,7 @@ export const StaffManagement: React.FC = () => {
               <button
                 onClick={() => {
                   setEditingStaff(staff);
-                  setNewPassword(staff.password_hash);
+                  setNewPassword('');
                 }}
                 className="py-2 px-3 rounded-xl bg-blue-950/60 hover:bg-blue-900 text-blue-300 font-bold text-xs border border-blue-500/30 flex items-center justify-center gap-1.5 transition-all"
                 title="Change staff password"
@@ -192,10 +215,11 @@ export const StaffManagement: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Login Password *</label>
                 <input
                   type="password"
-                  placeholder="Default: waiter123 or kitchen123"
+                  required
+                  placeholder="Enter staff login password (min 4 chars)"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:border-emerald-500 outline-none"

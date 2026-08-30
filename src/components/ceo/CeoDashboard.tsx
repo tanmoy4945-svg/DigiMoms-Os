@@ -10,6 +10,7 @@ import { SqlSchemaViewer } from './SqlSchemaViewer';
 import { CeoPaymentSettings } from './CeoPaymentSettings';
 import { CeoStorageViewer } from './CeoStorageViewer';
 import { CeoBackupManager } from './CeoBackupManager';
+import { CeoAgreementGenerator } from './CeoAgreementGenerator';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RestaurantWebsiteManager } from '../owner/RestaurantWebsiteManager';
 import { Restaurant } from '../../types';
@@ -71,6 +72,7 @@ export function isOrderInPeriod(orderCreatedAt: string, period: RevenuePeriod): 
 
 export const CeoDashboard: React.FC = () => {
   const {
+    ceoAuthenticated,
     restaurants,
     addRestaurant,
     updateRestaurant,
@@ -101,7 +103,7 @@ export const CeoDashboard: React.FC = () => {
     showToast
   } = useSaaS();
 
-  const [activeTab, setActiveTab] = useState<'restaurants' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>('restaurants');
+  const [activeTab, setActiveTab] = useState<'restaurants' | 'agreement' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>('restaurants');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [managingWebsiteRest, setManagingWebsiteRest] = useState<Restaurant | null>(null);
@@ -349,6 +351,24 @@ export const CeoDashboard: React.FC = () => {
     }
   };
 
+  if (!ceoAuthenticated) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20 space-y-4">
+        <div className="w-16 h-16 rounded-3xl bg-purple-600/20 text-purple-400 flex items-center justify-center mx-auto border border-purple-500/30">
+          <ShieldCheck className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-white">Authentication Required</h2>
+        <p className="text-xs text-slate-400">Please authenticate with Master CEO credentials to access this control center.</p>
+        <button
+          onClick={() => setActiveView('ceo-login')}
+          className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+        >
+          Go to CEO Login
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-8 space-y-8">
       {/* Top Header */}
@@ -456,6 +476,15 @@ export const CeoDashboard: React.FC = () => {
           }`}
         >
           <Building2 className="w-4 h-4" /> Manage Tenants ({restaurants.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('agreement')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'agreement' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <FileText className="w-4 h-4 text-pink-400" /> Restaurant Agreement
         </button>
 
         <button
@@ -814,6 +843,9 @@ export const CeoDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* TAB: RESTAURANT AGREEMENT PDF GENERATOR */}
+      {activeTab === 'agreement' && <CeoAgreementGenerator restaurants={restaurants} showToast={showToast} />}
+
       {/* TAB 1.5: CEO SUBSCRIPTION PAYMENT GATEWAY SETTINGS */}
       {activeTab === 'payment-settings' && <CeoPaymentSettings />}
 
@@ -984,13 +1016,14 @@ export const CeoDashboard: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Owner Password</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Owner Password *</label>
                 <input
                   type="password"
-                  placeholder="Default: owner123"
+                  required
+                  placeholder="Set owner password (min 6 chars)"
                   value={newRest.password}
                   onChange={(e) => setNewRest({ ...newRest, password: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-purple-500"
                 />
               </div>
 
@@ -1296,7 +1329,7 @@ export const CeoDashboard: React.FC = () => {
               <input
                 type="password"
                 required
-                placeholder="ceo123"
+                placeholder="Enter CEO password to confirm"
                 value={resetPasswordInput}
                 onChange={(e) => setResetPasswordInput(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-rose-500"

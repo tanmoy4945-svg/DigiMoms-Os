@@ -19,24 +19,24 @@ export const PricingPage: React.FC = () => {
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.owner_mobile) {
-      alert('Please fill in required fields.');
+    if (!formData.name || !formData.owner_mobile || !formData.password) {
+      alert('Please fill in all required fields including password.');
       return;
     }
 
     const created = addRestaurant({
-      name: formData.name,
-      slug: formData.slug || formData.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-      owner_name: formData.owner_name,
-      owner_mobile: formData.owner_mobile,
-      password_hash: formData.password || 'owner123',
-      address: formData.address,
-      gst: formData.gst,
-      fssai: formData.fssai
+      name: formData.name.trim(),
+      slug: formData.slug.trim() || formData.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      owner_name: formData.owner_name.trim(),
+      owner_mobile: formData.owner_mobile.trim(),
+      password_hash: formData.password.trim(),
+      address: formData.address.trim(),
+      gst: formData.gst.trim(),
+      fssai: formData.fssai.trim()
     });
 
-    // Auto log in as owner
-    loginOwner(created.owner_mobile, created.password_hash || 'owner123');
+    // Auto log in as owner with the chosen password
+    loginOwner(created.owner_mobile, formData.password.trim());
     setShowRegModal(false);
     setActiveView('owner-dashboard');
   };
@@ -195,10 +195,11 @@ export const PricingPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Owner Login Password</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Owner Login Password *</label>
                 <input
                   type="password"
-                  placeholder="Default: owner123"
+                  required
+                  placeholder="Create your owner password (min 6 chars)"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500 outline-none"
