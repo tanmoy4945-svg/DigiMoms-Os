@@ -448,6 +448,7 @@ export type NotificationEventType =
   | 'call_waiter'
   | 'cash_request'
   | 'payment_confirmed'
+  | 'online_paid'
   | 'payment_failed'
   | 'customer_joined'
   | 'customer_request'

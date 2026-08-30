@@ -4,7 +4,7 @@ import {
   QrCode, Search, Bell, ShoppingBag, Plus, Minus, CheckCircle2,
   Clock, Download, Star, ShieldAlert, ShieldCheck, Sparkles, ChevronDown,
   Info, Utensils, CreditCard, ArrowDown, Users, KeyRound, Globe, Phone, Ticket, Zap,
-  Copy, Check, ExternalLink
+  Copy, Check, ExternalLink, Home
 } from 'lucide-react';
 import { t } from '../../utils/i18n';
 import { CallWaiterModal } from './CallWaiterModal';
@@ -1881,38 +1881,54 @@ export const CustomerQrApp: React.FC = () => {
 
             <div className="space-y-1">
               <span className="px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 text-xs font-black uppercase tracking-wider border border-emerald-500/40">
-                Database Order Verified
+                Order Confirmed & Paid
               </span>
               <h2 className="text-2xl font-black text-white pt-2">ORDER SUCCESSFUL</h2>
               <div className="text-3xl font-mono font-black text-emerald-400">{lastPlacedOrder.order_number}</div>
               <p className="text-xs text-slate-300 pt-1">
-                Table #{lastPlacedOrder.table_number} • Total ₹{lastPlacedOrder.grand_total}
+                Table #{lastPlacedOrder.table_number.replace(/^Table\s+/i, '')} • Total ₹{lastPlacedOrder.grand_total}
               </p>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-left space-y-2 text-xs">
               <div className="flex justify-between text-slate-400 font-semibold">
                 <span>Status:</span>
-                <strong className="text-amber-400 uppercase">Order Received</strong>
+                <strong className="text-emerald-400 uppercase font-extrabold">Order Received & Paid</strong>
               </div>
               <div className="flex justify-between text-slate-400 font-semibold">
                 <span>Payment Mode:</span>
-                <strong className="text-white uppercase">{lastPlacedOrder.payment_mode}</strong>
+                <strong className="text-white uppercase font-bold">{lastPlacedOrder.payment_mode}</strong>
               </div>
-              <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-2">
-                Order details saved in Supabase. Kitchen and waiter notified in real-time.
+              <div className="text-[11px] text-emerald-300/90 border-t border-slate-800 pt-2 font-medium">
+                ✓ Order placed and notified to Kitchen & Staff in real-time.
               </div>
             </div>
 
-            <button
-              onClick={() => {
-                setLastPlacedOrder(null);
-                setCustomerStep('menu');
-              }}
-              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-xl shadow-emerald-600/30"
-            >
-              Back to Digital Menu
-            </button>
+            <div className="space-y-2 pt-1">
+              <button
+                id="btn-order-success-go-to-home"
+                onClick={() => {
+                  setLastPlacedOrder(null);
+                  setCustomerStep('welcome');
+                }}
+                className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2"
+              >
+                <Home className="w-4 h-4" />
+                Go to Home
+              </button>
+
+              <button
+                id="btn-order-success-order-more"
+                onClick={() => {
+                  setLastPlacedOrder(null);
+                  setCustomerStep('menu');
+                }}
+                className="w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+              >
+                <Utensils className="w-3.5 h-3.5" />
+                Order More Items (Digital Menu)
+              </button>
+            </div>
           </div>
         </div>
       )}

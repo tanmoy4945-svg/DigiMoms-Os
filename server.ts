@@ -189,10 +189,16 @@ async function startServer() {
     const targetIds = ['all'];
     if (restaurantId) targetIds.push(restaurantId);
 
+    const enrichedPayload = {
+      ...eventPayload,
+      data: eventPayload.data || eventPayload.order || eventPayload.call_request || eventPayload.payload,
+      timestamp: eventPayload.timestamp || new Date().toISOString()
+    };
+
     targetIds.forEach(rid => {
       const clients = sseClients.get(rid);
       if (clients) {
-        const msg = `data: ${JSON.stringify(eventPayload)}\n\n`;
+        const msg = `data: ${JSON.stringify(enrichedPayload)}\n\n`;
         clients.forEach(res => {
           try {
             res.write(msg);

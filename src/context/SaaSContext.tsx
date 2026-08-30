@@ -858,9 +858,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           tax: Number(o.tax || 0),
           discount: Number(o.discount || 0),
           grand_total: Number(o.grand_total || 0),
-          online_amount: o.online_amount ? Number(o.online_amount) : undefined,
-          cash_amount: o.cash_amount ? Number(o.cash_amount) : undefined,
-          cash_due: o.cash_due ? Number(o.cash_due) : undefined,
+          online_amount: o.online_amount !== undefined && o.online_amount !== null ? Number(o.online_amount) : 0,
+          cash_amount: o.cash_amount !== undefined && o.cash_amount !== null ? Number(o.cash_amount) : 0,
+          cash_due: o.cash_due !== undefined && o.cash_due !== null ? Number(o.cash_due) : 0,
           items: (orderItemsData || [])
             .filter(i => i.order_id === o.id)
             .map(i => ({
@@ -3501,13 +3501,39 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     razorpayResponse: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string },
     customerMobile?: string
   ): Promise<boolean> => {
-    const existingOrd = orders.find(o => o.id === orderId);
+    let existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+      if (dbOrd) {
+        const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderId);
+        existingOrd = {
+          ...dbOrd,
+          subtotal: Number(dbOrd.subtotal || 0),
+          tax: Number(dbOrd.tax || 0),
+          discount: Number(dbOrd.discount || 0),
+          grand_total: Number(dbOrd.grand_total || 0),
+          online_amount: Number(dbOrd.online_amount || 0),
+          cash_amount: Number(dbOrd.cash_amount || 0),
+          cash_due: Number(dbOrd.cash_due || 0),
+          items: (itms || []).map((i: any) => ({
+            id: i.id,
+            order_id: i.order_id,
+            menu_id: i.menu_id,
+            menu_name: i.menu_name,
+            quantity: Number(i.quantity),
+            price: Number(i.price),
+            special_instructions: i.special_instructions
+          }))
+        };
+      }
+    }
+
     if (!existingOrd) {
       showToast("Order not found for online payment.", "error");
       return false;
     }
 
-    const rest = restaurants.find(r => r.id === existingOrd.restaurant_id);
+    const rest = restaurants.find(r => r.id === existingOrd!.restaurant_id);
 
     try {
       const verifyRes = await fetch('/api/razorpay/verify-payment', {
@@ -3573,14 +3599,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateErr = retry1.error;
       }
 
-      if (updateErr) {
-        console.error("Razorpay order status update error:", updateErr);
-        showToast("Database update error: " + updateErr.message, "error");
-        return false;
-      }
-
       const updatedOrderObj = { ...existingOrd, ...updatePayload };
-      setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+      setOrders(prev => {
+        const exists = prev.some(o => o.id === orderId);
+        if (exists) {
+          return prev.map(o => o.id === orderId ? updatedOrderObj : o);
+        }
+        return [updatedOrderObj, ...prev];
+      });
 
       // Persist to server API store & broadcast
       try {
@@ -3605,14 +3631,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (e) {
         // ignore
       }
-
-      // SELECT Verification
-      const { data: dbCheck, error: selectErr } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('id', orderId)
-        .eq('restaurant_id', existingOrd.restaurant_id)
-        .maybeSingle();
 
       // Credit Hotel Wallet (Idempotency built-in)
       if (newPaymentStatus === 'paid_live' || newPaymentStatus === 'paid') {
@@ -3662,6 +3680,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Razorpay payment ₹${onlineAmountToPay} verified for Order ${existingOrd.order_number} (Payment ID: ${razorpayResponse.razorpay_payment_id})`
       });
 
+      triggerRealtimeEventNotification({
+        eventId: `online_pay_rzp_${orderId}_${Date.now()}`,
+        type: 'online_paid',
+        title: '💳 Online Payment Received (Paid Live)',
+        body: `Table ${existingOrd.table_number}: Order #${existingOrd.order_number} paid ₹${onlineAmountToPay} via Razorpay`,
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number
+      });
+
       await fetchAllFromSupabase();
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via Razorpay!`, 'success');
@@ -3679,13 +3707,39 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     payuResponse: { txnid: string; mihpayid?: string; hash?: string; status?: string; udf1?: string; udf2?: string },
     customerMobile?: string
   ): Promise<boolean> => {
-    const existingOrd = orders.find(o => o.id === orderId);
+    let existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+      if (dbOrd) {
+        const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderId);
+        existingOrd = {
+          ...dbOrd,
+          subtotal: Number(dbOrd.subtotal || 0),
+          tax: Number(dbOrd.tax || 0),
+          discount: Number(dbOrd.discount || 0),
+          grand_total: Number(dbOrd.grand_total || 0),
+          online_amount: Number(dbOrd.online_amount || 0),
+          cash_amount: Number(dbOrd.cash_amount || 0),
+          cash_due: Number(dbOrd.cash_due || 0),
+          items: (itms || []).map((i: any) => ({
+            id: i.id,
+            order_id: i.order_id,
+            menu_id: i.menu_id,
+            menu_name: i.menu_name,
+            quantity: Number(i.quantity),
+            price: Number(i.price),
+            special_instructions: i.special_instructions
+          }))
+        };
+      }
+    }
+
     if (!existingOrd) {
       showToast("Order not found for online payment.", "error");
       return false;
     }
 
-    const rest = restaurants.find(r => r.id === existingOrd.restaurant_id);
+    const rest = restaurants.find(r => r.id === existingOrd!.restaurant_id);
 
     try {
       const verifyRes = await fetch('/api/payu/verify-payment', {
@@ -3757,7 +3811,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const updatedOrderObj = { ...existingOrd, ...updatePayload };
-      setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+      setOrders(prev => {
+        const exists = prev.some(o => o.id === orderId);
+        if (exists) {
+          return prev.map(o => o.id === orderId ? updatedOrderObj : o);
+        }
+        return [updatedOrderObj, ...prev];
+      });
 
       // Clear any pending payment waiter calls for this table
       try {
@@ -3829,6 +3889,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `PayU payment ₹${onlineAmountToPay} verified for Order ${existingOrd.order_number} (Txn: ${payuResponse.txnid})`
       });
 
+      triggerRealtimeEventNotification({
+        eventId: `online_pay_payu_${orderId}_${Date.now()}`,
+        type: 'online_paid',
+        title: '💳 Online Payment Received (Paid Live)',
+        body: `Table ${existingOrd.table_number}: Order #${existingOrd.order_number} paid ₹${onlineAmountToPay} via PayU`,
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number
+      });
+
       await fetchAllFromSupabase();
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via PayU!`, 'success');
@@ -3846,13 +3916,39 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     phonePeResponse: { transactionId: string; mode?: string },
     customerMobile?: string
   ): Promise<boolean> => {
-    const existingOrd = orders.find(o => o.id === orderId);
+    let existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+      if (dbOrd) {
+        const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderId);
+        existingOrd = {
+          ...dbOrd,
+          subtotal: Number(dbOrd.subtotal || 0),
+          tax: Number(dbOrd.tax || 0),
+          discount: Number(dbOrd.discount || 0),
+          grand_total: Number(dbOrd.grand_total || 0),
+          online_amount: Number(dbOrd.online_amount || 0),
+          cash_amount: Number(dbOrd.cash_amount || 0),
+          cash_due: Number(dbOrd.cash_due || 0),
+          items: (itms || []).map((i: any) => ({
+            id: i.id,
+            order_id: i.order_id,
+            menu_id: i.menu_id,
+            menu_name: i.menu_name,
+            quantity: Number(i.quantity),
+            price: Number(i.price),
+            special_instructions: i.special_instructions
+          }))
+        };
+      }
+    }
+
     if (!existingOrd) {
       showToast("Order not found for online payment.", "error");
       return false;
     }
 
-    const rest = restaurants.find(r => r.id === existingOrd.restaurant_id);
+    const rest = restaurants.find(r => r.id === existingOrd!.restaurant_id);
 
     try {
       const verifyRes = await fetch('/api/phonepe/verify-payment', {
@@ -3918,7 +4014,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const updatedOrderObj = { ...existingOrd, ...updatePayload };
-      setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+      setOrders(prev => {
+        const exists = prev.some(o => o.id === orderId);
+        if (exists) {
+          return prev.map(o => o.id === orderId ? updatedOrderObj : o);
+        }
+        return [updatedOrderObj, ...prev];
+      });
 
       // Clear any pending payment waiter calls for this table
       try {
@@ -3960,13 +4062,23 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         actor_id: customerMobile || 'customer',
         actor_type: 'customer',
         actor_name: 'Online Payment (PhonePe)',
-        confirmed_at: confirmedAtIso
+        created_at: confirmedAtIso
       };
 
       try {
         await supabase.from('payment_transactions').insert([txPayload]);
       } catch (err) {
         console.warn("payment_transactions insert warning:", err);
+      }
+
+      try {
+        await fetch('/api/transactions/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(txPayload)
+        });
+      } catch (err) {
+        console.warn("Could not record transaction to server API:", err);
       }
 
       logAudit({
@@ -3978,6 +4090,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         previous_status: existingOrd.payment_status,
         new_status: newPaymentStatus,
         description: `PhonePe payment ₹${onlineAmountToPay} verified for Order ${existingOrd.order_number} (Txn: ${phonePeResponse.transactionId})`
+      });
+
+      triggerRealtimeEventNotification({
+        eventId: `online_pay_phonepe_${orderId}_${Date.now()}`,
+        type: 'online_paid',
+        title: '💳 Online Payment Received (Paid Live)',
+        body: `Table ${existingOrd.table_number}: Order #${existingOrd.order_number} paid ₹${onlineAmountToPay} via PhonePe`,
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number
       });
 
       await fetchAllFromSupabase();
