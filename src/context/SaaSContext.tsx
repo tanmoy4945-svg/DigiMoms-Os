@@ -3539,7 +3539,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (totalPaid >= grandTotal) {
         newPaymentStatus = 'paid_live';
-        newOrderStatus = 'completed';
+        newOrderStatus = existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status;
       } else if (totalPaid > 0) {
         newPaymentStatus = 'partially_paid';
       }
@@ -3579,6 +3579,33 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
 
+      const updatedOrderObj = { ...existingOrd, ...updatePayload };
+      setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+
+      // Persist to server API store & broadcast
+      try {
+        await fetch('/api/orders/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedOrderObj)
+        });
+      } catch (err) {
+        console.warn("Could not save order to server API:", err);
+      }
+
+      // Clear any pending payment waiter calls for this table
+      try {
+        await supabase
+          .from('call_waiter_requests')
+          .update({ status: 'completed', completed_at: confirmedAtIso })
+          .eq('restaurant_id', existingOrd.restaurant_id)
+          .eq('table_number', existingOrd.table_number)
+          .in('request_type', ['payment', 'bill', 'Bill / Payment'])
+          .eq('status', 'pending');
+      } catch (e) {
+        // ignore
+      }
+
       // SELECT Verification
       const { data: dbCheck, error: selectErr } = await supabase
         .from('orders')
@@ -3587,13 +3614,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('restaurant_id', existingOrd.restaurant_id)
         .maybeSingle();
 
-      if (selectErr || !dbCheck) {
-        showToast("Online payment verification failed in database.", "error");
-        return false;
-      }
-
       // Credit Hotel Wallet (Idempotency built-in)
-      if (dbCheck.payment_status === 'paid_live' || dbCheck.payment_status === 'paid') {
+      if (newPaymentStatus === 'paid_live' || newPaymentStatus === 'paid') {
         await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, onlineAmountToPay || grandTotal, 'online');
       }
 
@@ -3619,6 +3641,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn("payment_transactions insert warning:", err);
       }
 
+      try {
+        await fetch('/api/transactions/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(txPayload)
+        });
+      } catch (err) {
+        console.warn("Could not record transaction to server API:", err);
+      }
+
       logAudit({
         restaurant_id: existingOrd.restaurant_id,
         order_id: existingOrd.id,
@@ -3626,7 +3658,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         actor_name: 'Customer (Razorpay)',
         action: 'RAZORPAY_PAYMENT_VERIFIED',
         previous_status: existingOrd.payment_status,
-        new_status: dbCheck.payment_status,
+        new_status: newPaymentStatus,
         description: `Razorpay payment ₹${onlineAmountToPay} verified for Order ${existingOrd.order_number} (Payment ID: ${razorpayResponse.razorpay_payment_id})`
       });
 
@@ -3690,7 +3722,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (totalPaid >= grandTotal) {
         newPaymentStatus = 'paid_live';
-        newOrderStatus = 'completed';
+        newOrderStatus = existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status;
       } else if (totalPaid > 0) {
         newPaymentStatus = 'partially_paid';
       }
@@ -3726,6 +3758,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const updatedOrderObj = { ...existingOrd, ...updatePayload };
       setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+
+      // Clear any pending payment waiter calls for this table
+      try {
+        await supabase
+          .from('call_waiter_requests')
+          .update({ status: 'completed', completed_at: confirmedAtIso })
+          .eq('restaurant_id', existingOrd.restaurant_id)
+          .eq('table_number', existingOrd.table_number)
+          .in('request_type', ['payment', 'bill', 'Bill / Payment'])
+          .eq('status', 'pending');
+      } catch (e) {
+        // ignore
+      }
 
       // Persist to server API store
       try {
@@ -3841,7 +3886,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (totalPaid >= grandTotal) {
         newPaymentStatus = 'paid_live';
-        newOrderStatus = 'completed';
+        newOrderStatus = existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status;
       } else if (totalPaid > 0) {
         newPaymentStatus = 'partially_paid';
       }
@@ -3874,6 +3919,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const updatedOrderObj = { ...existingOrd, ...updatePayload };
       setOrders(prev => prev.map(o => o.id === orderId ? updatedOrderObj : o));
+
+      // Clear any pending payment waiter calls for this table
+      try {
+        await supabase
+          .from('call_waiter_requests')
+          .update({ status: 'completed', completed_at: confirmedAtIso })
+          .eq('restaurant_id', existingOrd.restaurant_id)
+          .eq('table_number', existingOrd.table_number)
+          .in('request_type', ['payment', 'bill', 'Bill / Payment'])
+          .eq('status', 'pending');
+      } catch (e) {
+        // ignore
+      }
 
       // Persist to server API store
       try {

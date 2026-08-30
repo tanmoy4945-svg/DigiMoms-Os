@@ -137,7 +137,15 @@ export const WaiterTerminal: React.FC = () => {
             })}
 
             {myAcceptedCalls.map(call => {
-              const matchedOrd = orders.find(o => o.restaurant_id === currentStaff.restaurant_id && o.table_number === call.table_number && (o.cash_due || 0) > 0);
+              const matchedOrd = orders.find(o => 
+                o.restaurant_id === currentStaff.restaurant_id && 
+                o.table_number === call.table_number && 
+                o.payment_status !== 'paid_live' && 
+                o.payment_status !== 'paid' && 
+                o.payment_status !== 'paid_demo' && 
+                o.payment_status !== 'paid_cash' && 
+                (o.cash_due ?? (o.grand_total - (o.online_amount || 0) - (o.cash_amount || 0))) > 0
+              );
               return (
                 <div key={call.id} className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-3">
                   <div className="flex items-center justify-between">

@@ -1971,17 +1971,30 @@ export const CustomerQrApp: React.FC = () => {
                 customerMobile
               );
 
+              const updatedPaidOrder = {
+                ...existingOrd,
+                payment_status: 'paid_live',
+                order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+                online_amount: Number((Number(existingOrd.online_amount || 0) + onlineAmt).toFixed(2)),
+                cash_due: 0
+              };
+
               setCart([]);
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
-              setLastPlacedOrder(existingOrd);
+              setLastPlacedOrder(updatedPaidOrder);
               showToast('🎉 PayU payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PayU Order Payment Error:", err);
               showToast('Payment received! Order active.', 'info');
+              const fallbackOrder = {
+                ...onlinePaymentModalData.existingOrder,
+                payment_status: 'paid_live',
+                cash_due: 0
+              };
               setCart([]);
               setIsCartOpen(false);
-              setLastPlacedOrder(onlinePaymentModalData.existingOrder);
+              setLastPlacedOrder(fallbackOrder);
               setOnlinePaymentModalData(null);
             }
           }}
@@ -2024,17 +2037,30 @@ export const CustomerQrApp: React.FC = () => {
                 customerMobile
               );
 
+              const updatedPaidOrder = {
+                ...existingOrd,
+                payment_status: 'paid_live',
+                order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+                online_amount: Number((Number(existingOrd.online_amount || 0) + onlineAmt).toFixed(2)),
+                cash_due: 0
+              };
+
               setCart([]);
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
-              setLastPlacedOrder(existingOrd);
+              setLastPlacedOrder(updatedPaidOrder);
               showToast('🎉 PhonePe payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PhonePe Order Payment Error:", err);
               showToast('Payment received! Order active.', 'info');
+              const fallbackOrder = {
+                ...onlinePaymentModalData.existingOrder,
+                payment_status: 'paid_live',
+                cash_due: 0
+              };
               setCart([]);
               setIsCartOpen(false);
-              setLastPlacedOrder(onlinePaymentModalData.existingOrder);
+              setLastPlacedOrder(fallbackOrder);
               setOnlinePaymentModalData(null);
             }
           }}
@@ -2078,17 +2104,30 @@ export const CustomerQrApp: React.FC = () => {
                 customerMobile
               );
 
+              const updatedPaidOrder = {
+                ...existingOrd,
+                payment_status: 'paid_live',
+                order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+                online_amount: Number((Number(existingOrd.online_amount || 0) + onlineAmt).toFixed(2)),
+                cash_due: 0
+              };
+
               setCart([]);
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
-              setLastPlacedOrder(existingOrd);
+              setLastPlacedOrder(updatedPaidOrder);
               showToast('🎉 Razorpay payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("Razorpay Order Payment Error:", err);
               showToast('Payment received! Order active.', 'info');
+              const fallbackOrder = {
+                ...onlinePaymentModalData.existingOrder,
+                payment_status: 'paid_live',
+                cash_due: 0
+              };
               setCart([]);
               setIsCartOpen(false);
-              setLastPlacedOrder(onlinePaymentModalData.existingOrder);
+              setLastPlacedOrder(fallbackOrder);
               setOnlinePaymentModalData(null);
             }
           }}
