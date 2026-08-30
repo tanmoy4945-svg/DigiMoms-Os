@@ -34,6 +34,9 @@ export interface PayUCheckoutModalProps {
   payuSalt?: string;
   env?: 'TEST' | 'LIVE';
   isSubscription?: boolean;
+  tableCode?: string;
+  tableUrl?: string;
+  sessionId?: string;
 }
 
 export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
@@ -53,6 +56,9 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
   payuSalt,
   env = 'TEST',
   isSubscription = false,
+  tableCode,
+  tableUrl,
+  sessionId,
 }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPolling, setIsPolling] = useState<boolean>(false);
@@ -181,7 +187,10 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
             surl: `${window.location.origin}/api/payu/callback`,
             furl: `${window.location.origin}/api/payu/callback`,
             udf1: restaurantId || '',
-            udf2: orderId || ''
+            udf2: orderId || '',
+            udf3: tableUrl || (tableCode ? `/q/${tableCode}` : '') || '',
+            udf4: sessionId || '',
+            udf5: isSubscription ? '1' : '0'
           })
         });
 
@@ -224,6 +233,9 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
           furl: `${window.location.origin}/api/payu/callback`,
           udf1: restaurantId || '',
           udf2: orderId || '',
+          udf3: tableUrl || (tableCode ? `/q/${tableCode}` : '') || '',
+          udf4: sessionId || '',
+          udf5: isSubscription ? '1' : '0',
           env: effectiveEnv
         });
 

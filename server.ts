@@ -4,6 +4,11 @@ import crypto from 'crypto';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://qjkoeehgkfnailgmhyjs.supabase.co').replace(/\/+$/, '');
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_TMLOZVNYis6bZInTdfWJ3Q_BJ1kiuih';
+const serverSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 async function startServer() {
   const app = express();
@@ -503,8 +508,82 @@ async function startServer() {
     }
   });
 
+  // Reusable helper to update orders and insert payment transaction in Supabase
+  async function syncPaymentToSupabase(params: {
+    orderId: string;
+    restaurantId?: string;
+    amount: number;
+    transactionId: string;
+    gateway: string;
+  }) {
+    const { orderId, restaurantId, amount, transactionId, gateway } = params;
+    if (!orderId) return;
+
+    try {
+      const confirmedAtIso = new Date().toISOString();
+      // 1. Update orders table in Supabase
+      const { data: dbOrd, error: ordErr } = await serverSupabase
+        .from('orders')
+        .update({
+          payment_status: 'paid_live',
+          order_status: 'accepted',
+          online_amount: amount,
+          cash_due: 0,
+          payment_actor_id: transactionId || `${gateway}_gateway`,
+          payment_actor_type: 'customer',
+          payment_actor_name: `Online Payment (${gateway.toUpperCase()})`,
+          payment_confirmed_at: confirmedAtIso,
+          transaction_id: transactionId,
+          updated_at: confirmedAtIso
+        })
+        .eq('id', orderId)
+        .select()
+        .maybeSingle();
+
+      if (ordErr) {
+        console.warn(`[Supabase Order Sync Warning for ${orderId}]:`, ordErr);
+      }
+
+      const effectiveRestId = restaurantId || dbOrd?.restaurant_id;
+
+      // 2. Insert transaction record in payment_transactions table
+      if (effectiveRestId) {
+        try {
+          await serverSupabase.from('payment_transactions').insert({
+            id: `pt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            order_id: orderId,
+            restaurant_id: effectiveRestId,
+            amount: amount,
+            mode: gateway,
+            type: 'online',
+            status: 'success',
+            reference_id: transactionId,
+            actor_id: `${gateway}_gateway`,
+            actor_name: `Online Payment (${gateway.toUpperCase()})`,
+            actor_type: 'customer',
+            created_at: confirmedAtIso
+          });
+        } catch (txErr) {
+          console.warn(`[Supabase Tx Insert Warning]:`, txErr);
+        }
+      }
+
+      // 3. Broadcast realtime SSE event
+      if (effectiveRestId) {
+        broadcastRealtimeOrderEvent(effectiveRestId, {
+          type: 'ORDER_UPDATED',
+          restaurant_id: effectiveRestId,
+          order: dbOrd || { id: orderId, payment_status: 'paid_live', order_status: 'accepted', online_amount: amount },
+          timestamp: confirmedAtIso
+        });
+      }
+    } catch (e) {
+      console.error(`[syncPaymentToSupabase Error]:`, e);
+    }
+  }
+
   // API Route: PhonePe Callback Handler (POST / GET from PhonePe redirect or S2S callback)
-  app.all('/api/phonepe/callback', (req, res) => {
+  app.all('/api/phonepe/callback', async (req, res) => {
     try {
       const data = req.method === 'POST' ? req.body : req.query;
       const reqQuery = req.query || {};
@@ -536,20 +615,30 @@ async function startServer() {
 
       const orderId = String(reqQuery.order_id || (req.body && req.body.order_id) || '');
       const tableCode = String(reqQuery.table_code || (req.body && req.body.table_code) || '');
+      const restaurantId = String(reqQuery.restaurant_id || (req.body && req.body.restaurant_id) || '');
       const paymentType = String(reqQuery.type || (req.body && req.body.type) || '');
       const isSubscription = paymentType === 'subscription' || merchantTransactionId.startsWith('SUB_') || merchantTransactionId.startsWith('RENEW_');
 
       let targetRedirectUrl = '/';
       if (isSubscription) {
         targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
-      } else if (tableCode || orderId) {
-        targetRedirectUrl = `/q/${encodeURIComponent(tableCode || 'table')}?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
-      } else {
-        targetRedirectUrl = '/owner-dashboard';
+      } else if (tableCode) {
+        const basePath = tableCode.startsWith('/') ? tableCode : `/q/${encodeURIComponent(tableCode)}`;
+        targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+      } else if (orderId) {
+        targetRedirectUrl = `/?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
       }
 
-      // Update server order record if payment was successful
+      // Update Supabase and local records if payment was successful
       if (isSuccess && orderId) {
+        await syncPaymentToSupabase({
+          orderId,
+          restaurantId,
+          amount,
+          transactionId: merchantTransactionId || transactionId,
+          gateway: 'phonepe'
+        });
+
         try {
           const allOrders = readJsonFile<any[]>('orders.json', []);
           const idx = allOrders.findIndex(o => o.id === orderId);
@@ -564,15 +653,9 @@ async function startServer() {
               updated_at: new Date().toISOString()
             };
             writeJsonFile('orders.json', allOrders.slice(0, 1000));
-            broadcastRealtimeOrderEvent(allOrders[idx].restaurant_id, {
-              type: 'ORDER_UPDATED',
-              restaurant_id: allOrders[idx].restaurant_id,
-              order: allOrders[idx],
-              timestamp: new Date().toISOString()
-            });
           }
         } catch (e) {
-          console.warn('Could not sync order on PhonePe callback:', e);
+          console.warn('Could not sync order in local file:', e);
         }
       }
 
@@ -633,33 +716,37 @@ async function startServer() {
             .btn {
               display: inline-block;
               width: 100%;
-              padding: 12px;
+              padding: 14px;
               border-radius: 12px;
               background-color: ${isSuccess ? '#10b981' : '#3b82f6'};
               color: #fff;
               text-decoration: none;
               font-weight: bold;
-              font-size: 14px;
+              font-size: 15px;
               border: none;
               cursor: pointer;
               box-sizing: border-box;
+              transition: all 0.2s ease;
+            }
+            .btn:active {
+              transform: scale(0.98);
             }
           </style>
         </head>
         <body>
           <div class="card">
             <div class="icon">${isSuccess ? '✓' : '!'}</div>
-            <h1>${isSuccess ? 'Payment Processed!' : 'Payment ' + code}</h1>
+            <h1>${isSuccess ? 'Payment Successful!' : 'Payment ' + code}</h1>
             <p>${isSuccess ? 'Your transaction has been received from PhonePe.' : 'Transaction update from PhonePe gateway.'}</p>
             
             <div class="details">
               <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${code}</strong></div>
-              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount}</strong></div>` : ''}
+              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount.toFixed(2)}</strong></div>` : ''}
               ${merchantTransactionId ? `<div class="row"><span>Merchant Txn:</span><span style="font-family: monospace; font-size: 11px;">${merchantTransactionId}</span></div>` : ''}
               ${transactionId ? `<div class="row"><span>PhonePe ID:</span><span style="font-family: monospace; font-size: 11px;">${transactionId}</span></div>` : ''}
             </div>
 
-            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Return to Dashboard' : 'Return to Order'}</button>
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : 'Go to Home'}</button>
           </div>
 
           <script>
@@ -695,7 +782,12 @@ async function startServer() {
 
             function closeOrRedirect() {
               if (window.opener) {
-                try { window.close(); } catch(e) {}
+                try {
+                  window.opener.postMessage(payload, '*');
+                  window.close();
+                } catch (e) {
+                  window.location.href = '${targetRedirectUrl}';
+                }
               } else {
                 window.location.href = '${targetRedirectUrl}';
               }
@@ -1206,7 +1298,7 @@ async function startServer() {
   });
 
   // API Route: PayU Callback Handler (POST & GET from PayU Gateway)
-  app.all('/api/payu/callback', (req, res) => {
+  app.all('/api/payu/callback', async (req, res) => {
     try {
       const data = req.method === 'POST' ? req.body : req.query;
       const status = data.status || (data.unmappedstatus === 'captured' ? 'success' : 'pending');
@@ -1216,7 +1308,7 @@ async function startServer() {
       const hash = data.hash || '';
       const udf1 = data.udf1 || ''; // restaurant_id
       const udf2 = data.udf2 || ''; // order_id
-      const udf3 = data.udf3 || ''; // table_short_code
+      const udf3 = data.udf3 || ''; // table_short_code / table_url
       const udf4 = data.udf4 || ''; // session_id
       const udf5 = data.udf5 || ''; // is_subscription: '1' if subscription
 
@@ -1244,14 +1336,23 @@ async function startServer() {
       let targetRedirectUrl = '/';
       if (isSubscription) {
         targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
-      } else if (udf3 || udf2) {
-        targetRedirectUrl = `/q/${encodeURIComponent(udf3 || 'table')}?order_id=${encodeURIComponent(udf2)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
-      } else {
-        targetRedirectUrl = '/';
+      } else if (udf3) {
+        const basePath = udf3.startsWith('/') ? udf3 : `/q/${encodeURIComponent(udf3)}`;
+        targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(udf2)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
+      } else if (udf2) {
+        targetRedirectUrl = `/?order_id=${encodeURIComponent(udf2)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
       }
 
-      // Update server order record if payment was successful
+      // Sync payment to Supabase orders and payment_transactions table immediately
       if (isSuccess && udf2) {
+        await syncPaymentToSupabase({
+          orderId: udf2,
+          restaurantId: udf1,
+          amount,
+          transactionId: txnid || mihpayid,
+          gateway: 'payu'
+        });
+
         try {
           const allOrders = readJsonFile<any[]>('orders.json', []);
           const idx = allOrders.findIndex(o => o.id === udf2);
@@ -1266,12 +1367,6 @@ async function startServer() {
               updated_at: new Date().toISOString()
             };
             writeJsonFile('orders.json', allOrders.slice(0, 1000));
-            broadcastRealtimeOrderEvent(allOrders[idx].restaurant_id, {
-              type: 'ORDER_UPDATED',
-              restaurant_id: allOrders[idx].restaurant_id,
-              order: allOrders[idx],
-              timestamp: new Date().toISOString()
-            });
           }
         } catch (e) {
           console.warn('Could not sync order on PayU callback:', e);
@@ -1336,16 +1431,20 @@ async function startServer() {
             .btn {
               display: inline-block;
               width: 100%;
-              padding: 12px;
+              padding: 14px;
               border-radius: 12px;
               background-color: ${isSuccess ? '#10b981' : '#3b82f6'};
               color: #fff;
               text-decoration: none;
               font-weight: bold;
-              font-size: 14px;
+              font-size: 15px;
               border: none;
               cursor: pointer;
               box-sizing: border-box;
+              transition: all 0.2s ease;
+            }
+            .btn:active {
+              transform: scale(0.98);
             }
           </style>
         </head>
@@ -1357,12 +1456,12 @@ async function startServer() {
             
             <div class="details">
               <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${status}</strong></div>
-              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount}</strong></div>` : ''}
+              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount.toFixed(2)}</strong></div>` : ''}
               ${txnid ? `<div class="row"><span>Txn ID:</span><span style="font-family: monospace; font-size: 11px;">${txnid}</span></div>` : ''}
               ${mihpayid ? `<div class="row"><span>PayU ID:</span><span style="font-family: monospace; font-size: 11px;">${mihpayid}</span></div>` : ''}
             </div>
 
-            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Return to Dashboard' : 'Return to Order'}</button>
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : 'Go to Home'}</button>
           </div>
 
           <script>
@@ -1402,7 +1501,12 @@ async function startServer() {
 
             function closeOrRedirect() {
               if (window.opener) {
-                try { window.close(); } catch(e) {}
+                try {
+                  window.opener.postMessage(payload, '*');
+                  window.close();
+                } catch (e) {
+                  window.location.href = '${targetRedirectUrl}';
+                }
               } else {
                 window.location.href = '${targetRedirectUrl}';
               }

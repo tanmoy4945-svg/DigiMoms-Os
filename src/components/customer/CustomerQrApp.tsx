@@ -292,7 +292,7 @@ export const CustomerQrApp: React.FC = () => {
     if (!table || !restaurant) return;
     const params = new URLSearchParams(window.location.search);
     const orderIdParam = params.get('order_id') || params.get('ord');
-    const statusParam = params.get('status') || params.get('payment_status');
+    const paymentParam = params.get('payment');
 
     if (orderIdParam) {
       const match = orders.find(o => o.id === orderIdParam || o.order_number === orderIdParam);
@@ -300,6 +300,40 @@ export const CustomerQrApp: React.FC = () => {
         setLastPlacedOrder(match);
         setCart([]);
         setIsCartOpen(false);
+      } else {
+        // Direct query to Supabase in case realtime state hasn't refreshed locally
+        (async () => {
+          try {
+            const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderIdParam).maybeSingle();
+            if (dbOrd) {
+              const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderIdParam);
+              const fullOrd: Order = {
+                ...dbOrd,
+                subtotal: Number(dbOrd.subtotal || 0),
+                tax: Number(dbOrd.tax || 0),
+                discount: Number(dbOrd.discount || 0),
+                grand_total: Number(dbOrd.grand_total || 0),
+                online_amount: Number(dbOrd.online_amount || 0),
+                cash_amount: Number(dbOrd.cash_amount || 0),
+                cash_due: Number(dbOrd.cash_due || 0),
+                items: (itms || []).map((i: any) => ({
+                  id: i.id,
+                  order_id: i.order_id,
+                  menu_id: i.menu_id,
+                  menu_name: i.menu_name,
+                  quantity: Number(i.quantity),
+                  price: Number(i.price),
+                  special_instructions: i.special_instructions
+                }))
+              };
+              setLastPlacedOrder(fullOrd);
+              setCart([]);
+              setIsCartOpen(false);
+            }
+          } catch (e) {
+            console.warn('Could not auto-restore order from Supabase:', e);
+          }
+        })();
       }
     }
   }, [table?.id, restaurant?.id, orders]);
@@ -2027,6 +2061,9 @@ export const CustomerQrApp: React.FC = () => {
           payuSalt={restaurant.payu_merchant_salt}
           env={restaurant.payu_env || 'TEST'}
           isSubscription={false}
+          tableCode={table.table_code || currentCode || table.id || table.table_number}
+          tableUrl={window.location.pathname}
+          sessionId={session?.id || ''}
         />
       )}
 
@@ -2093,6 +2130,9 @@ export const CustomerQrApp: React.FC = () => {
           customerMobile={customerMobile || '9999999999'}
           customerName={customerMobile ? `Customer (${customerMobile})` : `Table ${table.table_number}`}
           isSubscription={false}
+          tableCode={table.table_code || currentCode || table.id || table.table_number}
+          tableUrl={window.location.pathname}
+          sessionId={session?.id || ''}
         />
       )}
 

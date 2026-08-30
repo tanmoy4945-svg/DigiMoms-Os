@@ -1,6 +1,13 @@
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://qjkoeehgkfnailgmhyjs.supabase.co').replace(/\/+$/, '');
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_TMLOZVNYis6bZInTdfWJ3Q_BJ1kiuih';
+const serverSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 export default async function handler(req: any, res: any) {
   try {
     const data = req.method === 'POST' ? req.body : req.query;
+    const reqQuery = req.query || {};
     let transactionId = '';
     let merchantTransactionId = '';
     let code = 'PAYMENT_SUCCESS';
@@ -25,6 +32,66 @@ export default async function handler(req: any, res: any) {
       code = String(data?.code || 'PAYMENT_SUCCESS');
       isSuccess = code === 'PAYMENT_SUCCESS' || data?.status === 'SUCCESS' || data?.status === 'success';
       amount = Number(data?.amount) || 0;
+    }
+
+    const orderId = String(reqQuery.order_id || (req.body && req.body.order_id) || '');
+    const tableCode = String(reqQuery.table_code || (req.body && req.body.table_code) || '');
+    const restaurantId = String(reqQuery.restaurant_id || (req.body && req.body.restaurant_id) || '');
+    const paymentType = String(reqQuery.type || (req.body && req.body.type) || '');
+    const isSubscription = paymentType === 'subscription' || merchantTransactionId.startsWith('SUB_') || merchantTransactionId.startsWith('RENEW_');
+
+    let targetRedirectUrl = '/';
+    if (isSubscription) {
+      targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+    } else if (tableCode) {
+      const basePath = tableCode.startsWith('/') ? tableCode : `/q/${encodeURIComponent(tableCode)}`;
+      targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+    } else if (orderId) {
+      targetRedirectUrl = `/?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+    }
+
+    // Directly sync success status to Supabase database so Owner & Staff terminals receive live confirmation
+    if (isSuccess && orderId) {
+      try {
+        const confirmedAtIso = new Date().toISOString();
+        const { data: updatedOrd } = await serverSupabase
+          .from('orders')
+          .update({
+            payment_status: 'paid_live',
+            order_status: 'accepted',
+            online_amount: amount,
+            cash_due: 0,
+            payment_actor_id: transactionId || merchantTransactionId || 'phonepe_gateway',
+            payment_actor_type: 'customer',
+            payment_actor_name: 'Online Payment (PhonePe)',
+            payment_confirmed_at: confirmedAtIso,
+            transaction_id: merchantTransactionId || transactionId,
+            updated_at: confirmedAtIso
+          })
+          .eq('id', orderId)
+          .select()
+          .maybeSingle();
+
+        const effectiveRestId = restaurantId || updatedOrd?.restaurant_id;
+        if (effectiveRestId) {
+          await serverSupabase.from('payment_transactions').insert({
+            id: `pt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            order_id: orderId,
+            restaurant_id: effectiveRestId,
+            amount: amount,
+            mode: 'phonepe',
+            type: 'online',
+            status: 'success',
+            reference_id: merchantTransactionId || transactionId,
+            actor_id: 'phonepe_gateway',
+            actor_name: 'Online Payment (PhonePe)',
+            actor_type: 'customer',
+            created_at: confirmedAtIso
+          });
+        }
+      } catch (dbErr) {
+        console.warn('Could not sync PhonePe order to Supabase:', dbErr);
+      }
     }
 
     const htmlResponse = `
@@ -84,16 +151,20 @@ export default async function handler(req: any, res: any) {
           .btn {
             display: inline-block;
             width: 100%;
-            padding: 12px;
+            padding: 14px;
             border-radius: 12px;
             background-color: ${isSuccess ? '#10b981' : '#3b82f6'};
             color: #fff;
             text-decoration: none;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 15px;
             border: none;
             cursor: pointer;
             box-sizing: border-box;
+            transition: all 0.2s ease;
+          }
+          .btn:active {
+            transform: scale(0.98);
           }
         </style>
       </head>
@@ -105,12 +176,12 @@ export default async function handler(req: any, res: any) {
           
           <div class="details">
             <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'};">${code}</strong></div>
-            ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount}</strong></div>` : ''}
+            ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount.toFixed(2)}</strong></div>` : ''}
             ${merchantTransactionId ? `<div class="row"><span>Transaction ID:</span><span style="font-family: monospace; font-size: 11px;">${merchantTransactionId}</span></div>` : ''}
             ${transactionId ? `<div class="row"><span>PhonePe Ref:</span><span style="font-family: monospace; font-size: 11px;">${transactionId}</span></div>` : ''}
           </div>
 
-          <button class="btn" onclick="closeOrRedirect()">Return to Dashboard</button>
+          <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : 'Go to Home'}</button>
         </div>
 
         <script>
@@ -139,9 +210,14 @@ export default async function handler(req: any, res: any) {
 
           function closeOrRedirect() {
             if (window.opener) {
-              try { window.close(); } catch(e) {}
+              try {
+                window.opener.postMessage(payload, '*');
+                window.close();
+              } catch(e) {
+                window.location.href = '${targetRedirectUrl}';
+              }
             } else {
-              window.location.href = '/owner-dashboard';
+              window.location.href = '${targetRedirectUrl}';
             }
           }
 
@@ -149,6 +225,10 @@ export default async function handler(req: any, res: any) {
             setTimeout(() => {
               try { window.close(); } catch(e) {}
             }, 1800);
+          } else if (!window.opener && '${isSuccess}' === 'true') {
+            setTimeout(() => {
+              window.location.href = '${targetRedirectUrl}';
+            }, 2500);
           }
         </script>
       </body>
@@ -159,6 +239,6 @@ export default async function handler(req: any, res: any) {
     return res.status(200).send(htmlResponse);
   } catch (err: any) {
     console.error('PhonePe callback error:', err);
-    return res.redirect('/owner-dashboard');
+    return res.redirect('/');
   }
 }

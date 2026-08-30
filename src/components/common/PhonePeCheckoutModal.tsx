@@ -35,6 +35,9 @@ export interface PhonePeCheckoutModalProps {
   saltIndex?: string;
   env?: 'SANDBOX' | 'PRODUCTION';
   isSubscription?: boolean;
+  tableCode?: string;
+  tableUrl?: string;
+  sessionId?: string;
 }
 
 export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
@@ -55,6 +58,9 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
   saltIndex = '1',
   env = 'SANDBOX',
   isSubscription = false,
+  tableCode,
+  tableUrl,
+  sessionId,
 }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPolling, setIsPolling] = useState<boolean>(false);
@@ -151,6 +157,9 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
             restaurant_id: restaurantId,
             restaurant_name: restaurantName,
             order_id: orderId,
+            table_code: tableUrl || (tableCode ? `/q/${tableCode}` : '') || '',
+            session_id: sessionId || '',
+            is_subscription: isSubscription ? '1' : '0',
             customer_name: customerName,
             mobile: customerMobile,
             merchant_id: merchantId,
