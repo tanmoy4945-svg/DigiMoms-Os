@@ -103,6 +103,16 @@ export const CustomerQrApp: React.FC = () => {
             .maybeSingle();
 
           if (dbRest && isMounted) {
+            let dbExt: Record<string, any> = {};
+            let cleanSecret = dbRest.razorpay_secret || '';
+            if (dbRest.razorpay_secret && typeof dbRest.razorpay_secret === 'string' && dbRest.razorpay_secret.trim().startsWith('{')) {
+              try {
+                const parsed = JSON.parse(dbRest.razorpay_secret);
+                if (parsed?._ext) dbExt = parsed._ext;
+                if (parsed?.secret) cleanSecret = parsed.secret;
+              } catch (e) {}
+            }
+
             const mappedTable: Table = {
               id: dbTable.id,
               restaurant_id: dbTable.restaurant_id,
@@ -112,7 +122,24 @@ export const CustomerQrApp: React.FC = () => {
               status: dbTable.status || 'available',
               created_at: dbTable.created_at || new Date().toISOString()
             };
-            const mappedRest: Restaurant = dbRest as Restaurant;
+            const mappedRest: Restaurant = {
+              ...dbRest,
+              ...dbExt,
+              razorpay_secret: '',
+              payu_merchant_salt: '',
+              phonepe_salt_key: '',
+              password_hash: '',
+              enable_online_payment: typeof dbExt.enable_online_payment === 'boolean' ? dbExt.enable_online_payment : (typeof dbRest.enable_online_payment === 'boolean' ? dbRest.enable_online_payment : true),
+              enable_upi_qr: typeof dbExt.enable_upi_qr === 'boolean' ? dbExt.enable_upi_qr : (typeof dbRest.enable_upi_qr === 'boolean' ? dbRest.enable_upi_qr : true),
+              payment_mode: dbExt.payment_mode || dbRest.payment_mode || 'demo',
+              live_gateway: dbExt.live_gateway || dbRest.live_gateway || 'payu',
+              upi_id: dbExt.upi_id || dbRest.upi_id || '',
+              upi_name: dbExt.upi_name || dbRest.upi_name || dbRest.name || '',
+              upi_qr_image: dbExt.upi_qr_image || dbRest.upi_qr_image || '',
+              enable_cash_payment: typeof dbExt.enable_cash_payment === 'boolean' ? dbExt.enable_cash_payment : (typeof dbRest.enable_cash_payment === 'boolean' ? dbRest.enable_cash_payment : true),
+              enable_gateway_payment: typeof dbExt.enable_gateway_payment === 'boolean' ? dbExt.enable_gateway_payment : (typeof dbRest.enable_gateway_payment === 'boolean' ? dbRest.enable_gateway_payment : true),
+              enable_split_payment: typeof dbExt.enable_split_payment === 'boolean' ? dbExt.enable_split_payment : (typeof dbRest.enable_split_payment === 'boolean' ? dbRest.enable_split_payment : true),
+            } as Restaurant;
             setResolved({ table: mappedTable, restaurant: mappedRest, loading: false });
             return;
           }

@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { normalizeImageUrl } from '../utils/imageUrl';
 import { registerServiceWorker, triggerSystemNotification } from '../utils/notificationService';
 import { safeFetchJson } from '../lib/safeFetch';
+import { sanitizeSensitiveCredentials } from '../utils/productionSafety';
 
 export type ActiveView = 
   | 'public-home' 
@@ -588,38 +589,65 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             }
 
-            const ov = { ...dbExt, ...(localOverrides[r.id] || {}), ...(serverRestConfigs[r.id] || {}) };
+            // Primary source of truth: dbExt (from Supabase DB), complemented by server disk configs and local storage
+            const serverRest = serverRestConfigs[r.id] || {};
+            const localRest = localOverrides[r.id] || {};
+            const ov: Record<string, any> = { ...serverRest, ...localRest, ...dbExt };
+
+            // Helper to resolve booleans strictly (preserving explicit false values)
+            const resolveBool = (key: string, defaultVal: boolean): boolean => {
+              if (typeof dbExt[key] === 'boolean') return dbExt[key];
+              if (typeof localRest[key] === 'boolean') return localRest[key];
+              if (typeof serverRest[key] === 'boolean') return serverRest[key];
+              if (typeof (r as any)[key] === 'boolean') return (r as any)[key];
+              return defaultVal;
+            };
+
+            const enableOnlinePayment = resolveBool('enable_online_payment', true);
+            const enableUpiQr = resolveBool('enable_upi_qr', true);
+            const enableGatewayPayment = resolveBool('enable_gateway_payment', true);
+            const enableCashPayment = resolveBool('enable_cash_payment', true);
+            const enableSplitPayment = resolveBool('enable_split_payment', true);
+            const enableGst = resolveBool('enable_gst', true);
+            const enablePackagingCharge = resolveBool('enable_packaging_charge', false);
+            const enableServiceCharge = resolveBool('enable_service_charge', false);
+            const enableOnlineDiscount = resolveBool('enable_online_discount', true);
+            const enableCoupons = resolveBool('enable_coupons', true);
+
+            const paymentMode = (dbExt.payment_mode || localRest.payment_mode || serverRest.payment_mode || r.payment_mode || 'demo') as 'demo' | 'live';
+            const liveGateway = (dbExt.live_gateway || localRest.live_gateway || serverRest.live_gateway || r.live_gateway || 'payu') as 'razorpay' | 'phonepe' | 'payu';
+
             return {
               ...r,
               monthly_subscription_fee: ov.monthly_subscription_fee ?? r.monthly_subscription_fee ?? 999,
               trial_days: ov.trial_days ?? r.trial_days ?? 0,
               trial_status: ov.trial_status ?? r.trial_status ?? 'off',
               contact_mobile: ov.contact_mobile ?? r.contact_mobile ?? r.owner_mobile ?? '',
-              enable_gst: ov.enable_gst !== undefined ? ov.enable_gst : (r.enable_gst ?? true),
-              gst_percentage: ov.gst_percentage !== undefined ? ov.gst_percentage : (r.gst_percentage ?? 5),
-              enable_packaging_charge: ov.enable_packaging_charge !== undefined ? ov.enable_packaging_charge : (r.enable_packaging_charge ?? false),
-              packaging_charge_amount: ov.packaging_charge_amount !== undefined ? ov.packaging_charge_amount : (r.packaging_charge_amount ?? 10),
-              enable_service_charge: ov.enable_service_charge !== undefined ? ov.enable_service_charge : (r.enable_service_charge ?? false),
-              service_charge_percentage: ov.service_charge_percentage !== undefined ? ov.service_charge_percentage : (r.service_charge_percentage ?? 2.5),
-              enable_online_discount: ov.enable_online_discount !== undefined ? ov.enable_online_discount : (r.enable_online_discount ?? true),
-              online_discount_percentage: ov.online_discount_percentage !== undefined ? ov.online_discount_percentage : (r.online_discount_percentage ?? 5),
-              enable_coupons: ov.enable_coupons !== undefined ? ov.enable_coupons : (r.enable_coupons ?? true),
+              enable_gst: enableGst,
+              gst_percentage: ov.gst_percentage !== undefined ? Number(ov.gst_percentage) : (r.gst_percentage ?? 5),
+              enable_packaging_charge: enablePackagingCharge,
+              packaging_charge_amount: ov.packaging_charge_amount !== undefined ? Number(ov.packaging_charge_amount) : (r.packaging_charge_amount ?? 10),
+              enable_service_charge: enableServiceCharge,
+              service_charge_percentage: ov.service_charge_percentage !== undefined ? Number(ov.service_charge_percentage) : (r.service_charge_percentage ?? 2.5),
+              enable_online_discount: enableOnlineDiscount,
+              online_discount_percentage: ov.online_discount_percentage !== undefined ? Number(ov.online_discount_percentage) : (r.online_discount_percentage ?? 5),
+              enable_coupons: enableCoupons,
               coupons: ov.coupons ?? r.coupons ?? [
                 { id: '1', code: 'DIGI10', discount_type: 'percent', discount_value: 10, min_order_amount: 100, is_active: true },
                 { id: '2', code: 'WELCOME50', discount_type: 'flat', discount_value: 50, min_order_amount: 300, is_active: true }
               ],
-              enable_cash_payment: ov.enable_cash_payment !== undefined ? ov.enable_cash_payment : (r.enable_cash_payment ?? true),
-              enable_online_payment: ov.enable_online_payment !== undefined ? ov.enable_online_payment : (r.enable_online_payment ?? true),
-              enable_split_payment: ov.enable_split_payment !== undefined ? ov.enable_split_payment : (r.enable_split_payment ?? true),
-              enable_gateway_payment: ov.enable_gateway_payment !== undefined ? ov.enable_gateway_payment : (r.enable_gateway_payment ?? true),
-              enable_upi_qr: ov.enable_upi_qr !== undefined ? ov.enable_upi_qr : (r.enable_upi_qr ?? true),
+              enable_cash_payment: enableCashPayment,
+              enable_online_payment: enableOnlinePayment,
+              enable_split_payment: enableSplitPayment,
+              enable_gateway_payment: enableGatewayPayment,
+              enable_upi_qr: enableUpiQr,
               upi_id: ov.upi_id !== undefined ? ov.upi_id : (r.upi_id || ''),
-              upi_name: ov.upi_name !== undefined ? ov.upi_name : (r.upi_name || ''),
+              upi_name: ov.upi_name !== undefined ? ov.upi_name : (r.upi_name || r.name || ''),
               upi_qr_image: ov.upi_qr_image !== undefined ? ov.upi_qr_image : (r.upi_qr_image || ''),
-              live_gateway: ov.live_gateway !== undefined ? ov.live_gateway : (r.live_gateway || 'payu'),
-              payment_mode: ov.payment_mode !== undefined ? ov.payment_mode : (r.payment_mode || 'demo'),
+              live_gateway: liveGateway,
+              payment_mode: paymentMode,
               razorpay_key: ov.razorpay_key !== undefined ? ov.razorpay_key : (r.razorpay_key || ''),
-              razorpay_secret: ov.razorpay_secret !== undefined ? ov.razorpay_secret : cleanRazorpaySecret,
+              razorpay_secret: cleanRazorpaySecret,
               phonepe_merchant_id: ov.phonepe_merchant_id !== undefined ? ov.phonepe_merchant_id : (r.phonepe_merchant_id || ''),
               phonepe_salt_key: ov.phonepe_salt_key !== undefined ? ov.phonepe_salt_key : (r.phonepe_salt_key || ''),
               phonepe_salt_index: ov.phonepe_salt_index !== undefined ? ov.phonepe_salt_index : (r.phonepe_salt_index || '1'),
@@ -627,7 +655,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               payu_merchant_key: ov.payu_merchant_key !== undefined ? ov.payu_merchant_key : (r.payu_merchant_key || ''),
               payu_merchant_salt: ov.payu_merchant_salt !== undefined ? ov.payu_merchant_salt : (r.payu_merchant_salt || ''),
               payu_env: ov.payu_env !== undefined ? ov.payu_env : (r.payu_env || 'TEST'),
-              gateway_verified: ov.gateway_verified !== undefined ? ov.gateway_verified : (r.gateway_verified ?? false),
+              gateway_verified: ov.gateway_verified !== undefined ? Boolean(ov.gateway_verified) : (r.gateway_verified ?? false),
               gateway_status_message: ov.gateway_status_message !== undefined ? ov.gateway_status_message : (r.gateway_status_message || '')
             };
           });
@@ -1902,98 +1930,113 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const dbUpdates = sanitizeRestaurantForDb(updates);
     const nowIso = new Date().toISOString();
 
-    // 1. Try full update on restaurants
-    let { error } = await supabase.from('restaurants').update({
-      ...dbUpdates,
-      updated_at: nowIso
-    }).eq('id', id);
+    // 1. Retrieve full existing record from in-memory state or local overrides
+    const existingRest = restaurants.find(r => r.id === id);
+    let existingExt: Record<string, any> = {};
+    let cleanSecret = updates.razorpay_secret;
 
-    // If PGRST204 (missing column in DB table schema), fallback to core DB columns only
-    if (error && (error.code === 'PGRST204' || error.message?.includes('schema cache') || error.message?.includes('column'))) {
-      console.warn("Extended columns missing in public.restaurants schema cache. Falling back to core columns + JSON bundle...", error);
-      const CORE_COLUMNS = new Set([
-        'id', 'name', 'slug', 'owner_name', 'owner_mobile', 'password_hash',
-        'logo', 'banner', 'address', 'gst', 'fssai', 'business_hours',
-        'payment_mode', 'razorpay_key', 'razorpay_secret', 'status',
-        'trial_start', 'trial_end', 'subscription_start', 'subscription_end',
-        'theme', 'language', 'timezone', 'created_at', 'updated_at'
-      ]);
-      const coreUpdates: Record<string, any> = {};
-      for (const [k, v] of Object.entries(dbUpdates)) {
-        if (CORE_COLUMNS.has(k)) coreUpdates[k] = v;
+    if (existingRest) {
+      if (existingRest.razorpay_secret && typeof existingRest.razorpay_secret === 'string' && existingRest.razorpay_secret.trim().startsWith('{')) {
+        try {
+          const p = JSON.parse(existingRest.razorpay_secret);
+          if (p._ext) existingExt = p._ext;
+          if (cleanSecret === undefined) cleanSecret = p.secret || p._ext?.razorpay_secret || '';
+        } catch (e) {}
+      } else if (cleanSecret === undefined) {
+        cleanSecret = existingRest.razorpay_secret || '';
       }
-      coreUpdates.updated_at = nowIso;
+    }
 
-      // Get existing ext bundle if any
-      const existingRest = restaurants.find(r => r.id === id);
-      let existingExt: Record<string, any> = {};
-      let cleanSecret = updates.razorpay_secret;
-      if (existingRest) {
-        if (existingRest.razorpay_secret && typeof existingRest.razorpay_secret === 'string' && existingRest.razorpay_secret.trim().startsWith('{')) {
-          try {
-            const p = JSON.parse(existingRest.razorpay_secret);
-            if (p._ext) existingExt = p._ext;
-            if (cleanSecret === undefined) cleanSecret = p.secret || p._ext?.razorpay_secret || '';
-          } catch (e) {}
-        } else if (cleanSecret === undefined) {
-          cleanSecret = existingRest.razorpay_secret || '';
-        }
+    // Try reading local overrides and server config to ensure no fields are lost
+    try {
+      const raw = localStorage.getItem('digimoms_restaurant_overrides');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed[id]) existingExt = { ...parsed[id], ...existingExt };
       }
+    } catch (e) {}
 
-      const mergedExt = {
-        ...(existingRest ? {
-          monthly_subscription_fee: existingRest.monthly_subscription_fee,
-          trial_days: existingRest.trial_days,
-          trial_status: existingRest.trial_status,
-          contact_mobile: existingRest.contact_mobile,
-          enable_gst: existingRest.enable_gst,
-          gst_percentage: existingRest.gst_percentage,
-          enable_packaging_charge: existingRest.enable_packaging_charge,
-          packaging_charge_amount: existingRest.packaging_charge_amount,
-          enable_service_charge: existingRest.enable_service_charge,
-          service_charge_percentage: existingRest.service_charge_percentage,
-          enable_online_discount: existingRest.enable_online_discount,
-          online_discount_percentage: existingRest.online_discount_percentage,
-          enable_coupons: existingRest.enable_coupons,
-          coupons: existingRest.coupons,
-          enable_cash_payment: existingRest.enable_cash_payment,
-          enable_online_payment: existingRest.enable_online_payment,
-          enable_split_payment: existingRest.enable_split_payment,
-          enable_gateway_payment: existingRest.enable_gateway_payment,
-          enable_upi_qr: existingRest.enable_upi_qr,
-          upi_id: existingRest.upi_id,
-          upi_name: existingRest.upi_name,
-          upi_qr_image: existingRest.upi_qr_image,
-          live_gateway: existingRest.live_gateway,
-          payment_mode: existingRest.payment_mode,
-          razorpay_key: existingRest.razorpay_key,
-          phonepe_merchant_id: existingRest.phonepe_merchant_id,
-          phonepe_salt_key: existingRest.phonepe_salt_key,
-          phonepe_salt_index: existingRest.phonepe_salt_index,
-          phonepe_env: existingRest.phonepe_env,
-          payu_merchant_key: existingRest.payu_merchant_key,
-          payu_merchant_salt: existingRest.payu_merchant_salt,
-          payu_env: existingRest.payu_env,
-          gateway_verified: existingRest.gateway_verified,
-          gateway_status_message: existingRest.gateway_status_message
-        } : {}),
-        ...existingExt,
-        ...updates
+    // Form authoritative merged extended payload
+    const mergedExt = {
+      ...(existingRest ? {
+        monthly_subscription_fee: existingRest.monthly_subscription_fee,
+        trial_days: existingRest.trial_days,
+        trial_status: existingRest.trial_status,
+        contact_mobile: existingRest.contact_mobile,
+        enable_gst: existingRest.enable_gst,
+        gst_percentage: existingRest.gst_percentage,
+        enable_packaging_charge: existingRest.enable_packaging_charge,
+        packaging_charge_amount: existingRest.packaging_charge_amount,
+        enable_service_charge: existingRest.enable_service_charge,
+        service_charge_percentage: existingRest.service_charge_percentage,
+        enable_online_discount: existingRest.enable_online_discount,
+        online_discount_percentage: existingRest.online_discount_percentage,
+        enable_coupons: existingRest.enable_coupons,
+        coupons: existingRest.coupons,
+        enable_cash_payment: existingRest.enable_cash_payment,
+        enable_online_payment: existingRest.enable_online_payment,
+        enable_split_payment: existingRest.enable_split_payment,
+        enable_gateway_payment: existingRest.enable_gateway_payment,
+        enable_upi_qr: existingRest.enable_upi_qr,
+        upi_id: existingRest.upi_id,
+        upi_name: existingRest.upi_name,
+        upi_qr_image: existingRest.upi_qr_image,
+        live_gateway: existingRest.live_gateway,
+        payment_mode: existingRest.payment_mode,
+        razorpay_key: existingRest.razorpay_key,
+        phonepe_merchant_id: existingRest.phonepe_merchant_id,
+        phonepe_salt_key: existingRest.phonepe_salt_key,
+        phonepe_salt_index: existingRest.phonepe_salt_index,
+        phonepe_env: existingRest.phonepe_env,
+        payu_merchant_key: existingRest.payu_merchant_key,
+        payu_merchant_salt: existingRest.payu_merchant_salt,
+        payu_env: existingRest.payu_env,
+        gateway_verified: existingRest.gateway_verified,
+        gateway_status_message: existingRest.gateway_status_message
+      } : {}),
+      ...existingExt,
+      ...updates
+    };
+
+    const CORE_COLUMNS = new Set([
+      'id', 'name', 'slug', 'owner_name', 'owner_mobile', 'password_hash',
+      'logo', 'banner', 'address', 'gst', 'fssai', 'business_hours',
+      'payment_mode', 'razorpay_key', 'razorpay_secret', 'status',
+      'trial_start', 'trial_end', 'subscription_start', 'subscription_end',
+      'theme', 'language', 'timezone', 'created_at', 'updated_at'
+    ]);
+
+    const coreUpdates: Record<string, any> = {};
+    for (const [k, v] of Object.entries(dbUpdates)) {
+      if (CORE_COLUMNS.has(k)) coreUpdates[k] = v;
+    }
+    coreUpdates.updated_at = nowIso;
+    if (updates.payment_mode) coreUpdates.payment_mode = updates.payment_mode;
+    if (updates.razorpay_key !== undefined) coreUpdates.razorpay_key = updates.razorpay_key;
+
+    // Security Isolation: Scrub sensitive payment secrets/salts so they NEVER enter Supabase public columns or LocalStorage
+    const safeExt = sanitizeSensitiveCredentials(mergedExt);
+
+    // Pack ONLY safe operational fields into razorpay_secret as JSON bundle for permanent Supabase persistence
+    try {
+      coreUpdates.razorpay_secret = JSON.stringify({
+        _ext: safeExt
+      });
+    } catch (e) {}
+
+    // 2. Perform DB update (first try core columns + bundle, fallback if error)
+    let { error } = await supabase.from('restaurants').update(coreUpdates).eq('id', id);
+
+    if (error) {
+      console.warn("Retrying restaurant update with sanitized core payload...", error);
+      const minPayload: Record<string, any> = {
+        updated_at: nowIso,
+        razorpay_secret: coreUpdates.razorpay_secret
       };
-
-      if (updates.payment_mode) coreUpdates.payment_mode = updates.payment_mode;
-      if (updates.razorpay_key !== undefined) coreUpdates.razorpay_key = updates.razorpay_key;
-
-      // Pack all extended fields into razorpay_secret as JSON bundle for permanent Supabase persistence
-      try {
-        coreUpdates.razorpay_secret = JSON.stringify({
-          secret: cleanSecret || '',
-          _ext: mergedExt
-        });
-      } catch (e) {}
-
-      const fallbackRes = await supabase.from('restaurants').update(coreUpdates).eq('id', id);
-      error = fallbackRes.error;
+      if (coreUpdates.name) minPayload.name = coreUpdates.name;
+      if (coreUpdates.payment_mode) minPayload.payment_mode = coreUpdates.payment_mode;
+      const retryRes = await supabase.from('restaurants').update(minPayload).eq('id', id);
+      error = retryRes.error;
     }
 
     if (error) {
@@ -2002,41 +2045,46 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(`Update Failed: ${error.message}`);
     }
 
-    // 2. Immediate verification SELECT by ID
-    const { data: verifiedRow } = await supabase.from('restaurants').select('*').eq('id', id).single();
-
-    // 3. Update React context state array and currentOwner so UI updates immediately and stays persistent
-    setRestaurants(prev => prev.map(r => r.id === id ? { ...r, ...verifiedRow, ...updates } : r));
-
-    if (currentOwner && currentOwner.id === id) {
-      const updatedOwnerObj = { ...currentOwner, ...verifiedRow, ...updates };
-      setCurrentOwner(updatedOwnerObj);
-      sessionStorage.setItem('digimoms_current_owner', JSON.stringify(updatedOwnerObj));
-      localStorage.setItem('digimoms_current_owner', JSON.stringify(updatedOwnerObj));
-    }
-
-    // Save overrides to local storage as fallback for missing columns in Supabase table
+    // 3. Save safe non-sensitive configuration to LocalStorage mirror (never secrets)
     try {
       const raw = localStorage.getItem('digimoms_restaurant_overrides');
       const overrides = raw ? JSON.parse(raw) : {};
-      overrides[id] = { ...(overrides[id] || {}), ...updates };
+      overrides[id] = { ...(overrides[id] || {}), ...safeExt };
       localStorage.setItem('digimoms_restaurant_overrides', JSON.stringify(overrides));
     } catch (e) {
       console.warn("Failed to write digimoms_restaurant_overrides", e);
     }
 
-    // Persist to server disk storage (retained across all browsers, new tabs, and accounts)
+    // 4. Persist full configuration with credentials securely to server-side disk storage
     try {
       await safeFetchJson(`/api/restaurants/${id}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(mergedExt)
       });
     } catch (err) {
       console.warn(`Could not persist restaurant ${id} config to server API:`, err);
     }
 
-    await fetchAllFromSupabase();
+    // 5. Update React context state array and currentOwner so UI updates immediately
+    const updatedFullObj: Restaurant = {
+      ...(existingRest || {}),
+      ...mergedExt,
+      id,
+      updated_at: nowIso
+    } as Restaurant;
+
+    setRestaurants(prev => prev.map(r => r.id === id ? { ...r, ...updatedFullObj } : r));
+
+    if (currentOwner && currentOwner.id === id) {
+      setCurrentOwner(updatedFullObj);
+      const safeOwner = sanitizeSensitiveCredentials(updatedFullObj);
+      sessionStorage.setItem('digimoms_current_owner', JSON.stringify(safeOwner));
+      localStorage.setItem('digimoms_current_owner', JSON.stringify(safeOwner));
+    }
+
+    // 6. Background synchronization to verify all layers
+    fetchAllFromSupabase().catch(e => console.warn("fetchAllFromSupabase sync error:", e));
     showToast('Restaurant details updated and saved successfully!', 'success');
   };
 

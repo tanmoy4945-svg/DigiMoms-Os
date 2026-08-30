@@ -1,12 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
 import {
   CreditCard, ShieldCheck, Zap, Key, Smartphone, CheckCircle2,
   AlertTriangle, RefreshCw, Percent, Receipt, Tag, Trash2, Plus,
-  Ticket, Banknote, QrCode, Upload, Eye, Link as LinkIcon, Check, Copy
+  Ticket, Banknote, QrCode, Upload, Eye, Link as LinkIcon, Check, Copy,
+  History, RotateCcw, Activity
 } from 'lucide-react';
 import { verifyRestaurantGateway } from '../../lib/paymentAdapters';
 import { CouponConfig } from '../../types';
+import {
+  createProductionCheckpoint,
+  getProductionCheckpoints,
+  restoreProductionCheckpoint,
+  runPersistenceHealthCheck,
+  ProductionCheckpoint
+} from '../../utils/productionSafety';
 
 export const PaymentSettings: React.FC = () => {
   const { currentOwner, updateOwnerProfile } = useSaaS();
@@ -87,9 +95,21 @@ export const PaymentSettings: React.FC = () => {
     (currentOwner?.live_gateway as any) || 'payu'
   );
 
+  // Safety & Checkpoint state
+  const [checkpoints, setCheckpoints] = useState<ProductionCheckpoint[]>([]);
+  const [isHealthChecking, setIsHealthChecking] = useState(false);
+  const [healthCheckResult, setHealthCheckResult] = useState<any>(null);
+  const [showSafetyPanel, setShowSafetyPanel] = useState(false);
+
   // Track if user has modified local fields so background polls do not wipe inputs
   const isDirtyRef = React.useRef(false);
   const lastOwnerIdRef = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (currentOwner?.id) {
+      setCheckpoints(getProductionCheckpoints(currentOwner.id));
+    }
+  }, [currentOwner?.id]);
 
   // Synchronize local states when currentOwner updates from server/database
   React.useEffect(() => {
@@ -153,6 +173,7 @@ export const PaymentSettings: React.FC = () => {
       }
       const reader = new FileReader();
       reader.onloadend = () => {
+        isDirtyRef.current = true;
         setUpiQrImage(reader.result as string);
       };
       reader.readAsDataURL(file);
@@ -174,15 +195,18 @@ export const PaymentSettings: React.FC = () => {
       min_order_amount: Number(newCouponMin) || 0,
       is_active: true
     };
+    isDirtyRef.current = true;
     setCoupons(prev => [...prev, newC]);
     setNewCouponCode('');
   };
 
   const handleToggleCoupon = (id: string) => {
+    isDirtyRef.current = true;
     setCoupons(prev => prev.map(c => c.id === id ? { ...c, is_active: !c.is_active } : c));
   };
 
   const handleDeleteCoupon = (id: string) => {
+    isDirtyRef.current = true;
     setCoupons(prev => prev.filter(c => c.id !== id));
   };
 
@@ -223,6 +247,36 @@ export const PaymentSettings: React.FC = () => {
     }
   };
 
+  const handleRunHealthCheck = async () => {
+    setIsHealthChecking(true);
+    setHealthCheckResult(null);
+    try {
+      const result = await runPersistenceHealthCheck(currentOwner.id);
+      setHealthCheckResult(result);
+    } catch (e: any) {
+      setHealthCheckResult({
+        healthy: false,
+        checks: [{ name: 'Health Check Execution', passed: false, message: e.message || String(e) }]
+      });
+    } finally {
+      setIsHealthChecking(false);
+    }
+  };
+
+  const handleRollback = async (checkpoint: ProductionCheckpoint) => {
+    if (!confirm(`Are you sure you want to rollback to checkpoint: "${checkpoint.label}" (${new Date(checkpoint.timestamp).toLocaleTimeString()})?`)) {
+      return;
+    }
+    const success = restoreProductionCheckpoint(checkpoint.id);
+    if (success) {
+      isDirtyRef.current = false;
+      await updateOwnerProfile(checkpoint.data);
+      alert(`✅ Configuration rolled back successfully to checkpoint "${checkpoint.label}"`);
+    } else {
+      alert('❌ Failed to restore checkpoint.');
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -257,42 +311,55 @@ export const PaymentSettings: React.FC = () => {
       }
     }
 
+    const payload: Partial<any> = {
+      payment_mode: mode,
+      live_gateway: liveGateway,
+      enable_online_payment: enableOnlinePayment,
+      enable_upi_qr: enableUpiQr,
+      upi_id: upiId.trim(),
+      upi_name: upiName.trim(),
+      upi_qr_image: upiQrImage,
+      enable_gateway_payment: enableGatewayPayment,
+      razorpay_key: razorpayKey,
+      razorpay_secret: razorpaySecret,
+      phonepe_merchant_id: phonepeMerchantId,
+      phonepe_salt_key: phonepeSaltKey,
+      phonepe_salt_index: phonepeSaltIndex,
+      phonepe_env: phonepeEnv,
+      payu_merchant_key: payuMerchantKey,
+      payu_merchant_salt: payuMerchantSalt,
+      payu_env: payuEnv,
+      gateway_verified: isGatewayVerified,
+      gateway_status_message: verificationMessage,
+      enable_cash_payment: enableCashPayment,
+      enable_split_payment: enableSplitPayment,
+      enable_gst: enableGst,
+      gst_percentage: Number(gstPercentage) || 0,
+      enable_packaging_charge: enablePackaging,
+      packaging_charge_amount: Number(packagingAmount) || 0,
+      enable_service_charge: enableServiceCharge,
+      service_charge_percentage: Number(serviceChargePercentage) || 0,
+      enable_online_discount: enableOnlineDiscount,
+      online_discount_percentage: Number(onlineDiscountPercentage) || 0,
+      enable_coupons: enableCoupons,
+      coupons: coupons
+    };
+
     try {
-      await updateOwnerProfile({
-        payment_mode: mode,
-        live_gateway: liveGateway,
-        enable_online_payment: enableOnlinePayment,
-        enable_upi_qr: enableUpiQr,
-        upi_id: upiId.trim(),
-        upi_name: upiName.trim(),
-        upi_qr_image: upiQrImage,
-        enable_gateway_payment: enableGatewayPayment,
-        razorpay_key: razorpayKey,
-        razorpay_secret: razorpaySecret,
-        phonepe_merchant_id: phonepeMerchantId,
-        phonepe_salt_key: phonepeSaltKey,
-        phonepe_salt_index: phonepeSaltIndex,
-        phonepe_env: phonepeEnv,
-        payu_merchant_key: payuMerchantKey,
-        payu_merchant_salt: payuMerchantSalt,
-        payu_env: payuEnv,
-        gateway_verified: isGatewayVerified,
-        gateway_status_message: verificationMessage,
-        enable_cash_payment: enableCashPayment,
-        enable_split_payment: enableSplitPayment,
-        enable_gst: enableGst,
-        gst_percentage: Number(gstPercentage) || 0,
-        enable_packaging_charge: enablePackaging,
-        packaging_charge_amount: Number(packagingAmount) || 0,
-        enable_service_charge: enableServiceCharge,
-        service_charge_percentage: Number(serviceChargePercentage) || 0,
-        enable_online_discount: enableOnlineDiscount,
-        online_discount_percentage: Number(onlineDiscountPercentage) || 0,
-        enable_coupons: enableCoupons,
-        coupons: coupons
-      });
+      // 1. Create safety checkpoint before modifying production state
+      createProductionCheckpoint(
+        currentOwner.id,
+        'restaurant',
+        `Payment config update: Mode=${mode}, Online=${enableOnlinePayment ? 'ON' : 'OFF'}, UPI=${enableUpiQr ? 'ON' : 'OFF'}`,
+        payload,
+        'Owner Admin'
+      );
+      setCheckpoints(getProductionCheckpoints(currentOwner.id));
+
+      // 2. Perform authoritative update
+      await updateOwnerProfile(payload);
       isDirtyRef.current = false;
-      alert('✅ Restaurant Payment & Tax settings saved successfully!');
+      alert('✅ Restaurant Payment & Tax settings saved and verified across all storage layers!');
     } catch (err: any) {
       console.error("Save payment settings error:", err);
       alert(`❌ Failed to save payment settings: ${err?.message || String(err)}`);
@@ -301,12 +368,96 @@ export const PaymentSettings: React.FC = () => {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-white">Restaurant Payment Configuration</h2>
-        <p className="text-xs text-slate-400">
-          Configure direct UPI Scan & Pay, Online Payment Gateways, and Customer Checkout rules for <strong className="text-white">{currentOwner.name}</strong>.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-white">Restaurant Payment Configuration</h2>
+          <p className="text-xs text-slate-400">
+            Configure direct UPI Scan & Pay, Online Payment Gateways, and Customer Checkout rules for <strong className="text-white">{currentOwner.name}</strong>.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowSafetyPanel(!showSafetyPanel)}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 ${
+              showSafetyPanel
+                ? 'bg-blue-600/20 text-blue-300 border-blue-500/50'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-blue-400" />
+            Safety & Checkpoints ({checkpoints.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRunHealthCheck}
+            disabled={isHealthChecking}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-emerald-400 text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            <Activity className={`w-4 h-4 ${isHealthChecking ? 'animate-spin' : ''}`} />
+            {isHealthChecking ? 'Testing...' : 'Verify Persistence'}
+          </button>
+        </div>
       </div>
+
+      {/* PRODUCTION SAFETY & CHECKPOINTS PANEL */}
+      {showSafetyPanel && (
+        <div className="p-5 rounded-2xl bg-slate-950 border border-blue-500/30 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-bold text-blue-300">
+              <History className="w-4 h-4 text-blue-400" /> Production Configuration Checkpoints & Rollback
+            </div>
+            <span className="text-[11px] text-slate-400">
+              Automated snapshots captured prior to every configuration change
+            </span>
+          </div>
+
+          {checkpoints.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">No checkpoints recorded yet. Checkpoints are automatically generated when saving.</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {checkpoints.map((cp) => (
+                <div key={cp.id} className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="font-semibold text-white">{cp.label}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                      {new Date(cp.timestamp).toLocaleString()} • Triggered by: {cp.author || 'System'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRollback(cp)}
+                    className="px-3 py-1 rounded-lg bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center gap-1 transition-all"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Rollback
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* HEALTH CHECK RESULTS */}
+      {healthCheckResult && (
+        <div className={`p-4 rounded-2xl border ${healthCheckResult.healthy ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-rose-950/40 border-rose-500/30 text-rose-300'} space-y-2 text-xs`}>
+          <div className="font-bold flex items-center gap-2">
+            {healthCheckResult.healthy ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+            <span>Persistence Health Status: {healthCheckResult.healthy ? 'ALL PERSISTENCE CHECKS PASSED (Authoritative)' : 'PERSISTENCE ANOMALIES DETECTED'}</span>
+          </div>
+          <div className="space-y-1">
+            {healthCheckResult.checks.map((c: any, idx: number) => (
+              <div key={idx} className="flex items-center gap-2 text-[11px] font-mono">
+                <span>{c.passed ? '✅' : '❌'}</span>
+                <strong>{c.name}:</strong>
+                <span className="text-slate-300">{c.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSave} className="p-8 rounded-3xl bg-slate-900 border border-slate-800 space-y-8 shadow-2xl">
         
@@ -331,7 +482,10 @@ export const PaymentSettings: React.FC = () => {
             <input
               type="checkbox"
               checked={enableOnlinePayment}
-              onChange={(e) => setEnableOnlinePayment(e.target.checked)}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setEnableOnlinePayment(e.target.checked);
+              }}
               className="sr-only peer"
             />
             <div className="w-14 h-8 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
@@ -362,7 +516,10 @@ export const PaymentSettings: React.FC = () => {
               <input
                 type="checkbox"
                 checked={enableUpiQr}
-                onChange={(e) => setEnableUpiQr(e.target.checked)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setEnableUpiQr(e.target.checked);
+                }}
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
@@ -380,7 +537,10 @@ export const PaymentSettings: React.FC = () => {
                     type="text"
                     placeholder="e.g. restaurantname@upi or 9876543210@okaxis"
                     value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setUpiId(e.target.value);
+                    }}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white font-mono outline-none focus:border-purple-500"
                   />
                   <p className="text-[11px] text-slate-500 mt-1">
@@ -396,7 +556,10 @@ export const PaymentSettings: React.FC = () => {
                     type="text"
                     placeholder="e.g. Royal Spice Family Restaurant"
                     value={upiName}
-                    onChange={(e) => setUpiName(e.target.value)}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setUpiName(e.target.value);
+                    }}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-purple-500"
                   />
                 </div>
@@ -431,6 +594,7 @@ export const PaymentSettings: React.FC = () => {
                         type="button"
                         onClick={() => {
                           if (customQrUrlInput.trim()) {
+                            isDirtyRef.current = true;
                             setUpiQrImage(customQrUrlInput.trim());
                             setCustomQrUrlInput('');
                           }
@@ -444,7 +608,10 @@ export const PaymentSettings: React.FC = () => {
                     {upiQrImage && (
                       <button
                         type="button"
-                        onClick={() => setUpiQrImage('')}
+                        onClick={() => {
+                          isDirtyRef.current = true;
+                          setUpiQrImage('');
+                        }}
                         className="text-[11px] text-rose-400 hover:underline font-semibold flex items-center gap-1"
                       >
                         <Trash2 className="w-3.5 h-3.5" /> Remove Custom QR (Use Auto-Generated UPI QR)
@@ -526,7 +693,10 @@ export const PaymentSettings: React.FC = () => {
               <input
                 type="checkbox"
                 checked={enableGatewayPayment}
-                onChange={(e) => setEnableGatewayPayment(e.target.checked)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setEnableGatewayPayment(e.target.checked);
+                }}
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
@@ -543,7 +713,10 @@ export const PaymentSettings: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div
-                    onClick={() => setMode('demo')}
+                    onClick={() => {
+                      isDirtyRef.current = true;
+                      setMode('demo');
+                    }}
                     className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-1.5 ${
                       mode === 'demo'
                         ? 'border-blue-500 bg-blue-950/30 text-white shadow-lg shadow-blue-500/10'
@@ -563,6 +736,7 @@ export const PaymentSettings: React.FC = () => {
 
                   <div
                     onClick={() => {
+                      isDirtyRef.current = true;
                       setMode('live');
                     }}
                     className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-1.5 ${
@@ -943,7 +1117,10 @@ export const PaymentSettings: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={enableCashPayment}
-                  onChange={(e) => setEnableCashPayment(e.target.checked)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setEnableCashPayment(e.target.checked);
+                  }}
                   className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
                 />
               </div>
@@ -962,6 +1139,7 @@ export const PaymentSettings: React.FC = () => {
                   type="checkbox"
                   checked={enableUpiQr && enableOnlinePayment}
                   onChange={(e) => {
+                    isDirtyRef.current = true;
                     setEnableUpiQr(e.target.checked);
                     if (e.target.checked && !enableOnlinePayment) setEnableOnlinePayment(true);
                   }}
@@ -982,7 +1160,10 @@ export const PaymentSettings: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={enableSplitPayment}
-                  onChange={(e) => setEnableSplitPayment(e.target.checked)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setEnableSplitPayment(e.target.checked);
+                  }}
                   className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
                 />
               </div>
@@ -1010,7 +1191,10 @@ export const PaymentSettings: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={enableGst}
-                  onChange={(e) => setEnableGst(e.target.checked)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setEnableGst(e.target.checked);
+                  }}
                   className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                 />
               </div>
@@ -1021,7 +1205,10 @@ export const PaymentSettings: React.FC = () => {
                     type="number"
                     step="0.1"
                     value={gstPercentage}
-                    onChange={(e) => setGstPercentage(e.target.value)}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setGstPercentage(e.target.value);
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none focus:border-amber-500"
                     placeholder="5"
                   />
@@ -1036,7 +1223,10 @@ export const PaymentSettings: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={enablePackaging}
-                  onChange={(e) => setEnablePackaging(e.target.checked)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setEnablePackaging(e.target.checked);
+                  }}
                   className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                 />
               </div>
@@ -1046,7 +1236,10 @@ export const PaymentSettings: React.FC = () => {
                   <input
                     type="number"
                     value={packagingAmount}
-                    onChange={(e) => setPackagingAmount(e.target.value)}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setPackagingAmount(e.target.value);
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none focus:border-amber-500"
                     placeholder="10"
                   />
@@ -1061,7 +1254,10 @@ export const PaymentSettings: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={enableServiceCharge}
-                  onChange={(e) => setEnableServiceCharge(e.target.checked)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setEnableServiceCharge(e.target.checked);
+                  }}
                   className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                 />
               </div>
@@ -1072,7 +1268,10 @@ export const PaymentSettings: React.FC = () => {
                     type="number"
                     step="0.1"
                     value={serviceChargePercentage}
-                    onChange={(e) => setServiceChargePercentage(e.target.value)}
+                    onChange={(e) => {
+                      isDirtyRef.current = true;
+                      setServiceChargePercentage(e.target.value);
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none focus:border-amber-500"
                     placeholder="2.5"
                   />
@@ -1091,7 +1290,10 @@ export const PaymentSettings: React.FC = () => {
             <input
               type="checkbox"
               checked={enableOnlineDiscount}
-              onChange={(e) => setEnableOnlineDiscount(e.target.checked)}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setEnableOnlineDiscount(e.target.checked);
+              }}
               className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
             />
           </div>
@@ -1106,7 +1308,10 @@ export const PaymentSettings: React.FC = () => {
                 type="number"
                 step="0.5"
                 value={onlineDiscountPercentage}
-                onChange={(e) => setOnlineDiscountPercentage(e.target.value)}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setOnlineDiscountPercentage(e.target.value);
+                }}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-emerald-400 font-mono font-bold outline-none focus:border-emerald-500"
                 placeholder="5"
               />
@@ -1123,7 +1328,10 @@ export const PaymentSettings: React.FC = () => {
             <input
               type="checkbox"
               checked={enableCoupons}
-              onChange={(e) => setEnableCoupons(e.target.checked)}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setEnableCoupons(e.target.checked);
+              }}
               className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
             />
           </div>

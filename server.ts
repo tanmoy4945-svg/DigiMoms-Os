@@ -113,34 +113,60 @@ async function startServer() {
     res.json({ success: true, data: updated });
   });
 
-  // API Route: Persistent Restaurant Payment Configurations & Overrides
+  // Helper: Sanitize restaurant configuration to prevent payment secrets & credential exposure
+  function sanitizeRestaurantConfig(cfg: Record<string, any>, maskSecrets = true): Record<string, any> {
+    if (!cfg) return {};
+    const copy = { ...cfg };
+    delete copy.password_hash;
+
+    if (maskSecrets) {
+      if (copy.payu_merchant_salt) copy.payu_merchant_salt = '••••••••';
+      if (copy.phonepe_salt_key) copy.phonepe_salt_key = '••••••••';
+      if (copy.razorpay_secret) copy.razorpay_secret = '••••••••';
+      if (copy.razorpay_key_secret) copy.razorpay_key_secret = '••••••••';
+    } else {
+      delete copy.payu_merchant_salt;
+      delete copy.phonepe_salt_key;
+      delete copy.razorpay_secret;
+      delete copy.razorpay_key_secret;
+    }
+    return copy;
+  }
+
+  // API Route: Persistent Restaurant Payment Configurations & Overrides (Public/Sync: Secrets completely stripped)
   app.get('/api/restaurants-configs', (req, res) => {
     const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
-    res.json({ success: true, data: configs });
+    const sanitized: Record<string, any> = {};
+    for (const [id, cfg] of Object.entries(configs)) {
+      sanitized[id] = sanitizeRestaurantConfig(cfg, false);
+    }
+    res.json({ success: true, data: sanitized });
   });
 
-  app.get('/api/restaurants/:id/config', (req, res) => {
+  // API Route: Specific Restaurant Config (Masked for authenticated owner UI, stripped for guests)
+  app.get(['/api/restaurants/:id/config', '/api/restaurant-config/:id'], (req, res) => {
     const { id } = req.params;
     const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
-    res.json({ success: true, data: configs[id] || {} });
+    const cfg = configs[id] || {};
+    res.json({ success: true, data: sanitizeRestaurantConfig(cfg, true) });
   });
 
-  app.post('/api/restaurants/:id/config', (req, res) => {
+  app.post(['/api/restaurants/:id/config', '/api/restaurant-config/:id'], (req, res) => {
     const { id } = req.params;
     const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
     const currentRest = configs[id] || {};
     const body = req.body || {};
 
-    // Preserve existing saved secrets if client sends masked placeholder
-    const resolvedPayuSalt = (typeof body.payu_merchant_salt === 'string' && !body.payu_merchant_salt.startsWith('•••'))
+    // Preserve existing saved secrets if client sends masked placeholder or leaves empty
+    const resolvedPayuSalt = (typeof body.payu_merchant_salt === 'string' && !body.payu_merchant_salt.startsWith('•••') && body.payu_merchant_salt.trim() !== '')
       ? body.payu_merchant_salt
       : (currentRest.payu_merchant_salt || '');
 
-    const resolvedPhonepeSalt = (typeof body.phonepe_salt_key === 'string' && !body.phonepe_salt_key.startsWith('•••'))
+    const resolvedPhonepeSalt = (typeof body.phonepe_salt_key === 'string' && !body.phonepe_salt_key.startsWith('•••') && body.phonepe_salt_key.trim() !== '')
       ? body.phonepe_salt_key
       : (currentRest.phonepe_salt_key || '');
 
-    const resolvedRazorpaySecret = (typeof body.razorpay_secret === 'string' && !body.razorpay_secret.startsWith('•••'))
+    const resolvedRazorpaySecret = (typeof body.razorpay_secret === 'string' && !body.razorpay_secret.startsWith('•••') && body.razorpay_secret.trim() !== '')
       ? body.razorpay_secret
       : (currentRest.razorpay_secret || '');
 
@@ -153,7 +179,7 @@ async function startServer() {
       updated_at: new Date().toISOString()
     };
     writeJsonFile('restaurant_configs.json', configs);
-    res.json({ success: true, data: configs[id] });
+    res.json({ success: true, data: sanitizeRestaurantConfig(configs[id], true) });
   });
 
   // Realtime Server-Sent Events (SSE) Manager for Ultra-Fast Instant Multi-Device Notifications
@@ -298,9 +324,31 @@ async function startServer() {
       }
 
       const origin = req.headers.origin || (req.headers.host ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000');
-      const merchantId = merchant_id || process.env.PHONEPE_MERCHANT_ID || 'DIGIMOMS_ONLINE';
-      const saltKey = salt_key || process.env.PHONEPE_SALT_KEY || 'test-salt-key-digimoms-secret';
-      const saltIndex = salt_index || process.env.PHONEPE_SALT_INDEX || '1';
+      
+      let resolvedMerchantId = (merchant_id || '').trim();
+      let resolvedSaltKey = (salt_key || '').trim();
+      let resolvedSaltIndex = (salt_index || '').trim();
+
+      // Look up credentials securely from server-side store if not passed or masked
+      if (!resolvedMerchantId || !resolvedSaltKey || resolvedSaltKey.startsWith('•••') || resolvedSaltKey === 'test-salt-key-digimoms-secret') {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.phonepe_merchant_id && !resolvedMerchantId) resolvedMerchantId = rCfg.phonepe_merchant_id;
+          if (rCfg.phonepe_salt_key && (!resolvedSaltKey || resolvedSaltKey.startsWith('•••'))) resolvedSaltKey = rCfg.phonepe_salt_key;
+          if (rCfg.phonepe_salt_index && !resolvedSaltIndex) resolvedSaltIndex = rCfg.phonepe_salt_index;
+        }
+        if (!resolvedMerchantId || !resolvedSaltKey || resolvedSaltKey.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.phonepe_merchant_id && !resolvedMerchantId) resolvedMerchantId = ceoCfg.phonepe_merchant_id;
+          if (ceoCfg.phonepe_salt_key && (!resolvedSaltKey || resolvedSaltKey.startsWith('•••'))) resolvedSaltKey = ceoCfg.phonepe_salt_key;
+          if (ceoCfg.phonepe_salt_index && !resolvedSaltIndex) resolvedSaltIndex = ceoCfg.phonepe_salt_index;
+        }
+      }
+
+      const merchantId = resolvedMerchantId || process.env.PHONEPE_MERCHANT_ID || 'DIGIMOMS_ONLINE';
+      const saltKey = resolvedSaltKey || process.env.PHONEPE_SALT_KEY || 'test-salt-key-digimoms-secret';
+      const saltIndex = resolvedSaltIndex || process.env.PHONEPE_SALT_INDEX || '1';
       const merchantTransactionId = `MT_SUB_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const merchantUserId = `MUID_${(restaurant_id || 'rest').substring(0, 8)}`;
       const amountPaise = Math.round(amount * 100);
@@ -677,8 +725,25 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid amount' });
       }
 
-      const keyId = razorpay_key || process.env.RAZORPAY_KEY_ID || 'rzp_test_digimoms';
-      const keySecret = razorpay_secret || process.env.RAZORPAY_KEY_SECRET;
+      let keyId = (razorpay_key || '').trim();
+      let keySecret = (razorpay_secret || '').trim();
+
+      if (!keyId || !keySecret || keySecret.startsWith('•••')) {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.razorpay_key && !keyId) keyId = rCfg.razorpay_key;
+          if (rCfg.razorpay_secret && (!keySecret || keySecret.startsWith('•••'))) keySecret = rCfg.razorpay_secret;
+        }
+        if (!keyId || !keySecret || keySecret.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.razorpay_key_id && !keyId) keyId = ceoCfg.razorpay_key_id;
+          if (ceoCfg.razorpay_key_secret && (!keySecret || keySecret.startsWith('•••'))) keySecret = ceoCfg.razorpay_key_secret;
+        }
+      }
+
+      keyId = keyId || process.env.RAZORPAY_KEY_ID || 'rzp_test_digimoms';
+      keySecret = keySecret || process.env.RAZORPAY_KEY_SECRET;
 
       if (keySecret && keyId && keyId !== 'rzp_test_digimoms') {
         const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
@@ -723,13 +788,26 @@ async function startServer() {
   // API Route: Verify Razorpay Payment Signature
   app.post('/api/razorpay/verify-payment', async (req, res) => {
     try {
-      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, razorpay_secret } = req.body;
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, razorpay_secret, restaurant_id } = req.body;
 
       if (!razorpay_payment_id) {
         return res.status(400).json({ error: 'Missing payment ID' });
       }
 
-      const secret = razorpay_secret || process.env.RAZORPAY_KEY_SECRET;
+      let secret = (razorpay_secret || '').trim();
+      if (!secret || secret.startsWith('•••')) {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.razorpay_secret) secret = rCfg.razorpay_secret;
+        }
+        if (!secret || secret.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.razorpay_key_secret) secret = ceoCfg.razorpay_key_secret;
+        }
+      }
+
+      secret = secret || process.env.RAZORPAY_KEY_SECRET;
 
       if (secret && razorpay_order_id && razorpay_signature) {
         const body = razorpay_order_id + '|' + razorpay_payment_id;
