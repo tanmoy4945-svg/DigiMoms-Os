@@ -852,27 +852,42 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (orderData) {
-        const mappedOrders: Order[] = orderData.map(o => ({
-          ...o,
-          subtotal: Number(o.subtotal || 0),
-          tax: Number(o.tax || 0),
-          discount: Number(o.discount || 0),
-          grand_total: Number(o.grand_total || 0),
-          online_amount: o.online_amount !== undefined && o.online_amount !== null ? Number(o.online_amount) : 0,
-          cash_amount: o.cash_amount !== undefined && o.cash_amount !== null ? Number(o.cash_amount) : 0,
-          cash_due: o.cash_due !== undefined && o.cash_due !== null ? Number(o.cash_due) : 0,
-          items: (orderItemsData || [])
-            .filter(i => i.order_id === o.id)
-            .map(i => ({
-              id: i.id,
-              order_id: i.order_id,
-              menu_id: i.menu_id,
-              menu_name: i.menu_name,
-              quantity: Number(i.quantity),
-              price: Number(i.price),
-              special_instructions: i.special_instructions
-            }))
-        }));
+        const mappedOrders: Order[] = orderData.map(o => {
+          const grandTotal = Number(o.grand_total || 0);
+          const onlineAmt = o.online_amount !== undefined && o.online_amount !== null ? Number(o.online_amount) : 0;
+          const cashAmt = o.cash_amount !== undefined && o.cash_amount !== null ? Number(o.cash_amount) : 0;
+          const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(o.payment_status);
+          let calculatedCashDue = 0;
+          if (isPaid) {
+            calculatedCashDue = 0;
+          } else if (o.cash_due !== undefined && o.cash_due !== null && Number(o.cash_due) > 0) {
+            calculatedCashDue = Number(o.cash_due);
+          } else {
+            calculatedCashDue = Math.max(0, Number((grandTotal - onlineAmt - cashAmt).toFixed(2)));
+          }
+
+          return {
+            ...o,
+            subtotal: Number(o.subtotal || 0),
+            tax: Number(o.tax || 0),
+            discount: Number(o.discount || 0),
+            grand_total: grandTotal,
+            online_amount: onlineAmt,
+            cash_amount: cashAmt,
+            cash_due: calculatedCashDue,
+            items: (orderItemsData || [])
+              .filter(i => i.order_id === o.id)
+              .map(i => ({
+                id: i.id,
+                order_id: i.order_id,
+                menu_id: i.menu_id,
+                menu_name: i.menu_name,
+                quantity: Number(i.quantity),
+                price: Number(i.price),
+                special_instructions: i.special_instructions
+              }))
+          };
+        });
         setOrders(mappedOrders);
         mappedOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
       }
@@ -2947,7 +2962,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const type = actorType || (currentStaff ? 'staff' : 'owner');
     const actorId = currentStaff ? currentStaff.id : (currentOwner ? currentOwner.id : 'staff');
 
-    const dueToCollect = existingOrd.cash_due ?? (existingOrd.grand_total - (existingOrd.online_amount || 0));
+    const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(existingOrd.payment_status);
+    const calculatedDue = isPaid ? 0 : Math.max(0, Number(existingOrd.grand_total || 0) - Number(existingOrd.online_amount || 0) - Number(existingOrd.cash_amount || 0));
+    const dueToCollect = isPaid ? 0 : (existingOrd.cash_due !== undefined && existingOrd.cash_due !== null && existingOrd.cash_due > 0 ? existingOrd.cash_due : calculatedDue);
     await confirmCashPayment(orderId, Math.max(0, dueToCollect), actorId, type, actor);
   };
 
@@ -3223,7 +3240,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (totalPaid >= grandTotal) {
       newPaymentStatus = existingOrd.payment_mode === 'demo' ? 'paid_demo' : 'paid_cash';
-      newOrderStatus = 'completed';
+      if (existingOrd.order_status === 'pending' || existingOrd.order_status === 'received') {
+        newOrderStatus = 'accepted';
+      }
     } else if (totalPaid > 0) {
       newPaymentStatus = 'partially_paid';
     }

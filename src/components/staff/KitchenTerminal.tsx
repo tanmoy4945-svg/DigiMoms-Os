@@ -40,7 +40,7 @@ export const KitchenTerminal: React.FC = () => {
     if (o.restaurant_id !== currentStaff.restaurant_id) return false;
     if (o.order_status === 'completed' || o.order_status === 'cancelled') return false;
     // Exclude unverified online checkout attempts so Kitchen only receives confirmed orders
-    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
       return false;
     }
     return true;

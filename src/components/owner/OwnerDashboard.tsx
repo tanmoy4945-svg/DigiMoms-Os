@@ -78,19 +78,23 @@ export const OwnerDashboard: React.FC = () => {
   const restTables = tables.filter(t => t.restaurant_id === currentOwner.id);
   const restCalls = callRequests.filter(c => c.restaurant_id === currentOwner.id && c.status === 'pending');
 
-  // Filter confirmed orders (excluding cancelled & unverified online checkout attempts)
-  const confirmedRestOrders = restOrders.filter(o => {
-    if (o.order_status === 'cancelled') return false;
-    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
-      return false; // Do not show online orders until gateway confirms payment
+  // Helper to accurately get effective cash due
+  const getEffectiveCashDue = (o: Order): number => {
+    const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(o.payment_status);
+    if (isPaid) return 0;
+    if (o.cash_due !== undefined && o.cash_due !== null && Number(o.cash_due) > 0) {
+      return Number(o.cash_due);
     }
-    return true;
-  });
+    return Math.max(0, Number(o.grand_total || 0) - Number(o.online_amount || 0) - Number(o.cash_amount || 0));
+  };
+
+  // Filter confirmed & active orders (excluding cancelled)
+  const confirmedRestOrders = restOrders.filter(o => o.order_status !== 'cancelled');
 
   // Total Realized Revenue: Increases ONLY when customer pays online (auto) or cash is confirmed by staff/owner
   const todaySales = restOrders.reduce((sum, o) => {
     if (o.order_status === 'cancelled') return sum;
-    if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+    if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
       return sum + Number(o.online_amount || o.grand_total);
     }
     if (o.payment_mode === 'demo') {
@@ -98,7 +102,7 @@ export const OwnerDashboard: React.FC = () => {
     }
     if (o.payment_mode === 'partial') {
       let paidAmt = 0;
-      if (['paid_live', 'paid', 'paid_demo', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
+      if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
         paidAmt += Number(o.online_amount || 0);
       }
       if (['paid', 'paid_cash'].includes(o.payment_status)) {
@@ -108,7 +112,7 @@ export const OwnerDashboard: React.FC = () => {
       }
       return sum + Math.min(o.grand_total, paidAmt);
     }
-    if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+    if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
       return sum + Number(o.online_amount || o.grand_total);
     }
     // Cash payment
@@ -119,8 +123,8 @@ export const OwnerDashboard: React.FC = () => {
   }, 0);
 
   const pendingOrders = confirmedRestOrders.filter(o => {
-    if (['paid', 'paid_live', 'paid_cash', 'paid_demo'].includes(o.payment_status)) return false;
-    return (o.cash_due ?? (o.grand_total - (o.online_amount || 0) - (o.cash_amount || 0))) > 0;
+    if (['paid', 'paid_live', 'paid_cash', 'paid_demo', 'paid_online'].includes(o.payment_status)) return false;
+    return getEffectiveCashDue(o) > 0 || o.payment_status === 'payment_verification_pending';
   });
   const cookingOrders = confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted');
   const occupiedTables = restTables.filter(t => t.status === 'occupied').length;
@@ -780,21 +784,21 @@ export const OwnerDashboard: React.FC = () => {
                           {order.order_status}
                         </span>
 
-                        {['paid_live', 'paid', 'paid_demo'].includes(order.payment_status) && (order.payment_mode === 'online' || order.payment_mode === 'demo') ? (
+                        {['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(order.payment_status) && (order.payment_mode === 'online' || order.payment_mode === 'demo' || order.payment_mode === 'upi_qr') ? (
                           <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3" /> PAID ONLINE (AUTO)
                           </span>
-                        ) : ['paid_cash', 'paid'].includes(order.payment_status) && order.payment_mode === 'cash' ? (
+                        ) : ['paid_cash', 'paid'].includes(order.payment_status) || (order.payment_mode === 'cash' && ['paid_live', 'paid_cash', 'paid'].includes(order.payment_status)) ? (
                           <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3" /> PAID (CASH)
                           </span>
                         ) : order.payment_status === 'partially_paid' ? (
                           <span className="px-2.5 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold uppercase">
-                            PARTIAL (DUE: ₹{order.cash_due || 0})
+                            PARTIAL (DUE: ₹{getEffectiveCashDue(order)})
                           </span>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-400 border border-amber-500/40 text-[10px] font-bold uppercase">
-                            CASH DUE: ₹{order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0))}
+                            CASH DUE: ₹{getEffectiveCashDue(order)}
                           </span>
                         )}
                       </div>
@@ -831,8 +835,9 @@ export const OwnerDashboard: React.FC = () => {
                         )}
 
                         {order.payment_mode !== 'online' &&
-                         (order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0))) > 0 &&
-                         order.payment_status !== 'paid_live' && order.payment_status !== 'paid' && order.payment_status !== 'paid_demo' && order.payment_status !== 'paid_cash' && order.payment_status !== 'payment_verification_pending' && (
+                         getEffectiveCashDue(order) > 0 &&
+                         !['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(order.payment_status) &&
+                         order.payment_status !== 'payment_verification_pending' && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => setSelectedOfflineOrder(order)}
