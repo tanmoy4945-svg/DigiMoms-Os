@@ -110,9 +110,10 @@ export const ReportsAnalytics: React.FC = () => {
       if (['paid', 'paid_live', 'paid_cash', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
         return sum; // Fully paid
       }
-      const onlinePaid = (o.payment_mode === 'online' || o.payment_mode === 'upi_qr' || o.payment_mode === 'demo')
-        ? (['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status) ? o.grand_total : 0)
-        : Number(o.online_amount || 0);
+      if (o.payment_mode === 'online' || o.payment_mode === 'demo') {
+        return sum; // Online orders do not have pending cash collection
+      }
+      const onlinePaid = Number(o.online_amount || 0);
       const cashPaid = Number(o.cash_amount || 0);
       const remainingDue = Math.max(0, o.grand_total - (onlinePaid + cashPaid));
       return sum + remainingDue;

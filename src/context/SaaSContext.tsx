@@ -856,11 +856,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const grandTotal = Number(o.grand_total || 0);
           const onlineAmt = o.online_amount !== undefined && o.online_amount !== null ? Number(o.online_amount) : 0;
           const cashAmt = o.cash_amount !== undefined && o.cash_amount !== null ? Number(o.cash_amount) : 0;
-          const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(o.payment_status);
+          const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
           let calculatedCashDue = 0;
           if (isPaid) {
             calculatedCashDue = 0;
-          } else if (o.cash_due !== undefined && o.cash_due !== null && Number(o.cash_due) > 0) {
+          } else if (o.payment_mode === 'online' || o.payment_mode === 'demo') {
+            calculatedCashDue = 0;
+          } else if (o.cash_due !== undefined && o.cash_due !== null && Number(o.cash_due) >= 0) {
             calculatedCashDue = Number(o.cash_due);
           } else {
             calculatedCashDue = Math.max(0, Number((grandTotal - onlineAmt - cashAmt).toFixed(2)));
@@ -1140,7 +1142,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         grand_total: Number(newRow.grand_total || 0),
         online_amount: newRow.online_amount ? Number(newRow.online_amount) : 0,
         cash_amount: newRow.cash_amount ? Number(newRow.cash_amount) : 0,
-        cash_due: newRow.cash_due !== undefined ? Number(newRow.cash_due) : Number(newRow.grand_total || 0),
+        cash_due: (newRow.payment_mode === 'online' || newRow.payment_mode === 'demo' || ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(newRow.payment_status)) ? 0 : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : Number(newRow.grand_total || 0)),
         items: itemsData.map(i => ({
           id: i.id,
           order_id: i.order_id,
@@ -1156,7 +1158,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (isNew) {
         if (!activeRestId || newRow.restaurant_id === activeRestId) {
-          const isCashReq = newRow.payment_method === 'cash' || newRow.payment_status === 'pending_cash' || Number(newRow.cash_due) > 0;
+          const isCashReq = (newRow.payment_mode === 'cash' || newRow.payment_mode === 'partial') && Number(newRow.cash_due) > 0;
           triggerRealtimeEventNotification({
             eventId: `ord_ins_${newRow.id}`,
             type: isCashReq ? 'cash_request' : 'new_order',
@@ -1173,6 +1175,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const processOrderUpdate = (newRow: any, oldRow: any) => {
       setOrders(prev => prev.map(ord => {
         if (ord.id === newRow.id) {
+          const effectiveMode = newRow.payment_mode || ord.payment_mode;
+          const effectiveStatus = newRow.payment_status || ord.payment_status;
+          const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(effectiveStatus);
+          const computedCashDue = (effectiveMode === 'online' || effectiveMode === 'demo' || isPaid)
+            ? 0
+            : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : ord.cash_due);
+
           return {
             ...ord,
             ...newRow,
@@ -1182,7 +1191,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             grand_total: Number(newRow.grand_total ?? ord.grand_total),
             online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : ord.online_amount,
             cash_amount: newRow.cash_amount !== undefined ? Number(newRow.cash_amount) : ord.cash_amount,
-            cash_due: newRow.cash_due !== undefined ? Number(newRow.cash_due) : ord.cash_due,
+            cash_due: computedCashDue,
           };
         }
         return ord;
@@ -3249,15 +3258,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const confirmedAtIso = new Date().toISOString();
 
-    const fullUpdatePayload = {
+    const actorNote = `[CASH: ₹${cashAmountCollected} by ${actorName} (${actorType})]`;
+    const existingNotes = existingOrd.notes || '';
+    const updatedNotes = existingNotes ? `${existingNotes} ${actorNote}`.slice(0, 500) : actorNote;
+
+    const fullUpdatePayload: Record<string, any> = {
       cash_amount: newCashTotal,
       cash_due: newCashDue,
       payment_status: newPaymentStatus,
       order_status: newOrderStatus,
-      payment_actor_id: actorId,
-      payment_actor_type: actorType,
-      payment_actor_name: actorName,
-      payment_confirmed_at: confirmedAtIso,
+      notes: updatedNotes,
       updated_at: confirmedAtIso
     };
 
@@ -3277,17 +3287,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updated_at: confirmedAtIso
       }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
       updateErr = retry1.error;
-
-      if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('column'))) {
-        const retry2 = await supabase.from('orders').update({
-          payment_status: newPaymentStatus === 'paid_cash' ? 'paid' : newPaymentStatus,
-          cash_amount: newCashTotal,
-          cash_due: newCashDue,
-          order_status: newOrderStatus,
-          updated_at: confirmedAtIso
-        }).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
-        updateErr = retry2.error;
-      }
     }
 
     if (updateErr) {
@@ -3422,19 +3421,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       newPaymentStatus = 'partially_paid';
     }
 
+    const breakdownText = validPayments.map(p => `${p.method.toUpperCase()}: ₹${p.amount}${p.reference ? ` (Ref: ${p.reference})` : ''}`).join(', ');
+    const actorNote = `[OFFLINE: ${breakdownText} by ${actor} (${type})]`;
+    const existingNotes = existingOrd.notes || '';
+    const updatedNotes = existingNotes ? `${existingNotes} ${actorNote}`.slice(0, 500) : actorNote;
+
     const fullUpdatePayload: Record<string, any> = {
       cash_amount: newCashTotal,
       cash_due: newCashDue,
       payment_status: newPaymentStatus,
       order_status: newOrderStatus,
-      offline_payments: updatedOfflineRecords,
-      verified_by: actor,
-      verified_staff_id: actorId,
-      verified_at: confirmedAtIso,
-      payment_actor_id: actorId,
-      payment_actor_type: type,
-      payment_actor_name: `${actor} (${type})`,
-      payment_confirmed_at: confirmedAtIso,
+      notes: updatedNotes,
       updated_at: confirmedAtIso
     };
 
@@ -3489,8 +3486,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Credit Hotel Wallet
     await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, totalNewAmount, 'cash');
-
-    const breakdownText = validPayments.map(p => `${p.method.toUpperCase()}: ₹${p.amount}${p.reference ? ` (Ref: ${p.reference})` : ''}`).join(', ');
 
     logAudit({
       restaurant_id: existingOrd.restaurant_id,
@@ -3562,7 +3557,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           razorpay_order_id: razorpayResponse.razorpay_order_id,
           razorpay_payment_id: razorpayResponse.razorpay_payment_id,
           razorpay_signature: razorpayResponse.razorpay_signature,
-          razorpay_secret: rest?.razorpay_secret
+          razorpay_secret: rest?.razorpay_secret,
+          order_id: orderId,
+          restaurant_id: existingOrd.restaurant_id,
+          amount: onlineAmountToPay
         })
       });
 
@@ -3591,7 +3589,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const confirmedAtIso = new Date().toISOString();
 
-      const updatePayload = {
+      const updatePayload: Record<string, any> = {
         online_amount: newOnlineTotal,
         cash_due: newCashDue,
         payment_status: newPaymentStatus,
@@ -3599,10 +3597,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         razorpay_order_id: razorpayResponse.razorpay_order_id,
         razorpay_payment_id: razorpayResponse.razorpay_payment_id,
         razorpay_signature: razorpayResponse.razorpay_signature,
-        payment_actor_id: customerMobile || 'online_gateway',
-        payment_actor_type: 'customer',
-        payment_actor_name: 'Online Payment (Razorpay)',
-        payment_confirmed_at: confirmedAtIso,
         updated_at: confirmedAtIso
       };
 
@@ -3773,7 +3767,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           payu_key: rest?.payu_merchant_key,
           payu_salt: rest?.payu_merchant_salt,
           env: rest?.payu_env || 'TEST',
-          mode: rest?.payment_mode || 'demo'
+          mode: rest?.payment_mode || 'demo',
+          order_id: orderId,
+          restaurant_id: existingOrd.restaurant_id
         })
       });
 
@@ -3802,18 +3798,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const confirmedAtIso = new Date().toISOString();
 
-      const updatePayload = {
+      const payuNote = `[PAYU: ${payuResponse.txnid || verifyData.mihpayid}]`;
+      const existingNotes = existingOrd.notes || '';
+      const updatedNotes = existingNotes ? `${existingNotes} ${payuNote}`.slice(0, 500) : payuNote;
+
+      const updatePayload: Record<string, any> = {
         online_amount: newOnlineTotal,
         cash_due: newCashDue,
         payment_status: newPaymentStatus,
         order_status: newOrderStatus,
-        payu_txnid: payuResponse.txnid,
-        payu_mihpayid: verifyData.mihpayid || payuResponse.mihpayid,
-        payu_hash: payuResponse.hash,
-        payment_actor_id: customerMobile || 'payu_gateway',
-        payment_actor_type: 'customer',
-        payment_actor_name: 'Online Payment (PayU)',
-        payment_confirmed_at: confirmedAtIso,
+        notes: updatedNotes,
         updated_at: confirmedAtIso
       };
 
@@ -3979,7 +3973,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           salt_key: rest?.phonepe_salt_key,
           salt_index: rest?.phonepe_salt_index,
           env: rest?.phonepe_env || 'SANDBOX',
-          mode: rest?.payment_mode || 'demo'
+          mode: rest?.payment_mode || 'demo',
+          order_id: orderId,
+          restaurant_id: existingOrd.restaurant_id,
+          amount: onlineAmountToPay
         })
       });
 
@@ -4008,15 +4005,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const confirmedAtIso = new Date().toISOString();
 
-      const updatePayload = {
+      const phonepeNote = `[PHONEPE: ${phonePeResponse.transactionId}]`;
+      const existingNotes = existingOrd.notes || '';
+      const updatedNotes = existingNotes ? `${existingNotes} ${phonepeNote}`.slice(0, 500) : phonepeNote;
+
+      const updatePayload: Record<string, any> = {
         online_amount: newOnlineTotal,
         cash_due: newCashDue,
         payment_status: newPaymentStatus,
         order_status: newOrderStatus,
-        payment_actor_id: customerMobile || 'phonepe_gateway',
-        payment_actor_type: 'customer',
-        payment_actor_name: 'Online Payment (PhonePe)',
-        payment_confirmed_at: confirmedAtIso,
+        notes: updatedNotes,
         updated_at: confirmedAtIso
       };
 
@@ -4513,7 +4511,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const createdIso = new Date().toISOString();
 
-    const fullOrderPayload = {
+    // Combine additional notes into notes column safely
+    const extraNotes: string[] = [];
+    if (notes) extraNotes.push(notes);
+    if (coupon_code) extraNotes.push(`Coupon: ${coupon_code}`);
+    if (packaging_charge > 0) extraNotes.push(`Pkg: ₹${packaging_charge}`);
+    if (service_charge > 0) extraNotes.push(`Svc: ₹${service_charge}`);
+    const finalNotes = extraNotes.length > 0 ? extraNotes.join(' | ') : null;
+
+    // Guaranteed real columns in public.orders
+    const cleanOrderPayload = {
       id: orderId,
       restaurant_id: restaurantId,
       session_id: sessionId || null,
@@ -4524,18 +4531,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       order_status: orderStatus,
       subtotal,
       tax,
-      discount,
-      packaging_charge,
-      service_charge,
-      online_discount,
-      coupon_discount,
-      coupon_code,
+      discount: discount || 0,
       grand_total,
       online_amount,
       cash_amount,
       cash_due,
-      notes: notes || null,
-      upi_ref_number: (notes?.startsWith('UPI_REF:') ? notes.replace('UPI_REF:', '') : null),
+      notes: finalNotes,
       razorpay_order_id: razorpayDetails?.razorpay_order_id || null,
       razorpay_payment_id: razorpayDetails?.razorpay_payment_id || null,
       razorpay_signature: razorpayDetails?.razorpay_signature || null,
@@ -4555,15 +4556,18 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       order_status: orderStatus,
       subtotal,
       tax,
-      discount: 0,
+      discount: discount || 0,
       grand_total,
+      online_amount,
+      cash_amount,
+      cash_due,
       customer_mobile: customerMobile || null,
       created_at: createdIso,
       updated_at: createdIso
     };
 
     // Step 1: Real Supabase INSERT into public.orders
-    let { error: ordErr } = await supabase.from('orders').insert([fullOrderPayload]);
+    let { error: ordErr } = await supabase.from('orders').insert([cleanOrderPayload]);
     if (ordErr && (ordErr.code === '42703' || ordErr.message?.includes('column'))) {
       console.warn("Retrying orders insert with core schema fields due to missing table columns...");
       const retry = await supabase.from('orders').insert([coreOrderPayload]);
@@ -4605,7 +4609,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await fetch('/api/orders/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...fullOrderPayload, items: orderItemsToInsert })
+        body: JSON.stringify({ ...cleanOrderPayload, items: orderItemsToInsert })
       });
     } catch (srvErr) {
       console.warn("Server order save warning:", srvErr);

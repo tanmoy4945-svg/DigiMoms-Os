@@ -80,9 +80,10 @@ export const OwnerDashboard: React.FC = () => {
 
   // Helper to accurately get effective cash due
   const getEffectiveCashDue = (o: Order): number => {
-    const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(o.payment_status);
+    const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
     if (isPaid) return 0;
-    if (o.cash_due !== undefined && o.cash_due !== null && Number(o.cash_due) > 0) {
+    if (o.payment_mode === 'online' || o.payment_mode === 'demo') return 0;
+    if (o.cash_due !== undefined && o.cash_due !== null && Number(o.cash_due) >= 0) {
       return Number(o.cash_due);
     }
     return Math.max(0, Number(o.grand_total || 0) - Number(o.online_amount || 0) - Number(o.cash_amount || 0));
@@ -795,6 +796,10 @@ export const OwnerDashboard: React.FC = () => {
                         ) : order.payment_status === 'partially_paid' ? (
                           <span className="px-2.5 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold uppercase">
                             PARTIAL (DUE: ₹{getEffectiveCashDue(order)})
+                          </span>
+                        ) : order.payment_mode === 'online' || order.payment_mode === 'demo' ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> PAID ONLINE
                           </span>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-400 border border-amber-500/40 text-[10px] font-bold uppercase">

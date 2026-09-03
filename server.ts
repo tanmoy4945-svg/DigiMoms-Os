@@ -439,7 +439,10 @@ async function startServer() {
         salt_key,
         salt_index,
         env = 'SANDBOX',
-        mode = 'demo'
+        mode = 'demo',
+        order_id,
+        restaurant_id,
+        amount
       } = req.body;
 
       if (!merchant_transaction_id) {
@@ -472,12 +475,22 @@ async function startServer() {
           });
           const statusData = await statusRes.json();
           if (statusRes.ok && (statusData.code === 'PAYMENT_SUCCESS' || statusData.data?.responseCode === 'SUCCESS')) {
+            const verifiedAmount = statusData.data?.amount ? statusData.data.amount / 100 : Number(amount || 0);
+            if (order_id) {
+              await syncPaymentToSupabase({
+                orderId: order_id,
+                restaurantId: restaurant_id,
+                amount: verifiedAmount,
+                transactionId: merchant_transaction_id,
+                gateway: 'phonepe'
+              });
+            }
             return res.json({
               success: true,
               verified: true,
               code: 'PAYMENT_SUCCESS',
               merchantTransactionId: merchant_transaction_id,
-              amount: statusData.data?.amount ? statusData.data.amount / 100 : undefined,
+              amount: verifiedAmount,
               verifiedAt: new Date().toISOString()
             });
           } else {
@@ -494,11 +507,23 @@ async function startServer() {
       }
 
       // Demo Mode Verification Response
+      const verifiedAmount = Number(amount || 0);
+      if (order_id) {
+        await syncPaymentToSupabase({
+          orderId: order_id,
+          restaurantId: restaurant_id,
+          amount: verifiedAmount,
+          transactionId: merchant_transaction_id,
+          gateway: 'phonepe'
+        });
+      }
+
       return res.json({
         success: true,
         verified: true,
         code: 'PAYMENT_SUCCESS',
         merchantTransactionId: merchant_transaction_id,
+        amount: verifiedAmount,
         verifiedAt: new Date().toISOString(),
         mode: 'demo'
       });
@@ -508,77 +533,141 @@ async function startServer() {
     }
   });
 
-  // Reusable helper to update orders and insert payment transaction in Supabase
+  // Reusable authoritative helper to update orders in Supabase safely with real schema columns
   async function syncPaymentToSupabase(params: {
     orderId: string;
     restaurantId?: string;
     amount: number;
     transactionId: string;
     gateway: string;
+    razorpayOrderId?: string;
+    razorpaySignature?: string;
   }) {
-    const { orderId, restaurantId, amount, transactionId, gateway } = params;
-    if (!orderId) return;
+    const { orderId, restaurantId, amount, transactionId, gateway, razorpayOrderId, razorpaySignature } = params;
+    if (!orderId) return null;
 
     try {
       const confirmedAtIso = new Date().toISOString();
-      // 1. Update orders table in Supabase
+
+      // 1. Fetch current order from Supabase to validate existence, payment mode, and amount
+      const { data: existingOrd, error: fetchErr } = await serverSupabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .maybeSingle();
+
+      if (fetchErr) {
+        console.error(`[syncPaymentToSupabase] Fetch error for order ${orderId}:`, fetchErr);
+      }
+
+      if (!existingOrd) {
+        console.error(`[syncPaymentToSupabase] Order ${orderId} not found in Supabase.`);
+        return null;
+      }
+
+      const grandTotal = Number(existingOrd.grand_total || 0);
+
+      // SECURITY & FRAUD CHECK (Test 6: Amount Mismatch):
+      // If payment mode is not partial, verified online payment must cover grand_total (allow 1 INR rounding margin)
+      if (existingOrd.payment_mode !== 'partial' && amount > 0 && amount < (grandTotal - 1)) {
+        console.error(`[syncPaymentToSupabase SECURITY REJECTION] Amount mismatch for order ${orderId}! Expected grand_total: ₹${grandTotal}, received: ₹${amount}. Update rejected.`);
+        return null;
+      }
+
+      // Idempotency: If this order is already marked paid_live / paid with full amount and 0 cash due, skip redundant write
+      if (
+        ['paid_live', 'paid'].includes(existingOrd.payment_status) &&
+        Number(existingOrd.online_amount || 0) >= Number(amount) &&
+        Number(existingOrd.cash_due || 0) === 0
+      ) {
+        console.log(`[syncPaymentToSupabase] Order ${orderId} is already fully paid. Skipping redundant database update.`);
+        return existingOrd;
+      }
+
+      const isPartial = existingOrd.payment_mode === 'partial';
+      let newOnlineAmount = 0;
+      let newCashDue = 0;
+      let newPaymentStatus = 'paid_live';
+
+      if (isPartial) {
+        newOnlineAmount = Number(amount || 0);
+        const cashAmt = Number(existingOrd.cash_amount || 0);
+        newCashDue = Math.max(0, Number((grandTotal - newOnlineAmount - cashAmt).toFixed(2)));
+        newPaymentStatus = newCashDue === 0 ? 'paid_live' : 'partially_paid';
+      } else {
+        newOnlineAmount = grandTotal > 0 ? grandTotal : Number(amount || 0);
+        newCashDue = 0;
+        newPaymentStatus = 'paid_live';
+      }
+
+      // Safe update payload containing ONLY columns that genuinely exist in public.orders:
+      // id, restaurant_id, session_id, table_number, order_number, payment_mode, payment_status,
+      // order_status, subtotal, tax, discount, grand_total, customer_mobile, created_at, updated_at,
+      // online_amount, cash_amount, cash_due, notes, razorpay_order_id, razorpay_payment_id, razorpay_signature
+      const updatePayload: Record<string, any> = {
+        payment_status: newPaymentStatus,
+        online_amount: newOnlineAmount,
+        cash_due: newCashDue,
+        updated_at: confirmedAtIso
+      };
+
+      // Auto-accept order into kitchen if it was previously pending
+      if (existingOrd.order_status === 'pending' || !existingOrd.order_status) {
+        updatePayload.order_status = 'accepted';
+      }
+
+      // Safe gateway reference updates
+      if (gateway === 'razorpay') {
+        if (transactionId) updatePayload.razorpay_payment_id = transactionId;
+        if (razorpayOrderId) updatePayload.razorpay_order_id = razorpayOrderId;
+        if (razorpaySignature) updatePayload.razorpay_signature = razorpaySignature;
+      }
+
+      // Store transaction reference safely into existing notes column without corrupting existing text
+      if (transactionId) {
+        const txnNote = `[${gateway.toUpperCase()}: ${transactionId}]`;
+        const currentNotes = existingOrd.notes || '';
+        if (!currentNotes.includes(transactionId)) {
+          updatePayload.notes = currentNotes ? `${currentNotes} ${txnNote}`.slice(0, 500) : txnNote;
+        }
+      }
+
+      // 1. Authoritative Update in Supabase public.orders
       const { data: dbOrd, error: ordErr } = await serverSupabase
         .from('orders')
-        .update({
-          payment_status: 'paid_live',
-          order_status: 'accepted',
-          online_amount: amount,
-          cash_due: 0,
-          payment_actor_id: transactionId || `${gateway}_gateway`,
-          payment_actor_type: 'customer',
-          payment_actor_name: `Online Payment (${gateway.toUpperCase()})`,
-          payment_confirmed_at: confirmedAtIso,
-          transaction_id: transactionId,
-          updated_at: confirmedAtIso
-        })
+        .update(updatePayload)
         .eq('id', orderId)
         .select()
         .maybeSingle();
 
       if (ordErr) {
-        console.warn(`[Supabase Order Sync Warning for ${orderId}]:`, ordErr);
+        console.error(`[syncPaymentToSupabase FATAL ERROR for ${orderId}]:`, ordErr);
+        throw ordErr;
       }
 
-      const effectiveRestId = restaurantId || dbOrd?.restaurant_id;
+      console.log(`[syncPaymentToSupabase SUCCESS] Order ${orderId} marked ${newPaymentStatus}, online_amount=₹${newOnlineAmount}, cash_due=₹${newCashDue}`);
 
-      // 2. Insert transaction record in payment_transactions table
-      if (effectiveRestId) {
-        try {
-          await serverSupabase.from('payment_transactions').insert({
-            id: `pt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            order_id: orderId,
-            restaurant_id: effectiveRestId,
-            amount: amount,
-            mode: gateway,
-            type: 'online',
-            status: 'success',
-            reference_id: transactionId,
-            actor_id: `${gateway}_gateway`,
-            actor_name: `Online Payment (${gateway.toUpperCase()})`,
-            actor_type: 'customer',
-            created_at: confirmedAtIso
-          });
-        } catch (txErr) {
-          console.warn(`[Supabase Tx Insert Warning]:`, txErr);
-        }
-      }
+      const effectiveRestId = restaurantId || dbOrd?.restaurant_id || existingOrd.restaurant_id;
 
-      // 3. Broadcast realtime SSE event
+      // 2. Broadcast realtime SSE event to dashboard / waiter
       if (effectiveRestId) {
+        const finalOrderObj = dbOrd || {
+          ...existingOrd,
+          ...updatePayload
+        };
+
         broadcastRealtimeOrderEvent(effectiveRestId, {
           type: 'ORDER_UPDATED',
           restaurant_id: effectiveRestId,
-          order: dbOrd || { id: orderId, payment_status: 'paid_live', order_status: 'accepted', online_amount: amount },
+          order: finalOrderObj,
           timestamp: confirmedAtIso
         });
       }
+
+      return dbOrd || existingOrd;
     } catch (e) {
-      console.error(`[syncPaymentToSupabase Error]:`, e);
+      console.error(`[syncPaymentToSupabase Exception]:`, e);
+      throw e;
     }
   }
 
@@ -886,7 +975,15 @@ async function startServer() {
   // API Route: Verify Razorpay Payment Signature
   app.post('/api/razorpay/verify-payment', async (req, res) => {
     try {
-      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, razorpay_secret, restaurant_id } = req.body;
+      const {
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        razorpay_secret,
+        restaurant_id,
+        order_id,
+        amount
+      } = req.body;
 
       if (!razorpay_payment_id) {
         return res.status(400).json({ error: 'Missing payment ID' });
@@ -916,6 +1013,22 @@ async function startServer() {
 
         if (expectedSignature !== razorpay_signature) {
           return res.status(400).json({ success: false, error: 'Invalid Razorpay payment signature' });
+        }
+      }
+
+      if (order_id) {
+        try {
+          await syncPaymentToSupabase({
+            orderId: order_id,
+            restaurantId: restaurant_id,
+            amount: Number(amount || 0),
+            transactionId: razorpay_payment_id,
+            gateway: 'razorpay',
+            razorpayOrderId: razorpay_order_id,
+            razorpaySignature: razorpay_signature
+          });
+        } catch (syncErr) {
+          console.error('Failed to sync Razorpay payment to Supabase:', syncErr);
         }
       }
 
@@ -1169,7 +1282,9 @@ async function startServer() {
         udf5 = '',
         mihpayid,
         env = 'TEST',
-        mode = 'demo'
+        mode = 'demo',
+        order_id,
+        restaurant_id
       } = req.body;
 
       if (!txnid) {
@@ -1254,6 +1369,23 @@ async function startServer() {
                 verified_at: new Date().toISOString()
               };
               verifiedPayUTransactions.set(txnid, record);
+
+              const orderIdToSync = order_id || udf2;
+              const restIdToSync = restaurant_id || udf1;
+              if (orderIdToSync) {
+                try {
+                  await syncPaymentToSupabase({
+                    orderId: orderIdToSync,
+                    restaurantId: restIdToSync,
+                    amount: Number(record.amount || formattedAmount),
+                    transactionId: record.txnid || record.mihpayid,
+                    gateway: 'payu'
+                  });
+                } catch (syncErr) {
+                  console.error('Failed to sync PayU payment to Supabase:', syncErr);
+                }
+              }
+
               return res.json({
                 success: true,
                 verified: true,
@@ -1277,6 +1409,23 @@ async function startServer() {
           verified_at: new Date().toISOString()
         };
         verifiedPayUTransactions.set(txnid, record);
+
+        const orderIdToSync = order_id || udf2;
+        const restIdToSync = restaurant_id || udf1;
+        if (orderIdToSync) {
+          try {
+            await syncPaymentToSupabase({
+              orderId: orderIdToSync,
+              restaurantId: restIdToSync,
+              amount: Number(record.amount || formattedAmount),
+              transactionId: record.txnid || record.mihpayid,
+              gateway: 'payu'
+            });
+          } catch (syncErr) {
+            console.error('Failed to sync PayU payment to Supabase:', syncErr);
+          }
+        }
+
         return res.json({
           success: true,
           verified: true,
