@@ -54,10 +54,12 @@ export const WaiterTerminal: React.FC = () => {
     o.payment_status === 'payment_verification_pending'
   );
 
-  // Strictly filter cash-due orders (exclude orders that are paid online, cash, or UPI verification pending)
+  // Strictly filter cash-due orders (exclude orders that are online/demo, paid, or UPI verification pending)
   const pendingCashOrders = orders.filter(o => {
     if (o.restaurant_id !== currentStaff.restaurant_id) return false;
-    if (o.payment_status === 'paid_live' || o.payment_status === 'paid' || o.payment_status === 'paid_demo' || o.payment_status === 'paid_cash' || o.payment_status === 'payment_verification_pending') return false;
+    if (o.order_status === 'cancelled') return false;
+    if (o.payment_mode === 'online' || o.payment_mode === 'demo') return false;
+    if (['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online', 'payment_verification_pending'].includes(o.payment_status)) return false;
     const due = o.cash_due ?? (o.grand_total - (o.online_amount || 0) - (o.cash_amount || 0));
     return due > 0;
   });

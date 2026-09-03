@@ -43,7 +43,7 @@ export const ReportsAnalytics: React.FC = () => {
     return restOrders.filter(o => {
       if (o.order_status === 'cancelled') return false;
       // If payment mode is online and payment has not been verified/paid, ignore as uncompleted gateway checkout
-      if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
         return false;
       }
       return true;
@@ -58,18 +58,18 @@ export const ReportsAnalytics: React.FC = () => {
   const onlineSales = useMemo(() => {
     return restOrders.reduce((sum, o) => {
       if (o.order_status === 'cancelled') return sum;
-      if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
         return sum + Number(o.online_amount || o.grand_total);
       }
       if (o.payment_mode === 'demo') {
         return sum + Number(o.online_amount || o.grand_total);
       }
       if (o.payment_mode === 'partial') {
-        if (['paid_live', 'paid', 'paid_demo', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
+        if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
           return sum + Number(o.online_amount || 0);
         }
       }
-      if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo'].includes(o.payment_status)) {
+      if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
         return sum + Number(o.online_amount || o.grand_total);
       }
       return sum;
@@ -81,7 +81,7 @@ export const ReportsAnalytics: React.FC = () => {
     return restOrders.reduce((sum, o) => {
       if (o.order_status === 'cancelled') return sum;
       if (o.payment_mode === 'cash') {
-        if (['paid_cash', 'paid', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
+        if (['paid_cash', 'paid', 'paid_live', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
           return sum + Number(o.cash_amount || o.grand_total);
         } else if ((o.cash_amount || 0) > 0) {
           return sum + Number(o.cash_amount || 0);
@@ -107,11 +107,11 @@ export const ReportsAnalytics: React.FC = () => {
   // 4. Pending Payment: Real uncollected cash due on active placed orders (excludes cancelled and abandoned online)
   const pendingSales = useMemo(() => {
     return validOrders.reduce((sum, o) => {
-      if (['paid', 'paid_live', 'paid_cash', 'paid_demo'].includes(o.payment_status)) {
+      if (['paid', 'paid_live', 'paid_cash', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
         return sum; // Fully paid
       }
       const onlinePaid = (o.payment_mode === 'online' || o.payment_mode === 'upi_qr' || o.payment_mode === 'demo')
-        ? (['paid_live', 'paid', 'paid_demo'].includes(o.payment_status) ? o.grand_total : 0)
+        ? (['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status) ? o.grand_total : 0)
         : Number(o.online_amount || 0);
       const cashPaid = Number(o.cash_amount || 0);
       const remainingDue = Math.max(0, o.grand_total - (onlinePaid + cashPaid));

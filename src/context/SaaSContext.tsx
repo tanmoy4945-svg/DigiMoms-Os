@@ -4481,20 +4481,21 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         paymentStatus = 'pending';
         orderStatus = 'pending';
         online_amount = 0;
-        cash_due = grand_total;
+        cash_due = 0; // Online orders do not have cash due
       }
     } else if (effectivePaymentMode === 'partial') {
       const targetOnline = partialDetails?.online_amount || 0;
+      const targetCash = partialDetails?.cash_amount || Number((grand_total - targetOnline).toFixed(2));
       if (isRazorpayVerified && targetOnline > 0) {
         paymentStatus = 'partially_paid';
         orderStatus = 'accepted';
         online_amount = targetOnline;
-        cash_due = Number((grand_total - targetOnline).toFixed(2));
+        cash_due = targetCash;
       } else {
         paymentStatus = 'pending';
         orderStatus = 'pending';
         online_amount = 0;
-        cash_due = grand_total;
+        cash_due = targetCash;
       }
     } else if (effectivePaymentMode === 'upi_qr') {
       paymentStatus = 'payment_verification_pending';
@@ -4502,7 +4503,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       online_amount = 0;
       cash_due = grand_total;
     } else {
-      // Cash payment
+      // Cash payment - requires manual staff/admin confirmation
       paymentStatus = 'pending';
       orderStatus = 'pending';
       online_amount = 0;
