@@ -284,13 +284,16 @@ async function startServer() {
     }
     writeJsonFile('orders.json', allOrders.slice(0, 1000));
 
-    // Immediately broadcast to all connected Owner & Staff dashboards via SSE
-    broadcastRealtimeOrderEvent(order.restaurant_id, {
-      type: isNew ? 'NEW_ORDER' : 'ORDER_UPDATED',
-      restaurant_id: order.restaurant_id,
-      order,
-      timestamp: new Date().toISOString()
-    });
+    // Immediately broadcast to all connected Owner & Staff dashboards via SSE (exclude unverified online checkout attempts)
+    const isUnverifiedOnline = order.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(order.payment_status);
+    if (!isUnverifiedOnline) {
+      broadcastRealtimeOrderEvent(order.restaurant_id, {
+        type: isNew ? 'NEW_ORDER' : 'ORDER_UPDATED',
+        restaurant_id: order.restaurant_id,
+        order,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     res.json({ success: true, data: order });
   });

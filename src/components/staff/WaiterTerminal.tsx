@@ -64,7 +64,14 @@ export const WaiterTerminal: React.FC = () => {
     return due > 0;
   });
 
-  const readyOrders = orders.filter(o => o.restaurant_id === currentStaff.restaurant_id && o.order_status === 'ready');
+  const readyOrders = orders.filter(o => {
+    if (o.restaurant_id !== currentStaff.restaurant_id) return false;
+    if (o.order_status !== 'ready') return false;
+    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+      return false;
+    }
+    return true;
+  });
   const restTables = tables.filter(t => t.restaurant_id === currentStaff.restaurant_id);
 
   return (

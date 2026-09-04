@@ -309,7 +309,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [currentStaff, setCurrentStaff] = useState<Staff | null>(() => {
     const savedSession = sessionStorage.getItem('digimoms_current_staff');
-    if (savedSession) return JSON.parse(savedSession);
+    if (savedSession) {
+      try { return JSON.parse(savedSession); } catch { /* ignore */ }
+    }
+    const savedLocal = localStorage.getItem('digimoms_current_staff');
+    if (savedLocal) {
+      try { return JSON.parse(savedLocal); } catch { /* ignore */ }
+    }
     return null;
   });
 
@@ -325,7 +331,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })(),
     (() => {
       try {
-        const s = sessionStorage.getItem('digimoms_current_staff');
+        const s = sessionStorage.getItem('digimoms_current_staff') || localStorage.getItem('digimoms_current_staff');
         return s ? JSON.parse(s) : null;
       } catch { return null; }
     })()
@@ -363,6 +369,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentStaff) {
           setCurrentStaff(null);
           sessionStorage.removeItem('digimoms_current_staff');
+          localStorage.removeItem('digimoms_current_staff');
           setActiveViewRaw('staff-login');
           showToast('Staff session ended due to 15 minutes of inactivity.', 'info');
         }
@@ -684,7 +691,32 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } catch (e) {}
         }
       }
-      if (staffData) setStaffList(staffData as Staff[]);
+      if (staffData) {
+        setStaffList(staffData as Staff[]);
+        if (currentStaff) {
+          const freshStaff = (staffData as Staff[]).find(s => s.id === currentStaff.id);
+          if (freshStaff) {
+            setCurrentStaff(freshStaff);
+            sessionStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+            localStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+          }
+        } else {
+          try {
+            const saved = sessionStorage.getItem('digimoms_current_staff') || localStorage.getItem('digimoms_current_staff');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (parsed?.id) {
+                const freshStaff = (staffData as Staff[]).find(s => s.id === parsed.id);
+                if (freshStaff) {
+                  setCurrentStaff(freshStaff);
+                  sessionStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+                  localStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+                }
+              }
+            }
+          } catch (e) {}
+        }
+      }
       if (tableData) setTables(tableData as Table[]);
       if (sessionData) setTableSessions(sessionData as TableSession[]);
       if (catData) setCategories(catData as MenuCategory[]);
@@ -890,8 +922,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }))
           };
         });
-        setOrders(mappedOrders);
-        mappedOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
+        // Deduplicate orders by ID to prevent duplicate order display
+        const uniqueOrders = Array.from(new Map(mappedOrders.map(o => [o.id, o])).values());
+        setOrders(uniqueOrders);
+        uniqueOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
       }
 
       if (feedbackData) setFeedbackList(feedbackData as CustomerFeedback[]);
@@ -1121,6 +1155,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const channelName = activeRestId ? `restaurant-orders-${activeRestId}` : 'all-restaurant-orders';
 
     const processOrderInsert = async (newRow: any) => {
+      // 1. ONLINE PAYMENT VERIFICATION:
+      // Online orders must NOT appear before successful gateway + server-side verification.
+      if (newRow.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(newRow.payment_status)) {
+        return;
+      }
+      if (newRow.payment_mode === 'partial' && !['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(newRow.payment_status) && Number(newRow.online_amount || 0) <= 0) {
+        return;
+      }
+
       const isNew = !knownOrderIdsRef.current.has(newRow.id);
       knownOrderIdsRef.current.add(newRow.id);
 
@@ -1142,7 +1185,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         grand_total: Number(newRow.grand_total || 0),
         online_amount: newRow.online_amount ? Number(newRow.online_amount) : 0,
         cash_amount: newRow.cash_amount ? Number(newRow.cash_amount) : 0,
-        cash_due: (newRow.payment_mode === 'online' || newRow.payment_mode === 'demo' || ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(newRow.payment_status)) ? 0 : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : Number(newRow.grand_total || 0)),
+        cash_due: (newRow.payment_mode === 'online' || newRow.payment_mode === 'demo' || ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(newRow.payment_status)) ? 0 : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : Number(newRow.grand_total || 0)),
         items: itemsData.map(i => ({
           id: i.id,
           order_id: i.order_id,
@@ -1154,7 +1197,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }))
       };
 
-      setOrders(prev => [formattedOrder, ...prev.filter(o => o.id !== newRow.id)]);
+      // Prevent duplicate orders by replacing if present, or prepending
+      setOrders(prev => {
+        const exists = prev.some(o => o.id === formattedOrder.id);
+        if (exists) {
+          return prev.map(o => o.id === formattedOrder.id ? formattedOrder : o);
+        }
+        return [formattedOrder, ...prev];
+      });
 
       if (isNew) {
         if (!activeRestId || newRow.restaurant_id === activeRestId) {
@@ -1172,30 +1222,44 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    const processOrderUpdate = (newRow: any, oldRow: any) => {
-      setOrders(prev => prev.map(ord => {
-        if (ord.id === newRow.id) {
-          const effectiveMode = newRow.payment_mode || ord.payment_mode;
-          const effectiveStatus = newRow.payment_status || ord.payment_status;
-          const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash'].includes(effectiveStatus);
-          const computedCashDue = (effectiveMode === 'online' || effectiveMode === 'demo' || isPaid)
-            ? 0
-            : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : ord.cash_due);
+    const processOrderUpdate = async (newRow: any, oldRow: any) => {
+      const isPaidOnline = ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(newRow.payment_status);
+      let orderExists = false;
 
-          return {
-            ...ord,
-            ...newRow,
-            subtotal: Number(newRow.subtotal ?? ord.subtotal),
-            tax: Number(newRow.tax ?? ord.tax),
-            discount: Number(newRow.discount ?? ord.discount),
-            grand_total: Number(newRow.grand_total ?? ord.grand_total),
-            online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : ord.online_amount,
-            cash_amount: newRow.cash_amount !== undefined ? Number(newRow.cash_amount) : ord.cash_amount,
-            cash_due: computedCashDue,
-          };
+      setOrders(prev => {
+        orderExists = prev.some(o => o.id === newRow.id);
+        if (!orderExists && (newRow.payment_mode !== 'online' || isPaidOnline)) {
+          return prev;
         }
-        return ord;
-      }));
+        return prev.map(ord => {
+          if (ord.id === newRow.id) {
+            const effectiveMode = newRow.payment_mode || ord.payment_mode;
+            const effectiveStatus = newRow.payment_status || ord.payment_status;
+            const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(effectiveStatus);
+            const computedCashDue = (effectiveMode === 'online' || effectiveMode === 'demo' || isPaid)
+              ? 0
+              : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : ord.cash_due);
+
+            return {
+              ...ord,
+              ...newRow,
+              subtotal: Number(newRow.subtotal ?? ord.subtotal),
+              tax: Number(newRow.tax ?? ord.tax),
+              discount: Number(newRow.discount ?? ord.discount),
+              grand_total: Number(newRow.grand_total ?? ord.grand_total),
+              online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : ord.online_amount,
+              cash_amount: newRow.cash_amount !== undefined ? Number(newRow.cash_amount) : ord.cash_amount,
+              cash_due: computedCashDue,
+            };
+          }
+          return ord;
+        });
+      });
+
+      // If an online order was just confirmed/verified by gateway, insert it as a live order
+      if (!orderExists && (newRow.payment_mode !== 'online' || isPaidOnline)) {
+        await processOrderInsert(newRow);
+      }
 
       if (!activeRestId || newRow.restaurant_id === activeRestId) {
         // Order Status Changes
@@ -1349,14 +1413,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       eventSource.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
-          if (parsed.type === 'NEW_ORDER' && parsed.data) {
-            processOrderInsert(parsed.data);
-          } else if (parsed.type === 'ORDER_UPDATED' && parsed.data) {
-            processOrderUpdate(parsed.data, null);
-          } else if (parsed.type === 'CALL_WAITER' && parsed.data) {
-            processCallInsert(parsed.data);
-          } else if (parsed.type === 'CALL_WAITER_UPDATED' && parsed.data) {
-            processCallUpdate(parsed.data);
+          const orderPayload = parsed.order || parsed.data;
+          if (parsed.type === 'NEW_ORDER' && orderPayload) {
+            processOrderInsert(orderPayload);
+          } else if (parsed.type === 'ORDER_UPDATED' && orderPayload) {
+            processOrderUpdate(orderPayload, null);
+          } else if (parsed.type === 'CALL_WAITER' && (parsed.call_request || parsed.data)) {
+            processCallInsert(parsed.call_request || parsed.data);
+          } else if (parsed.type === 'CALL_WAITER_UPDATED' && (parsed.call_request || parsed.data)) {
+            processCallUpdate(parsed.call_request || parsed.data);
           } else if (parsed.type === 'SESSION_UPDATE' && parsed.data) {
             const newRow = parsed.data;
             if (newRow?.id) {
@@ -1378,8 +1443,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Connect to Supabase Postgres Realtime replication channel
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', ordersFilter as any, (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload: any) => {
         const { eventType, new: newRow, old: oldRow } = payload;
+        const effectiveRestId = currentOwner?.id || currentStaff?.restaurant_id;
+        const targetRestId = newRow?.restaurant_id || oldRow?.restaurant_id;
+        if (effectiveRestId && targetRestId && targetRestId !== effectiveRestId) {
+          return;
+        }
         if (eventType === 'INSERT' && newRow?.id) {
           processOrderInsert(newRow);
         } else if (eventType === 'UPDATE' && newRow?.id) {
@@ -1387,8 +1457,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         fetchAllFromSupabase();
       })
-      .on('postgres_changes', callsFilter as any, (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'call_waiter' }, (payload: any) => {
         const { eventType, new: newRow } = payload;
+        const effectiveRestId = currentOwner?.id || currentStaff?.restaurant_id;
+        if (effectiveRestId && newRow?.restaurant_id && newRow.restaurant_id !== effectiveRestId) {
+          return;
+        }
         if (eventType === 'INSERT' && newRow?.id) {
           processCallInsert(newRow);
         } else if (eventType === 'UPDATE' && newRow?.id) {
@@ -1396,11 +1470,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         fetchAllFromSupabase();
       })
-      .on('postgres_changes', sessionsFilter as any, (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_sessions' }, (payload: any) => {
         const { new: newRow } = payload;
+        const effectiveRestId = currentOwner?.id || currentStaff?.restaurant_id;
+        if (effectiveRestId && newRow?.restaurant_id && newRow.restaurant_id !== effectiveRestId) {
+          return;
+        }
         if (newRow?.id) {
           setTableSessions(prev => [newRow as TableSession, ...prev.filter(s => s.id !== newRow.id)]);
-          if (newRow.status === 'active' && (!activeRestId || newRow.restaurant_id === activeRestId)) {
+          if (newRow.status === 'active' && (!effectiveRestId || newRow.restaurant_id === effectiveRestId)) {
             triggerRealtimeEventNotification({
               eventId: `sess_join_${newRow.id}_${newRow.updated_at || newRow.created_at}`,
               type: 'customer_joined',
@@ -2893,6 +2971,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (found) {
       setCurrentStaff(found);
       sessionStorage.setItem('digimoms_current_staff', JSON.stringify(found));
+      localStorage.setItem('digimoms_current_staff', JSON.stringify(found));
       logAudit({
         restaurant_id: found.restaurant_id,
         actor_type: 'staff',
@@ -2923,6 +3002,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setCurrentStaff(null);
     sessionStorage.removeItem('digimoms_current_staff');
+    localStorage.removeItem('digimoms_current_staff');
     setActiveView('staff-login');
     showToast('Staff logged out.', 'info');
   };

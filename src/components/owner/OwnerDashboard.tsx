@@ -89,8 +89,19 @@ export const OwnerDashboard: React.FC = () => {
     return Math.max(0, Number(o.grand_total || 0) - Number(o.online_amount || 0) - Number(o.cash_amount || 0));
   };
 
-  // Filter confirmed & active orders (excluding cancelled)
-  const confirmedRestOrders = restOrders.filter(o => o.order_status !== 'cancelled');
+  // Filter confirmed & active orders (excluding cancelled and unverified online checkout attempts)
+  const confirmedRestOrders = restOrders.filter(o => {
+    if (o.order_status === 'cancelled') return false;
+    // Online order must NOT appear in Owner Live Orders before successful gateway + server-side payment verification
+    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+      return false;
+    }
+    // Partial order must have its online advance verified before appearing in live orders
+    if (o.payment_mode === 'partial' && !['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) && (o.online_amount || 0) <= 0) {
+      return false;
+    }
+    return true;
+  });
 
   // Total Realized Revenue: Increases ONLY when customer pays online (auto) or cash is confirmed by staff/owner
   const todaySales = restOrders.reduce((sum, o) => {
