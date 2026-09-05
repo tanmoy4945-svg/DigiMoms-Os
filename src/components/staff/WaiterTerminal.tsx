@@ -72,6 +72,16 @@ export const WaiterTerminal: React.FC = () => {
     }
     return true;
   });
+
+  // Confirmed online orders paid via gateway and in kitchen
+  const confirmedOnlineOrders = orders.filter(o => {
+    if (o.restaurant_id !== currentStaff.restaurant_id) return false;
+    if (o.order_status === 'cancelled' || o.order_status === 'completed' || o.order_status === 'ready') return false;
+    const isOnline = o.payment_mode === 'online' || o.payment_mode === 'demo';
+    const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status);
+    return isOnline && isPaid;
+  });
+
   const restTables = tables.filter(t => t.restaurant_id === currentStaff.restaurant_id);
 
   return (
@@ -265,6 +275,52 @@ export const WaiterTerminal: React.FC = () => {
                   >
                     <XCircle className="w-3.5 h-3.5" />
                   </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Confirmed Online Orders (Paid via Online Payment) */}
+      {confirmedOnlineOrders.length > 0 && (
+        <div className="p-6 rounded-3xl bg-emerald-950/30 border border-emerald-500/40 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" /> CONFIRMED ONLINE ORDERS — IN KITCHEN ({confirmedOnlineOrders.length})
+            </h3>
+            <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold uppercase border border-emerald-500/30">
+              Paid Online (Cash Due: ₹0)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {confirmedOnlineOrders.map(order => (
+              <div key={order.id} className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold uppercase">
+                    PAID ONLINE ({order.payment_mode.toUpperCase()})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <div>
+                    <span className="font-extrabold text-white font-mono text-sm">Order {order.order_number}</span>
+                    <span className="text-xs text-emerald-400 ml-2 font-bold">Table #{order.table_number}</span>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-400">₹{order.grand_total} (PAID)</span>
+                </div>
+
+                <div className="text-xs text-slate-300">
+                  {order.items.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px]">
+                  <span className="text-slate-400">Kitchen: <strong className="text-white capitalize">{order.order_status}</strong></span>
+                  <span className="text-emerald-400 font-semibold">✓ Paid & Preparing</span>
                 </div>
               </div>
             ))}

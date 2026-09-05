@@ -113,7 +113,10 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
           salt_key: saltKey,
           salt_index: saltIndex,
           env,
-          mode: env === 'PRODUCTION' ? 'live' : 'demo'
+          mode: env === 'PRODUCTION' ? 'live' : 'demo',
+          order_id: orderId,
+          restaurant_id: restaurantId,
+          amount
         })
       });
 

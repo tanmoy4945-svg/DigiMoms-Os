@@ -164,7 +164,14 @@ export const CustomerQrApp: React.FC = () => {
   const { table, restaurant, loading: isLoadingTable } = resolved;
 
   // Customer View Step: 'welcome' (default landing) or 'menu'
-  const [customerStep, setCustomerStep] = useState<'welcome' | 'menu'>('welcome');
+  const [customerStep, setCustomerStep] = useState<'welcome' | 'menu'>(() => {
+    try {
+      const nav = window.performance?.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
+      const isReload = (nav && nav.type === 'reload') || ((window.performance as any)?.navigation?.type === 1);
+      if (isReload) return 'menu';
+    } catch (e) {}
+    return 'welcome';
+  });
 
   // Modals & Quantity Popup State
   const [detailsItem, setDetailsItem] = useState<MenuItem | null>(null);
@@ -294,7 +301,46 @@ export const CustomerQrApp: React.FC = () => {
     const orderIdParam = params.get('order_id') || params.get('ord');
     const paymentParam = params.get('payment');
 
+    const isReload = (() => {
+      try {
+        const nav = window.performance?.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
+        if (nav && nav.type === 'reload') return true;
+        if (window.performance && (window.performance as any).navigation?.type === 1) return true;
+      } catch (e) {}
+      return false;
+    })();
+
+    // REQUIREMENT 2: If customer refreshed the page:
+    // Strictly DO NOT reopen the previous Order Success popup!
+    // Clean up URL parameters and open the normal Menu page directly.
+    if (isReload) {
+      setLastPlacedOrder(null);
+      setCustomerStep('menu');
+      if (orderIdParam || paymentParam) {
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+      }
+      return;
+    }
+
     if (orderIdParam) {
+      const alreadyShown = sessionStorage.getItem(`digimoms_order_shown_${orderIdParam}`) === 'true';
+      if (alreadyShown) {
+        // Already shown previously; do not reopen popup on reload/revisit.
+        setLastPlacedOrder(null);
+        setCustomerStep('menu');
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+        return;
+      }
+
+      // Mark as shown once so any subsequent refresh will not reopen this popup
+      sessionStorage.setItem(`digimoms_order_shown_${orderIdParam}`, 'true');
+
+      // Clean up URL parameters immediately
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, '', cleanUrl);
+
       const match = orders.find(o => o.id === orderIdParam || o.order_number === orderIdParam);
       if (match) {
         setLastPlacedOrder(match);
@@ -336,7 +382,7 @@ export const CustomerQrApp: React.FC = () => {
         })();
       }
     }
-  }, [table?.id, restaurant?.id, orders]);
+  }, [table?.id, restaurant?.id]);
 
   const restCategories = restaurant ? categories.filter(c => c.restaurant_id === restaurant.id && !c.is_hidden) : [];
   const restMenu = restaurant ? menuItems.filter(m => m.restaurant_id === restaurant.id && m.is_available) : [];
@@ -2029,6 +2075,7 @@ export const CustomerQrApp: React.FC = () => {
                 cash_due: 0
               };
 
+              sessionStorage.setItem(`digimoms_order_shown_${updatedPaidOrder.id}`, 'true');
               setCart([]);
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
@@ -2036,15 +2083,7 @@ export const CustomerQrApp: React.FC = () => {
               showToast('🎉 PayU payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PayU Order Payment Error:", err);
-              showToast('Payment received! Order active.', 'info');
-              const fallbackOrder = {
-                ...onlinePaymentModalData.existingOrder,
-                payment_status: 'paid_live',
-                cash_due: 0
-              };
-              setCart([]);
-              setIsCartOpen(false);
-              setLastPlacedOrder(fallbackOrder);
+              showToast('Payment verification error. If money was deducted, please contact staff with your UPI/bank reference.', 'error');
               setOnlinePaymentModalData(null);
             }
           }}
@@ -2098,6 +2137,7 @@ export const CustomerQrApp: React.FC = () => {
                 cash_due: 0
               };
 
+              sessionStorage.setItem(`digimoms_order_shown_${updatedPaidOrder.id}`, 'true');
               setCart([]);
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
@@ -2105,15 +2145,7 @@ export const CustomerQrApp: React.FC = () => {
               showToast('🎉 PhonePe payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PhonePe Order Payment Error:", err);
-              showToast('Payment received! Order active.', 'info');
-              const fallbackOrder = {
-                ...onlinePaymentModalData.existingOrder,
-                payment_status: 'paid_live',
-                cash_due: 0
-              };
-              setCart([]);
-              setIsCartOpen(false);
-              setLastPlacedOrder(fallbackOrder);
+              showToast('Payment verification error. If money was deducted, please contact staff with your UPI/bank reference.', 'error');
               setOnlinePaymentModalData(null);
             }
           }}
@@ -2168,6 +2200,7 @@ export const CustomerQrApp: React.FC = () => {
                 cash_due: 0
               };
 
+              sessionStorage.setItem(`digimoms_order_shown_${updatedPaidOrder.id}`, 'true');
               setCart([]);
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
@@ -2175,15 +2208,7 @@ export const CustomerQrApp: React.FC = () => {
               showToast('🎉 Razorpay payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("Razorpay Order Payment Error:", err);
-              showToast('Payment received! Order active.', 'info');
-              const fallbackOrder = {
-                ...onlinePaymentModalData.existingOrder,
-                payment_status: 'paid_live',
-                cash_due: 0
-              };
-              setCart([]);
-              setIsCartOpen(false);
-              setLastPlacedOrder(fallbackOrder);
+              showToast('Payment verification error. If money was deducted, please contact staff with your UPI/bank reference.', 'error');
               setOnlinePaymentModalData(null);
             }
           }}

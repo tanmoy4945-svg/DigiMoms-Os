@@ -1224,41 +1224,100 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const processOrderUpdate = async (newRow: any, oldRow: any) => {
       const isPaidOnline = ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(newRow.payment_status);
-      let orderExists = false;
+      const isUnverifiedOnline = newRow.payment_mode === 'online' && !isPaidOnline;
+
+      // Unverified online orders must not appear in active orders
+      if (isUnverifiedOnline) {
+        return;
+      }
+
+      let wasNewlyVerified = false;
 
       setOrders(prev => {
-        orderExists = prev.some(o => o.id === newRow.id);
-        if (!orderExists && (newRow.payment_mode !== 'online' || isPaidOnline)) {
-          return prev;
-        }
-        return prev.map(ord => {
-          if (ord.id === newRow.id) {
-            const effectiveMode = newRow.payment_mode || ord.payment_mode;
-            const effectiveStatus = newRow.payment_status || ord.payment_status;
-            const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(effectiveStatus);
-            const computedCashDue = (effectiveMode === 'online' || effectiveMode === 'demo' || isPaid)
-              ? 0
-              : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : ord.cash_due);
+        const existingIdx = prev.findIndex(o => o.id === newRow.id);
 
-            return {
-              ...ord,
-              ...newRow,
-              subtotal: Number(newRow.subtotal ?? ord.subtotal),
-              tax: Number(newRow.tax ?? ord.tax),
-              discount: Number(newRow.discount ?? ord.discount),
-              grand_total: Number(newRow.grand_total ?? ord.grand_total),
-              online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : ord.online_amount,
-              cash_amount: newRow.cash_amount !== undefined ? Number(newRow.cash_amount) : ord.cash_amount,
-              cash_due: computedCashDue,
-            };
-          }
-          return ord;
-        });
+        if (existingIdx === -1) {
+          // Newly verified online order that was not yet in active orders
+          wasNewlyVerified = true;
+          const formattedOrder: Order = {
+            ...newRow,
+            subtotal: Number(newRow.subtotal || 0),
+            tax: Number(newRow.tax || 0),
+            discount: Number(newRow.discount || 0),
+            grand_total: Number(newRow.grand_total || 0),
+            online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : Number(newRow.grand_total || 0),
+            cash_amount: Number(newRow.cash_amount || 0),
+            cash_due: 0,
+            items: newRow.items || []
+          };
+          return [formattedOrder, ...prev];
+        }
+
+        const existingOrd = prev[existingIdx];
+        const wasUnverified = existingOrd.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(existingOrd.payment_status);
+        if (wasUnverified && isPaidOnline) {
+          wasNewlyVerified = true;
+        }
+
+        const effectiveMode = newRow.payment_mode || existingOrd.payment_mode;
+        const effectiveStatus = newRow.payment_status || existingOrd.payment_status;
+        const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(effectiveStatus);
+        const computedCashDue = (effectiveMode === 'online' || effectiveMode === 'demo' || isPaid)
+          ? 0
+          : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : existingOrd.cash_due);
+
+        const updatedOrder: Order = {
+          ...existingOrd,
+          ...newRow,
+          items: (newRow.items && newRow.items.length > 0) ? newRow.items : existingOrd.items,
+          subtotal: Number(newRow.subtotal ?? existingOrd.subtotal),
+          tax: Number(newRow.tax ?? existingOrd.tax),
+          discount: Number(newRow.discount ?? existingOrd.discount),
+          grand_total: Number(newRow.grand_total ?? existingOrd.grand_total),
+          online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : existingOrd.online_amount,
+          cash_amount: newRow.cash_amount !== undefined ? Number(newRow.cash_amount) : existingOrd.cash_amount,
+          cash_due: computedCashDue,
+        };
+
+        const next = [...prev];
+        next[existingIdx] = updatedOrder;
+        return next;
       });
 
-      // If an online order was just confirmed/verified by gateway, insert it as a live order
-      if (!orderExists && (newRow.payment_mode !== 'online' || isPaidOnline)) {
-        await processOrderInsert(newRow);
+      // If items are missing from SSE payload, fetch them safely
+      if (!newRow.items || newRow.items.length === 0) {
+        try {
+          const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
+          if (itms && itms.length > 0) {
+            setOrders(prev => prev.map(o => o.id === newRow.id ? {
+              ...o,
+              items: itms.map((i: any) => ({
+                id: i.id,
+                order_id: i.order_id,
+                menu_id: i.menu_id,
+                menu_name: i.menu_name,
+                quantity: Number(i.quantity),
+                price: Number(i.price),
+                special_instructions: i.special_instructions
+              }))
+            } : o));
+          }
+        } catch (e) {}
+      }
+
+      if (wasNewlyVerified && isPaidOnline) {
+        if (!activeRestId || newRow.restaurant_id === activeRestId) {
+          playNotificationSound('new_order');
+          triggerRealtimeEventNotification({
+            eventId: `ord_online_verified_${newRow.id}_${Date.now()}`,
+            type: 'new_order',
+            title: '💳 Online Payment Received (Order Confirmed)',
+            body: `Table ${newRow.table_number || ''} (Order #${newRow.order_number || ''}): ₹${newRow.grand_total || newRow.online_amount} Paid via Online Payment!`,
+            restaurant_id: newRow.restaurant_id,
+            order_id: newRow.id,
+            table_number: newRow.table_number
+          });
+        }
       }
 
       if (!activeRestId || newRow.restaurant_id === activeRestId) {
@@ -4544,12 +4603,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const isRazorpayVerified = Boolean(razorpayDetails?.razorpay_payment_id && razorpayDetails?.razorpay_signature);
 
-    if (effectivePaymentMode === 'demo') {
-      paymentStatus = 'paid_demo';
-      orderStatus = 'accepted';
-      online_amount = grand_total;
-      cash_due = 0;
-    } else if (effectivePaymentMode === 'online') {
+    if (paymentMode === 'online' || effectivePaymentMode === 'demo') {
       if (isRazorpayVerified) {
         paymentStatus = 'paid_live';
         orderStatus = 'accepted';

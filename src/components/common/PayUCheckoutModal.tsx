@@ -112,7 +112,8 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
         env,
         ...(restaurantId ? { restaurant_id: restaurantId } : {}),
         ...(payuKey ? { payu_key: payuKey } : {}),
-        ...(payuSalt ? { payu_salt: payuSalt } : {})
+        ...(payuSalt ? { payu_salt: payuSalt } : {}),
+        ...(orderId ? { order_id: orderId } : {})
       });
 
       const { ok, data } = await safeFetchJson<any>(`/api/payu/check-status?${queryParams.toString()}`);
