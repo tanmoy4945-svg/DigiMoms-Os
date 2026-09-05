@@ -136,7 +136,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
     } finally {
       if (isManual) setIsVerifyingManual(false);
     }
-  }, [merchantTxnId, merchantId, saltKey, saltIndex, env, amount, completePayment]);
+  }, [merchantTxnId, merchantId, saltKey, saltIndex, env, amount, completePayment, orderId, restaurantId]);
 
   // Initiate PhonePe on Open
   useEffect(() => {

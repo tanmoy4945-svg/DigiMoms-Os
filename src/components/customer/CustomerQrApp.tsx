@@ -2067,6 +2067,19 @@ export const CustomerQrApp: React.FC = () => {
                 customerMobile
               );
 
+              // Proactively ensure Supabase orders table is updated to paid_live
+              try {
+                await supabase.from('orders').update({
+                  payment_status: 'paid_live',
+                  order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+                  online_amount: Number((Number(existingOrd.online_amount || 0) + onlineAmt).toFixed(2)),
+                  cash_due: 0,
+                  updated_at: new Date().toISOString()
+                }).eq('id', existingOrd.id);
+              } catch (e) {
+                console.warn("Direct Supabase update warning:", e);
+              }
+
               const updatedPaidOrder = {
                 ...existingOrd,
                 payment_status: 'paid_live',
@@ -2080,6 +2093,7 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
+              await fetchAllFromSupabase();
               showToast('🎉 PayU payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PayU Order Payment Error:", err);
@@ -2129,6 +2143,19 @@ export const CustomerQrApp: React.FC = () => {
                 customerMobile
               );
 
+              // Proactively ensure Supabase orders table is updated to paid_live
+              try {
+                await supabase.from('orders').update({
+                  payment_status: 'paid_live',
+                  order_status: existingOrd.order_status === 'pending' ? 'accepted' : existingOrd.order_status,
+                  online_amount: Number((Number(existingOrd.online_amount || 0) + onlineAmt).toFixed(2)),
+                  cash_due: 0,
+                  updated_at: new Date().toISOString()
+                }).eq('id', existingOrd.id);
+              } catch (e) {
+                console.warn("Direct Supabase update warning:", e);
+              }
+
               const updatedPaidOrder = {
                 ...existingOrd,
                 payment_status: 'paid_live',
@@ -2142,6 +2169,7 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
+              await fetchAllFromSupabase();
               showToast('🎉 PhonePe payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PhonePe Order Payment Error:", err);

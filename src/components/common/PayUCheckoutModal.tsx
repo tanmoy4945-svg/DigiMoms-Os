@@ -140,7 +140,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
         setIsVerifyingManual(false);
       }
     }
-  }, [txnid, env, restaurantId, payuKey, payuSalt, hash, amount, completePayment]);
+  }, [txnid, env, restaurantId, payuKey, payuSalt, hash, amount, completePayment, orderId]);
 
   // Initialize PayU payment request when modal opens
   useEffect(() => {
