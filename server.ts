@@ -6,7 +6,12 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://qjkoeehgkfnailgmhyjs.supabase.co').replace(/\/+$/, '');
+const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://qjkoeehgkfnailgmhyjs.supabase.co';
+const SUPABASE_URL = String(rawSupabaseUrl)
+  .trim()
+  .replace(/\/+$/, '')
+  .replace(/\/rest\/v1\/?$/i, '')
+  .replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_TMLOZVNYis6bZInTdfWJ3Q_BJ1kiuih';
 const serverSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -330,7 +335,10 @@ async function startServer() {
         salt_index,
         env = 'SANDBOX',
         redirect_url,
-        callback_url
+        callback_url,
+        order_id,
+        table_code,
+        is_subscription
       } = req.body;
 
       if (!amount || amount <= 0) {
@@ -1794,15 +1802,16 @@ async function startServer() {
               }
             }
 
-            // Auto close popup if successful
+            // Auto close popup or redirect immediately to Order Confirmation to avoid duplicate screens
             if (window.opener && '${isSuccess}' === 'true') {
+              try { window.opener.postMessage(payload, '*'); } catch(e) {}
               setTimeout(() => {
                 try { window.close(); } catch(e) {}
-              }, 2000);
+              }, 400);
             } else if (!window.opener && '${isSuccess}' === 'true') {
               setTimeout(() => {
-                window.location.href = '${targetRedirectUrl}';
-              }, 2500);
+                window.location.replace('${targetRedirectUrl}');
+              }, 400);
             }
           </script>
         </body>

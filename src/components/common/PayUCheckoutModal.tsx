@@ -372,7 +372,8 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = actionUrl;
-    form.target = '_blank'; // Opens in secure PayU Tab / Window
+    const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    form.target = isMobile ? '_self' : '_blank';
 
     Object.entries(payuParams).forEach(([key, val]) => {
       const input = document.createElement('input');

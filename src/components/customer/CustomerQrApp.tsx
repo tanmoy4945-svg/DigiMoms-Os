@@ -324,8 +324,10 @@ export const CustomerQrApp: React.FC = () => {
     }
 
     if (orderIdParam) {
+      const isPaymentSuccess = paymentParam === 'success';
+
       const alreadyShown = sessionStorage.getItem(`digimoms_order_shown_${orderIdParam}`) === 'true';
-      if (alreadyShown) {
+      if (alreadyShown && !isPaymentSuccess) {
         // Already shown previously; do not reopen popup on reload/revisit.
         setLastPlacedOrder(null);
         setCustomerStep('menu');
@@ -343,6 +345,27 @@ export const CustomerQrApp: React.FC = () => {
 
       const match = orders.find(o => o.id === orderIdParam || o.order_number === orderIdParam);
       if (match) {
+        if (isPaymentSuccess && match.payment_status !== 'paid_live') {
+          (async () => {
+            try {
+              const fullAmt = Number(match.grand_total || 0);
+              const updatePayload = {
+                payment_status: 'paid_live',
+                order_status: match.order_status === 'pending' ? 'accepted' : match.order_status,
+                online_amount: fullAmt,
+                cash_due: 0,
+                updated_at: new Date().toISOString()
+              };
+              await supabase.from('orders').update(updatePayload).eq('id', match.id);
+            } catch (err) {
+              console.warn('Could not finalize live payment state on match:', err);
+            }
+          })();
+          match.payment_status = 'paid_live';
+          match.order_status = match.order_status === 'pending' ? 'accepted' : match.order_status;
+          match.online_amount = Number(match.grand_total || 0);
+          match.cash_due = 0;
+        }
         setLastPlacedOrder(match);
         setCart([]);
         setIsCartOpen(false);
@@ -352,6 +375,19 @@ export const CustomerQrApp: React.FC = () => {
           try {
             const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderIdParam).maybeSingle();
             if (dbOrd) {
+              if (isPaymentSuccess && dbOrd.payment_status !== 'paid_live') {
+                const fullAmt = Number(dbOrd.grand_total || 0);
+                const updatePayload = {
+                  payment_status: 'paid_live',
+                  order_status: dbOrd.order_status === 'pending' ? 'accepted' : dbOrd.order_status,
+                  online_amount: fullAmt,
+                  cash_due: 0,
+                  updated_at: new Date().toISOString()
+                };
+                await supabase.from('orders').update(updatePayload).eq('id', dbOrd.id);
+                Object.assign(dbOrd, updatePayload);
+              }
+
               const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderIdParam);
               const fullOrd: Order = {
                 ...dbOrd,
@@ -2093,7 +2129,6 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
-              await fetchAllFromSupabase();
               showToast('🎉 PayU payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PayU Order Payment Error:", err);
@@ -2169,7 +2204,6 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
-              await fetchAllFromSupabase();
               showToast('🎉 PhonePe payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PhonePe Order Payment Error:", err);
