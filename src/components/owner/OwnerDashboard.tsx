@@ -4,7 +4,8 @@ import { SmartImage } from '../common/SmartImage';
 import {
   Building2, Utensils, QrCode, Users, CreditCard, BarChart3,
   Star, Settings, LogOut, CheckCircle2, Clock, PhoneCall, ShoppingBag, Bell, AlertTriangle, ShieldCheck, Sparkles,
-  FileText, Printer, Download, Globe, Banknote
+  FileText, Printer, Download, Globe, Banknote, Lock, History, AlertCircle, RefreshCw,
+  KeyRound, Eye, EyeOff, MessageCircle, Phone, Mail, Info, Calendar, Gift
 } from 'lucide-react';
 import { MenuManagement } from './MenuManagement';
 import { TableManagement } from './TableManagement';
@@ -21,7 +22,8 @@ import { RealtimeStatusBadge } from '../common/RealtimeStatusBadge';
 import { PayUCheckoutModal } from '../common/PayUCheckoutModal';
 import { PhonePeCheckoutModal } from '../common/PhonePeCheckoutModal';
 import { RazorpayCheckoutModal } from '../common/RazorpayCheckoutModal';
-import { generateInvoicePdf } from '../../utils/pdfGenerator';
+import { generateInvoicePdf, generateSubscriptionInvoicePdf } from '../../utils/pdfGenerator';
+import { getRestaurantSubscriptionDetails } from '../../utils/subscriptionUtils';
 import { Order } from '../../types';
 
 export const OwnerDashboard: React.FC = () => {
@@ -48,6 +50,7 @@ export const OwnerDashboard: React.FC = () => {
     ceoPaymentConfig,
     renewRestaurantMonthly,
     subscriptionHistory,
+    updateOwnerPassword,
     showToast
   } = useSaaS();
 
@@ -56,6 +59,18 @@ export const OwnerDashboard: React.FC = () => {
   const [showPayUSubscriptionModal, setShowPayUSubscriptionModal] = useState(false);
   const [showPhonePeSubscriptionModal, setShowPhonePeSubscriptionModal] = useState(false);
   const [showRazorpaySubscriptionModal, setShowRazorpaySubscriptionModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyFilterTab, setHistoryFilterTab] = useState<'all' | 'paid' | 'free'>('all');
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [showAdminContactModal, setShowAdminContactModal] = useState(false);
+  const [oldPasswordInput, setOldPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [showOldPass, setShowOldPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [isChangingPass, setIsChangingPass] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
   const [selectedOfflineOrder, setSelectedOfflineOrder] = useState<Order | null>(null);
@@ -141,22 +156,23 @@ export const OwnerDashboard: React.FC = () => {
   const cookingOrders = confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted');
   const occupiedTables = restTables.filter(t => t.status === 'occupied').length;
 
-  const now = Date.now();
-  const isTrialActive = currentOwner.trial_status === 'active' && new Date(currentOwner.trial_end).getTime() > now;
-  const isFreeActive = currentOwner.free_offer_status === 'active' && new Date(currentOwner.free_offer_end).getTime() > now;
-  const isSubActive = currentOwner.status === 'active' && new Date(currentOwner.subscription_end).getTime() > now;
-
-  let subEndDate = new Date(currentOwner.subscription_end || now).getTime();
-  if (isTrialActive) {
-    subEndDate = Math.max(subEndDate, new Date(currentOwner.trial_end).getTime());
-  }
-  if (isFreeActive) {
-    subEndDate = Math.max(subEndDate, new Date(currentOwner.free_offer_end).getTime());
-  }
-
-  const daysLeft = Math.ceil((subEndDate - now) / (1000 * 60 * 60 * 24));
-  const isExpiringSoon = daysLeft <= 7;
-  const monthlyFee = currentOwner.monthly_subscription_fee || 999;
+  const subDetails = getRestaurantSubscriptionDetails(currentOwner);
+  const {
+    subEndDate,
+    formattedEndDate,
+    isTrialActive,
+    isFreeActive,
+    isSubActive,
+    isSuspended,
+    isExpired,
+    diffDays,
+    daysAgo,
+    expiryBadgeText,
+    expiryDescriptionText,
+    isExpiringSoon,
+    monthlyFee
+  } = subDetails;
+  const daysLeft = diffDays;
 
   const handleProcessPhonePeRenewal = async () => {
     setIsProcessingPayment(true);
@@ -418,8 +434,30 @@ export const OwnerDashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <RealtimeStatusBadge />
+
+          <button
+            onClick={() => setShowHistoryModal(true)}
+            className="px-3.5 py-2.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 text-purple-200 font-bold text-xs border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm"
+            title="View Renewal & Free History"
+          >
+            <History className="w-3.5 h-3.5 text-purple-400" /> Renewal & Free History
+          </button>
+
+          <button
+            onClick={() => {
+              setPasswordError('');
+              setOldPasswordInput('');
+              setNewPasswordInput('');
+              setConfirmPasswordInput('');
+              setShowChangePasswordModal(true);
+            }}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Change Owner Password"
+          >
+            <Lock className="w-3.5 h-3.5 text-amber-400" /> Change Password
+          </button>
 
           <button
             onClick={() => setShowRenewalModal(true)}
@@ -437,38 +475,128 @@ export const OwnerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Subscription Expiry Alert Banner (triggers when 7 days or less remaining) */}
-      {isExpiringSoon && (
-        <div className="p-5 rounded-3xl bg-amber-950/60 border-2 border-amber-500/40 text-amber-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xl backdrop-blur-md animate-pulse">
-          <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                ⚠️ Subscription Expiry Warning!
-                <span className="text-xs bg-amber-500/20 px-2 py-0.5 rounded-full text-amber-300 border border-amber-500/30 font-mono">
-                  {daysLeft <= 0 ? 'Expired Today' : `${daysLeft} Days Remaining`}
-                </span>
-              </h3>
-              <p className="text-xs text-amber-200/80 mt-1">
-                Your monthly plan ends on <strong>{new Date(subEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>.
-                Pay <strong>₹{monthlyFee}</strong> via Razorpay to keep your digital menu & QR ordering active without interruption.
-              </p>
+      {/* If Expired, Lock All Features */}
+      {isExpired ? (
+        <div className="space-y-6 animate-fade-in">
+          <div className="p-6 sm:p-10 rounded-3xl bg-slate-900/95 border-2 border-rose-500/40 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-rose-500/10 blur-3xl rounded-full pointer-events-none" />
+            <div className="relative z-10 max-w-3xl mx-auto text-center space-y-6">
+              <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center justify-center mx-auto shadow-xl">
+                <Lock className="w-8 h-8 animate-pulse" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-500/40 text-xs font-bold uppercase tracking-wider">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  {expiryBadgeText}
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                  Subscription Plan Expired — All Features Locked
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 max-w-xl mx-auto leading-relaxed">
+                  {expiryDescriptionText}
+                </p>
+              </div>
+
+              {/* Plan & Expiry Summary */}
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-wrap items-center justify-around gap-4 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Plan Status</span>
+                  <span className="font-bold text-rose-400 uppercase">Inactive / Expired</span>
+                </div>
+                <div className="w-px h-8 bg-slate-800 hidden sm:block" />
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Expired Date</span>
+                  <span className="font-mono text-slate-200 font-bold">{formattedEndDate}</span>
+                </div>
+                <div className="w-px h-8 bg-slate-800 hidden sm:block" />
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Reactivation Fee</span>
+                  <span className="font-extrabold text-emerald-400 text-sm">₹{monthlyFee} / Month</span>
+                </div>
+              </div>
+
+              {/* Feature Lock Breakdown */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
+                    <QrCode className="w-4 h-4" /> Digital QR Menu & Ordering
+                  </div>
+                  <p className="text-[11px] text-slate-400">Customer table QR links are currently showing an inactive notice.</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
+                    <Utensils className="w-4 h-4" /> Menu & Category Management
+                  </div>
+                  <p className="text-[11px] text-slate-400">Adding, editing, or modifying dishes and prices is locked.</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
+                    <Users className="w-4 h-4" /> Kitchen & Waiter Terminals
+                  </div>
+                  <p className="text-[11px] text-slate-400">Staff logins and live order terminals are blocked until renewal.</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
+                    <CreditCard className="w-4 h-4" /> POS Billing & Reports
+                  </div>
+                  <p className="text-[11px] text-slate-400">Offline billing and financial exports are paused.</p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => setShowRenewalModal(true)}
+                  className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02]"
+                >
+                  <CreditCard className="w-5 h-5" /> Pay ₹{monthlyFee} & Reactivate All Features
+                </button>
+
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 flex items-center justify-center gap-2 transition-all"
+                >
+                  <History className="w-4 h-4" /> Subscription Invoices
+                </button>
+              </div>
             </div>
           </div>
-
-          <button
-            onClick={() => setShowRenewalModal(true)}
-            className="px-5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-xl shadow-amber-500/20 transition-all shrink-0 flex items-center gap-2"
-          >
-            💳 Pay ₹{monthlyFee} & Extend 1 Month
-          </button>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Subscription Expiry Alert Banner (triggers when 7 days or less remaining and NOT expired) */}
+          {isExpiringSoon && (
+            <div className="p-5 rounded-3xl bg-amber-950/60 border-2 border-amber-500/40 text-amber-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xl backdrop-blur-md animate-pulse">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                    ⚠️ Subscription Expiry Warning!
+                    <span className="text-xs bg-amber-500/20 px-2.5 py-0.5 rounded-full text-amber-300 border border-amber-500/30 font-mono">
+                      {diffDays === 0 ? 'Expires Today' : `${diffDays} Days Remaining`}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-amber-200/80 mt-1">
+                    Your monthly plan ends on <strong>{formattedEndDate}</strong>.
+                    Pay <strong>₹{monthlyFee}</strong> online to keep your digital menu & QR ordering active without interruption.
+                  </p>
+                </div>
+              </div>
 
-      {/* Tabs Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800 custom-scrollbar">
+              <button
+                onClick={() => setShowRenewalModal(true)}
+                className="px-5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-xl shadow-amber-500/20 transition-all shrink-0 flex items-center gap-2"
+              >
+                💳 Pay ₹{monthlyFee} & Extend 1 Month
+              </button>
+            </div>
+          )}
+
+          {/* Tabs Bar */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800 custom-scrollbar">
         <button
           onClick={() => setActiveTab('overview')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
@@ -973,6 +1101,8 @@ export const OwnerDashboard: React.FC = () => {
       {activeTab === 'feedback' && <FeedbackViewer />}
       {activeTab === 'settings' && <SettingsManagement />}
       {activeTab === 'public-website' && <RestaurantWebsiteManager restaurantId={currentOwner.id} />}
+        </>
+      )}
 
       {/* PhonePe Monthly Subscription Renewal Modal */}
       {showRenewalModal && (
@@ -987,11 +1117,7 @@ export const OwnerDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-white text-base">
-                    {ceoPaymentConfig?.primary_gateway === 'payu'
-                      ? 'PayU India Gateway'
-                      : ceoPaymentConfig?.primary_gateway === 'razorpay'
-                      ? 'Razorpay Gateway'
-                      : 'PhonePe Business Gateway'}
+                    Secure Subscription Renewal
                   </h3>
                   <p className="text-[11px] text-slate-400">DigiMoms SaaS Official Renewal</p>
                 </div>
@@ -1015,7 +1141,7 @@ export const OwnerDashboard: React.FC = () => {
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400">Current Expiry Date:</span>
-                <span className="font-mono text-slate-300">{new Date(subEndDate).toLocaleDateString()}</span>
+                <span className="font-mono text-slate-300">{formattedEndDate}</span>
               </div>
               <div className="border-t border-slate-800 pt-3 flex items-center justify-between">
                 <span className="text-sm font-bold text-white">Total Amount Due:</span>
@@ -1026,40 +1152,19 @@ export const OwnerDashboard: React.FC = () => {
             {(ceoPaymentConfig?.mode || 'demo') === 'demo' ? (
               <div className="p-3.5 rounded-xl bg-purple-950/50 border border-purple-500/30 text-xs text-purple-200 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-purple-300">
-                  <Sparkles className="w-4 h-4 text-purple-400" />{' '}
-                  {ceoPaymentConfig?.primary_gateway === 'payu'
-                    ? 'PayU'
-                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
-                    ? 'Razorpay'
-                    : 'PhonePe'}{' '}
-                  Demo / Sandbox Mode
+                  <Sparkles className="w-4 h-4 text-purple-400" /> Instant Verification Mode Active
                 </div>
                 <p className="text-[11px] text-purple-200/80">
-                  {ceoPaymentConfig?.primary_gateway === 'payu'
-                    ? 'PayU India'
-                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
-                    ? 'Razorpay'
-                    : 'PhonePe Business'}{' '}
-                  gateway is active in Demo mode. Proceeding will execute server-side verification and extend subscription by 1 calendar month instantly.
+                  Testing mode is active. Proceeding will verify the transaction and extend your restaurant subscription by 1 calendar month immediately.
                 </p>
               </div>
             ) : (
               <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-emerald-300">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />{' '}
-                  {ceoPaymentConfig?.primary_gateway === 'payu'
-                    ? 'PayU India Live'
-                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
-                    ? 'Razorpay Live'
-                    : 'PhonePe Live Business'}
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> 256-Bit Encrypted Online Checkout
                 </div>
                 <p className="text-[11px] text-emerald-200/80">
-                  Payment will be routed via{' '}
-                  {ceoPaymentConfig?.primary_gateway === 'payu'
-                    ? `PayU Merchant Key: ${ceoPaymentConfig?.payu_merchant_key || 'Configured'}`
-                    : ceoPaymentConfig?.primary_gateway === 'razorpay'
-                    ? `Razorpay Key ID: ${ceoPaymentConfig?.razorpay_key_id || 'Configured'}`
-                    : `PhonePe Business Merchant ID: ${ceoPaymentConfig?.phonepe_merchant_id || 'DIGIMOMS_ONLINE'}`}.
+                  Your payment is processed through a secure, encrypted online banking network. Digital QR services will be instantly reactivated upon successful payment.
                 </p>
               </div>
             )}
@@ -1084,12 +1189,7 @@ export const OwnerDashboard: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    💳 Pay ₹{monthlyFee} via{' '}
-                    {ceoPaymentConfig?.primary_gateway === 'payu'
-                      ? 'PayU'
-                      : ceoPaymentConfig?.primary_gateway === 'razorpay'
-                      ? 'Razorpay'
-                      : 'PhonePe'}
+                    💳 Pay ₹{monthlyFee} & Reactivate Plan
                   </>
                 )}
               </button>
@@ -1124,7 +1224,7 @@ export const OwnerDashboard: React.FC = () => {
             mode: ceoPaymentConfig?.mode || 'demo'
           });
           setShowPayUSubscriptionModal(false);
-          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via PayU!', 'success');
+          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month!', 'success');
         }}
         amount={monthlyFee}
         title="DigiMoms Smart Restaurant OS Subscription"
@@ -1150,7 +1250,7 @@ export const OwnerDashboard: React.FC = () => {
             mode: ceoPaymentConfig?.mode || 'demo'
           });
           setShowPhonePeSubscriptionModal(false);
-          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via PhonePe!', 'success');
+          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month!', 'success');
         }}
         amount={monthlyFee}
         title="DigiMoms Smart Restaurant OS Subscription"
@@ -1180,7 +1280,7 @@ export const OwnerDashboard: React.FC = () => {
             razorpay_signature: paymentData.razorpay_signature
           });
           setShowRazorpaySubscriptionModal(false);
-          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month via Razorpay!', 'success');
+          showToast('🎉 DigiMoms OS subscription successfully extended by 1 month!', 'success');
         }}
         amount={monthlyFee}
         title="DigiMoms Smart Restaurant OS Subscription"
@@ -1194,6 +1294,447 @@ export const OwnerDashboard: React.FC = () => {
         razorpaySecret={ceoPaymentConfig?.razorpay_key_secret}
         isSubscription={true}
       />
+
+      {/* Subscription & Free Offer History Modal */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">
+                    Renewal & Free Offer History
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Complete record of paid subscription renewals and complimentary free grants</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="text-slate-400 hover:text-white text-sm font-bold p-1 rounded-lg hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            {(() => {
+              const ownerSubHist = subscriptionHistory.filter(s => s.restaurant_id === currentOwner.id);
+              const paidList = ownerSubHist.filter(s => {
+                const amt = Number(s.amount ?? s.amount_paid ?? 0);
+                const status = (s.payment_status || '').toLowerCase();
+                return amt > 0 && status !== 'free' && status !== 'complimentary' && status !== 'not_required' && status !== 'free_granted';
+              });
+              const freeList = ownerSubHist.filter(s => {
+                const amt = Number(s.amount ?? s.amount_paid ?? 0);
+                const status = (s.payment_status || '').toLowerCase();
+                const type = (s.subscription_type || '').toUpperCase();
+                return amt === 0 || s.payment_mode === 'free' || status === 'free' || status === 'complimentary' || status === 'not_required' || status === 'free_granted' || ['TRIAL', 'FREE_OFFER', 'CEO_FREE_EXTENSION', 'FREE_GRANT', 'COMPLIMENTARY'].some(t => type.includes(t));
+              });
+
+              const displayedList = historyFilterTab === 'paid' ? paidList : (historyFilterTab === 'free' ? freeList : ownerSubHist);
+
+              return (
+                <div className="space-y-4">
+                  {/* Filter Tabs */}
+                  <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-950 border border-slate-800">
+                    <button
+                      onClick={() => setHistoryFilterTab('all')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        historyFilterTab === 'all'
+                          ? 'bg-slate-800 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <History className="w-3.5 h-3.5" /> All History ({ownerSubHist.length})
+                    </button>
+                    <button
+                      onClick={() => setHistoryFilterTab('paid')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        historyFilterTab === 'paid'
+                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-emerald-300'
+                      }`}
+                    >
+                      <CreditCard className="w-3.5 h-3.5" /> Paid Renewals ({paidList.length})
+                    </button>
+                    <button
+                      onClick={() => setHistoryFilterTab('free')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        historyFilterTab === 'free'
+                          ? 'bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-purple-300'
+                      }`}
+                    >
+                      <Gift className="w-3.5 h-3.5" /> Free & Trial ({freeList.length})
+                    </button>
+                  </div>
+
+                  {displayedList.length === 0 ? (
+                    <div className="text-center py-12 space-y-2 text-slate-400 bg-slate-950/50 rounded-2xl border border-slate-800/60 p-6">
+                      <History className="w-9 h-9 mx-auto text-slate-600" />
+                      <p className="text-sm font-semibold text-slate-300">
+                        {historyFilterTab === 'paid' ? 'No paid renewals found.' : historyFilterTab === 'free' ? 'No free offer / trial records found.' : 'No recorded renewal or free history yet.'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {historyFilterTab === 'paid' ? 'Your tax invoices and renewal receipts will appear here.' : 'Free trial, promotional offers, and admin extensions will be recorded here.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {displayedList.map((sub, idx) => {
+                        const amt = Number(sub.amount ?? sub.amount_paid ?? 0);
+                        const isFree = amt === 0 || sub.payment_mode === 'free' || ['TRIAL', 'FREE_OFFER', 'CEO_FREE_EXTENSION', 'FREE_GRANT'].some(t => (sub.subscription_type || '').includes(t));
+
+                        return (
+                          <div
+                            key={sub.id || idx}
+                            className={`p-4 rounded-2xl border transition-all text-xs space-y-2.5 ${
+                              isFree
+                                ? 'bg-gradient-to-r from-purple-950/30 to-slate-950 border-purple-800/40'
+                                : 'bg-gradient-to-r from-emerald-950/30 to-slate-950 border-emerald-800/40'
+                            }`}
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {isFree ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-500/40 text-[10px] font-bold flex items-center gap-1">
+                                    <Gift className="w-3 h-3 text-purple-400" /> Free Offer / Trial
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Paid Renewal
+                                  </span>
+                                )}
+
+                                <span className="font-extrabold text-white text-sm">
+                                  {isFree ? (
+                                    <span className="text-purple-300 font-bold">Free (₹0)</span>
+                                  ) : (
+                                    <span className="text-emerald-300 font-bold">₹{amt}</span>
+                                  )}
+                                </span>
+
+                                {(sub.days_added || sub.duration_months) && (
+                                  <span className="text-[11px] font-medium text-slate-300 bg-slate-800 px-2 py-0.5 rounded-md">
+                                    +{sub.days_added ? `${sub.days_added} Days` : `${sub.duration_months} Month(s)`}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-right text-[11px] text-slate-400">
+                                {new Date(sub.payment_date || sub.created_at).toLocaleDateString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric'
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Details Row */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-800/80">
+                              <div>
+                                <span className="text-slate-500">Plan / Reason: </span>
+                                <span className="text-slate-200 font-medium">{sub.reason || sub.plan_name || (isFree ? 'Promotional Free Period' : 'Monthly Subscription')}</span>
+                              </div>
+                              {sub.granted_by && (
+                                <div>
+                                  <span className="text-slate-500">Granted By: </span>
+                                  <span className="text-slate-200 font-medium">{sub.granted_by}</span>
+                                </div>
+                              )}
+                              {sub.new_expiry && (
+                                <div>
+                                  <span className="text-slate-500">Extended Validity To: </span>
+                                  <span className="text-amber-300 font-medium">
+                                    {new Date(sub.new_expiry).toLocaleDateString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric'
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                              {sub.transaction_id && (
+                                <div>
+                                  <span className="text-slate-500">Txn / Ref ID: </span>
+                                  <span className="font-mono text-slate-300">{sub.transaction_id}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {!isFree && (
+                              <div className="pt-2 flex justify-end">
+                                <button
+                                  onClick={() => generateSubscriptionInvoicePdf(sub, currentOwner)}
+                                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 border border-slate-700 transition-all"
+                                >
+                                  <Download className="w-3.5 h-3.5" /> Download Tax Invoice
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Change Owner Password</h3>
+                  <p className="text-[11px] text-slate-400">Secure credential update</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowChangePasswordModal(false)}
+                className="text-slate-400 hover:text-white text-sm font-bold p-1 rounded-lg hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-rose-950/30 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>নিরাপত্তা সতর্কতা:</strong> পাসওয়ার্ড পরিবর্তন করলে আপনার বর্তমান ডিভাইস সহ সমস্ত সক্রিয় ডিভাইস থেকে স্বয়ংক্রিয়ভাবে লগআউট হয়ে যাবে।
+              </span>
+            </div>
+
+            {passwordError && (
+              <div className="p-3 rounded-2xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{passwordError}</span>
+              </div>
+            )}
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setPasswordError('');
+
+                if (!oldPasswordInput.trim()) {
+                  setPasswordError('অনুগ্রহ করে আপনার বর্তমান (পুরাতন) পাসওয়ার্ডটি প্রবেশ করান।');
+                  return;
+                }
+
+                if (oldPasswordInput.trim() !== (currentOwner.password_hash || '').trim()) {
+                  setPasswordError('বর্তমান পাসওয়ার্ড ভুল হয়েছে! পাসওয়ার্ড ভুলে গেলে নিচে CEO/Admin এর সাথে যোগাযোগ বাটনে চাপুন।');
+                  return;
+                }
+
+                if (!newPasswordInput.trim() || newPasswordInput.trim().length < 4) {
+                  setPasswordError('নতুন পাসওয়ার্ড অন্তত ৪ অক্ষরের হতে হবে।');
+                  return;
+                }
+
+                if (newPasswordInput.trim() !== confirmPasswordInput.trim()) {
+                  setPasswordError('নতুন পাসওয়ার্ড এবং নিশ্চিতকরণ পাসওয়ার্ড একই নয়।');
+                  return;
+                }
+
+                if (newPasswordInput.trim() === oldPasswordInput.trim()) {
+                  setPasswordError('নতুন পাসওয়ার্ড পুরাতন পাসওয়ার্ডের মতো হতে পারে না।');
+                  return;
+                }
+
+                setIsChangingPass(true);
+                const success = await updateOwnerPassword(oldPasswordInput.trim(), newPasswordInput.trim());
+                setIsChangingPass(false);
+                if (success) {
+                  setShowChangePasswordModal(false);
+                }
+              }}
+              className="space-y-4"
+            >
+              {/* Old Password */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Current (Old) Password <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOldPass ? 'text' : 'password'}
+                    value={oldPasswordInput}
+                    onChange={(e) => setOldPasswordInput(e.target.value)}
+                    placeholder="Enter existing password"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 pr-10 text-white text-xs outline-none transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldPass(!showOldPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showOldPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  New Password <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPass ? 'text' : 'password'}
+                    value={newPasswordInput}
+                    onChange={(e) => setNewPasswordInput(e.target.value)}
+                    placeholder="Enter new strong password"
+                    minLength={4}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 pr-10 text-white text-xs outline-none transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Confirm New Password <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPass ? 'text' : 'password'}
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="Re-enter new password"
+                    minLength={4}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 pr-10 text-white text-xs outline-none transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPass(!showConfirmPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangePasswordModal(false);
+                    setShowAdminContactModal(true);
+                  }}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 hover:underline font-medium"
+                >
+                  Forgot Password? Request CEO/Admin
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isChangingPass}
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-amber-600/20 transition-all flex items-center gap-2"
+                >
+                  {isChangingPass ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
+                  Save & Logout All
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Forgot Password Contact CEO/Admin Modal */}
+      {showAdminContactModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+                  <PhoneCall className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Request Password Reset</h3>
+                  <p className="text-[11px] text-slate-400">Direct CEO / Platform Admin Support</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAdminContactModal(false)}
+                className="text-slate-400 hover:text-white text-sm font-bold p-1 rounded-lg hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+              <p>
+                আপনি যদি আপনার বর্তমান পাসওয়ার্ড সম্পূর্ণ ভুলে গিয়ে থাকেন, তবে সুরক্ষার জন্য প্ল্যাটফর্মের সিইও (CEO / Admin) সরাসরি আপনার সাথে যোগাযোগ করে নতুন পাসওয়ার্ড প্রদান করবেন।
+              </p>
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Restaurant:</span>
+                  <span className="font-bold text-white">{currentOwner.name}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Registered Owner:</span>
+                  <span className="font-bold text-white">{currentOwner.owner_name}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Registered Mobile:</span>
+                  <span className="font-bold font-mono text-emerald-400">{currentOwner.owner_mobile}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <a
+                href={`https://wa.me/919475388085?text=${encodeURIComponent(
+                  `Hello CEO / Admin, I am the owner of ${currentOwner.name} (Owner: ${currentOwner.owner_name}, Mobile: ${currentOwner.owner_mobile}). I forgot my owner password and request a secure password reset.`
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+              >
+                <MessageCircle className="w-4 h-4" /> WhatsApp CEO Admin Directly
+              </a>
+
+              <a
+                href="tel:+919475388085"
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all"
+              >
+                <Phone className="w-4 h-4 text-blue-400" /> Direct Phone Call (+91 9475388085)
+              </a>
+
+              <button
+                onClick={() => {
+                  setShowAdminContactModal(false);
+                  setShowChangePasswordModal(true);
+                }}
+                className="w-full py-2 text-center text-xs text-slate-400 hover:text-white"
+              >
+                Back to Password Form
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -259,7 +259,7 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     journeyTitle: 'Our Journey',
     journeyFounder: 'Tanmoy Jana (Founder & Legal Operator)',
     journeyEstablished: 'Established in 2024',
-    journeyStory: 'Founded by Tanmoy Jana, DigiMoms Marketing Agency is helping local businesses and restaurants in India with modern IT solutions and operating systems. Headquartered at Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144, DigiMoms provides cutting-edge digital restaurant technology with a 15-day free trial and starting at ₹999/month (INR).',
+    journeyStory: 'Founded by Tanmoy Jana, DigiMoms Marketing Agency is helping local businesses and restaurants in India with modern IT solutions and operating systems. Headquartered at Sabang, Paschim Medinipur, West Bengal, 721144, DigiMoms provides cutting-edge digital restaurant technology with a 15-day free trial and starting at ₹999/month (INR).',
 
     visionTag: 'Core Purpose',
     visionTitle: 'Our Vision',

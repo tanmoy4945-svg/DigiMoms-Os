@@ -249,6 +249,8 @@ export async function generateRestaurantAgreementPdf(data: AgreementData): Promi
           </div>
           <div style="font-size: 11.5px; color: #334155; line-height: 1.6;">
             DigiMoms আধুনিক এনক্রিপশন ও সর্বোত্তম শিল্প-মানের নিরাপত্তা ব্যবস্থা বজায় রাখবে। রেস্তোরাঁর সকল ডেটা গোপনীয় ও সুরক্ষিত রাখা হবে।
+            <br/><br/>
+            <strong>ডেটা মুছে ফেলা নীতি (Data Deletion Policy):</strong> সিস্টেমের পারফরম্যান্স ভালো রাখতে এবং স্টোরেজ ম্যানেজমেন্টের জন্য, DigiMoms প্রতি ৬ মাস বা ১ বছর পর পর রেস্তোরাঁকে তাদের পুরনো অর্ডারের ডেটা মুছে ফেলার (Delete) অনুরোধ করবে। ৬ মাসে ডেটা ডিলিট না করলেও ১ বছরে ডেটা ডিলিট করা বাধ্যতামূলক। DigiMoms রেস্তোরাঁর সম্মতি ছাড়া ডেটা মুছে ফেলবে না। তবে, একাধিকবার নোটিশ দেওয়ার পরও যদি রেস্তোরাঁ কর্তৃপক্ষ ডেটা মুছে ফেলতে সম্মতি না দেয়, তবে DigiMoms সাময়িকভাবে পরিষেবা বন্ধ (Suspend) করার অধিকার সংরক্ষণ করে। ডেটা মুছে ফেলার ফলে রেস্তোরাঁর মোট আজীবন আয় (Lifetime Revenue) বা হিসেব নষ্ট হবে না, শুধুমাত্র অর্ডারের বিলের বিবরণগুলো ডিলিট হবে।
           </div>
         </div>
 
@@ -490,6 +492,8 @@ export async function generateRestaurantAgreementPdf(data: AgreementData): Promi
           </div>
           <div style="font-size: 11.5px; color: #334155; line-height: 1.6;">
             DigiMoms implements reasonable, industry-standard security measures and handles restaurant and customer information according to applicable privacy practices.
+            <br/><br/>
+            <strong>Data Deletion Policy:</strong> To maintain system performance and storage management, DigiMoms will request the Restaurant to delete their old order data every 6 months or 1 year. Even if not deleted at 6 months, deletion at 1 year is mandatory. DigiMoms will not delete data without the Restaurant's permission. However, if the Restaurant refuses to grant permission after multiple notices, DigiMoms reserves the right to suspend the service. Deleting data will not erase the Restaurant's Lifetime Revenue or yearly totals; only raw order billing records will be archived and deleted.
           </div>
         </div>
 

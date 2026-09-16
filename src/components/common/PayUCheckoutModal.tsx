@@ -82,7 +82,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
     isCompletedRef.current = true;
     setIsSuccessConfirmed(true);
     setErrorMessage('');
-    setStatusMessage('Payment verified successfully by PayU Gateway!');
+    setStatusMessage('Payment verified successfully!');
 
     if (pollingTimerRef.current) {
       clearInterval(pollingTimerRef.current);
@@ -127,12 +127,12 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
           amount: data.amount || amount
         });
       } else if (isManual) {
-        setErrorMessage('PayU Status: Payment is still PENDING or verifying. If you completed payment, click "Confirm with PayU Ref" below.');
+        setErrorMessage('Payment status is still pending or verifying. If you completed payment, click "Confirm with Transaction Ref" below.');
         setShowManualConfirmBox(true);
       }
     } catch (err: any) {
       if (isManual) {
-        setErrorMessage('Unable to connect to gateway status server. You can confirm your payment with your PayU/UPI reference below.');
+        setErrorMessage('Unable to connect to gateway status server. You can confirm your payment with your UPI or transaction reference below.');
         setShowManualConfirmBox(true);
       }
     } finally {
@@ -307,7 +307,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
             amount: Number(callbackAmount) || amount
           });
         } else if (status && status !== 'success') {
-          setErrorMessage(`Payment ${status || 'failed'}. Please try again on PayU.`);
+          setErrorMessage(`Payment ${status || 'failed'}. Please try again.`);
         }
       }
     };
@@ -366,7 +366,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
 
     setPaymentWindowOpened(true);
     setErrorMessage('');
-    setStatusMessage('Waiting for PayU gateway payment confirmation...');
+    setStatusMessage('Waiting for payment gateway confirmation...');
 
     // Programmatically construct and submit standard HTML form to PayU gateway
     const form = document.createElement('form');
@@ -405,7 +405,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="font-extrabold text-white text-base">PayU India Gateway</h3>
+                <h3 className="font-extrabold text-white text-base">Secure Online Payment</h3>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                   env === 'LIVE' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
                 }`}>
@@ -431,11 +431,11 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
             </div>
             <div>
               <h4 className="text-base font-bold text-white">Payment Confirmed!</h4>
-              <p className="text-xs text-emerald-300 mt-1">Verified securely by PayU Gateway.</p>
+              <p className="text-xs text-emerald-300 mt-1">Verified securely through online payment gateway.</p>
             </div>
             {verifiedRecord?.mihpayid && (
               <div className="text-[11px] font-mono text-emerald-400/90 bg-emerald-950/80 py-1.5 px-3 rounded-lg border border-emerald-500/30">
-                PayU Ref: {verifiedRecord.mihpayid}
+                Transaction Ref: {verifiedRecord.mihpayid}
               </div>
             )}
             <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
@@ -463,7 +463,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
 
               {txnid && (
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-400">PayU Txn ID</span>
+                  <span className="text-slate-400">Payment Txn ID</span>
                   <span className="font-mono text-[11px] text-emerald-400 truncate max-w-[180px]">{txnid}</span>
                 </div>
               )}
@@ -499,11 +499,11 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                 >
                   {isLoading ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" /> Preparing PayU Secure Gateway...
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Preparing Secure Payment Gateway...
                     </>
                   ) : (
                     <>
-                      <ExternalLink className="w-4 h-4" /> Open PayU Payment Gateway (₹{amount})
+                      <ExternalLink className="w-4 h-4" /> Open Payment Gateway (₹{amount})
                     </>
                   )}
                 </button>
@@ -514,10 +514,10 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                     <div className="flex items-center justify-center gap-2 text-xs font-bold text-emerald-400">
                       <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
                       <Lock className="w-3.5 h-3.5" />
-                      <span>Waiting for PayU Gateway Confirmation...</span>
+                      <span>Waiting for Payment Confirmation...</span>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Please complete your payment on the opened PayU tab. The system will automatically detect confirmation and proceed.
+                      Please complete your payment on the opened payment tab. The system will automatically detect confirmation and proceed.
                     </p>
                   </div>
 
@@ -530,7 +530,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                     {isVerifyingManual ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
-                        Checking PayU Gateway Status...
+                        Checking Payment Gateway Status...
                       </>
                     ) : (
                       <>
@@ -546,7 +546,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                         <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Manual Payment Confirmation
                       </div>
                       <p className="text-[11px] text-slate-400">
-                        If you completed the payment on PayU, enter your PayU Payment ID or Bank UTR/UPI Ref to confirm immediately:
+                        If you completed the payment, enter your Payment ID or Bank UTR/UPI Ref to confirm immediately:
                       </p>
                       <div className="flex gap-2">
                         <input
@@ -561,7 +561,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                           onClick={() => {
                             completePayment({
                               txnid: txnid,
-                              mihpayid: manualTxnInput.trim() || `payu_${Date.now()}`,
+                              mihpayid: manualTxnInput.trim() || `txn_${Date.now()}`,
                               hash: hash,
                               amount: amount
                             });
@@ -578,7 +578,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                       onClick={() => setShowManualConfirmBox(true)}
                       className="w-full text-center text-[11px] text-slate-400 hover:text-emerald-400 underline decoration-slate-600 transition-colors py-1 cursor-pointer"
                     >
-                      Already paid on PayU? Confirm with PayU Payment ID / UPI Ref
+                      Already paid? Confirm with Transaction / UPI Ref
                     </button>
                   )}
 
@@ -588,7 +588,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                       onClick={handleLaunchPayU}
                       className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" /> Reopen PayU Tab
+                      <ExternalLink className="w-3.5 h-3.5" /> Reopen Payment Tab
                     </button>
                     <button
                       type="button"
@@ -602,7 +602,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
               )}
 
               <div className="text-center text-[10px] text-slate-500 flex items-center justify-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-emerald-400" /> 256-Bit SSL Encrypted • RBI & PCI-DSS Compliant PayU Checkout
+                <ShieldCheck className="w-3 h-3 text-emerald-400" /> 256-Bit SSL Encrypted • RBI & PCI-DSS Compliant Checkout
               </div>
             </div>
           </>

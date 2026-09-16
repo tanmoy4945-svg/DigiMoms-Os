@@ -242,3 +242,144 @@ export function generateInvoicePdf(order: Order, restaurant: Restaurant) {
   }
 }
 
+export function generateSubscriptionInvoicePdf(subscription: any, restaurant: Restaurant) {
+  try {
+    const doc = new jsPDF({
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const invoiceNumber = `INV-SUB-${subscription.id ? subscription.id.slice(0, 8).toUpperCase() : Date.now()}`;
+    const invoiceDate = new Date(subscription.payment_date || subscription.created_at || Date.now()).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+
+    // Header
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(30, 41, 59);
+    doc.text('DigiMoms Technologies & SaaS', 20, 25);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Smart Cloud Restaurant Operating System', 20, 31);
+    doc.text('Email: support@digimoms.in | Web: digimoms.in', 20, 36);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(15, 23, 42);
+    doc.text('TAX INVOICE / RECEIPT', 190, 25, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Invoice No: ${invoiceNumber}`, 190, 32, { align: 'right' });
+    doc.text(`Date: ${invoiceDate}`, 190, 38, { align: 'right' });
+    doc.text(`Txn ID: ${subscription.transaction_id || 'N/A'}`, 190, 44, { align: 'right' });
+
+    // Divider
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.line(20, 50, 190, 50);
+
+    // Bill To
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text('BILLED TO:', 20, 60);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text(restaurant.name || 'Restaurant Partner', 20, 67);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Attn: ${restaurant.owner_name || 'Restaurant Owner'}`, 20, 73);
+    doc.text(`Phone: ${restaurant.contact_mobile || restaurant.owner_mobile || 'N/A'}`, 20, 79);
+    if (restaurant.address) {
+      const splitAddr = doc.splitTextToSize(`Address: ${restaurant.address}`, 90);
+      doc.text(splitAddr, 20, 85);
+    }
+    if (restaurant.gst) {
+      doc.text(`GSTIN: ${restaurant.gst}`, 20, 95);
+    }
+
+    // Table Header
+    const tableY = 110;
+    doc.setFillColor(241, 245, 249);
+    doc.rect(20, tableY, 170, 9, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    doc.text('Description', 25, tableY + 6);
+    doc.text('Period', 105, tableY + 6);
+    doc.text('Qty', 140, tableY + 6, { align: 'center' });
+    doc.text('Amount (INR)', 185, tableY + 6, { align: 'right' });
+
+    // Table Content
+    const rowY = tableY + 16;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(51, 65, 85);
+    doc.text('DigiMoms Restaurant OS Monthly SaaS Subscription', 25, rowY);
+    doc.text('Cloud POS, QR Menus, KDS & Analytics', 25, rowY + 5);
+    doc.text('30 Days', 105, rowY);
+    doc.text('1', 140, rowY, { align: 'center' });
+    const amount = Number(subscription.amount_paid || 999);
+    doc.text(`Rs. ${amount.toFixed(2)}`, 185, rowY, { align: 'right' });
+
+    doc.line(20, rowY + 14, 190, rowY + 14);
+
+    // Totals
+    const totalsY = rowY + 24;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Subtotal:', 140, totalsY, { align: 'right' });
+    doc.text(`Rs. ${amount.toFixed(2)}`, 185, totalsY, { align: 'right' });
+
+    doc.text('Taxes & Gateway Fees:', 140, totalsY + 6, { align: 'right' });
+    doc.text('Rs. 0.00', 185, totalsY + 6, { align: 'right' });
+
+    doc.setFontSize(12);
+    doc.setTextColor(16, 185, 129);
+    doc.text('Total Paid:', 140, totalsY + 14, { align: 'right' });
+    doc.text(`Rs. ${amount.toFixed(2)}`, 185, totalsY + 14, { align: 'right' });
+
+    // Payment Status Box
+    doc.setDrawColor(16, 185, 129);
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(20, totalsY + 2, 75, 20, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(21, 128, 61);
+    doc.text('PAYMENT STATUS: CONFIRMED & PAID', 25, totalsY + 9);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`Method: Online Gateway (${subscription.gateway || 'Verified'})`, 25, totalsY + 16);
+
+    // Terms and Footer
+    const footerY = 250;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Terms & Conditions:', 20, footerY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('1. This invoice is electronically generated and digitally authenticated by DigiMoms.', 20, footerY + 5);
+    doc.text('2. Subscription charges grant continuous access to DigiMoms Restaurant OS for the active billing cycle.', 20, footerY + 9);
+    doc.text('3. For billing disputes or technical assistance, contact support@digimoms.in.', 20, footerY + 13);
+
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.text('Thank you for partnering with DigiMoms Smart Restaurant OS!', 105, 280, { align: 'center' });
+
+    doc.save(`DigiMoms_Invoice_${invoiceNumber}.pdf`);
+  } catch (err) {
+    console.error("Subscription PDF Generation Error:", err);
+    alert("Could not generate tax invoice PDF. Please try again.");
+  }
+}
+

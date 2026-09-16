@@ -33,8 +33,9 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
           <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1.5 mt-1">
             <p><strong className="text-white">Legal Operator:</strong> Tanmoy Jana</p>
             <p><strong className="text-white">Trade Name:</strong> DigiMoms Marketing Agency</p>
-            <p><strong className="text-white">Address:</strong> Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144</p>
-            <p><strong className="text-white">Email:</strong> tanmoy4945@gmail.com / support@digimoms.com</p>
+            <p><strong className="text-white">Address:</strong> Sabang, Paschim Medinipur, West Bengal, 721144</p>
+            <p><strong className="text-white">Official Email:</strong> digimomsagency@gmail.com</p>
+            <p><strong className="text-white">CEO Touch Email:</strong> tanmoy4945@gmail.com</p>
             <p><strong className="text-white">WhatsApp Support:</strong> 24 Hours Active (+91 9475388085)</p>
             <p><strong className="text-white">Office Hours:</strong> Mon - Sat (10 AM - 9 PM IST)</p>
           </div>
@@ -53,7 +54,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
           <p>By registering, accessing, or using the DigiMoms Smart Restaurant OS, you agree to be bound by these Terms and Conditions.</p>
 
           <h3 className="font-bold text-white text-base pt-2">1. Operating Entity & Legal Ownership</h3>
-          <p>The platform, services, and software are legally operated by <strong>Tanmoy Jana</strong> under the trade name <strong>DigiMoms Marketing Agency</strong>, located at <strong>Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144</strong>.</p>
+          <p>The platform, services, and software are legally operated by <strong>Tanmoy Jana</strong> under the trade name <strong>DigiMoms Marketing Agency</strong>, located at <strong>Sabang, Paschim Medinipur, West Bengal, 721144</strong>.</p>
 
           <h3 className="font-bold text-white text-base pt-2">2. SaaS Subscription & 15-Day Free Trial</h3>
           <p>New restaurants are provided a 15-day free trial period to evaluate all features of the operating system. Subscriptions can be activated or renewed at ₹999/month (INR) without losing existing restaurant data or invoice history.</p>
@@ -86,7 +87,8 @@ export const LegalModal: React.FC<LegalModalProps> = ({ type = 'privacy', onClos
           <div className="text-xs text-slate-300 space-y-1">
             <p><strong>WhatsApp Support:</strong> 24 Hours Active (+91 9475388085)</p>
             <p><strong>Office Hours:</strong> Mon - Sat (10 AM - 9 PM IST)</p>
-            <p><strong>Email:</strong> support@digimoms.com / tanmoy4945@gmail.com</p>
+            <p><strong>Official Email:</strong> digimomsagency@gmail.com</p>
+            <p><strong>CEO Touch Email:</strong> tanmoy4945@gmail.com</p>
           </div>
         </div>
       )

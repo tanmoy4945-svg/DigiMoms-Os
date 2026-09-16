@@ -69,7 +69,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
     isCompletedRef.current = true;
     setIsSuccessConfirmed(true);
     setErrorMessage('');
-    setStatusMessage('Payment verified successfully by Razorpay Gateway!');
+    setStatusMessage('Payment verified successfully!');
 
     setTimeout(() => {
       onSuccess(data);
@@ -118,7 +118,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
                   amount
                 });
               } else {
-                setErrorMessage('Razorpay payment signature mismatch.');
+                setErrorMessage('Payment verification signature mismatch.');
               }
             } catch (err: any) {
               setErrorMessage('Verification failed: ' + err.message);
@@ -137,7 +137,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
         rzp.open();
         return true;
       } catch (err) {
-        console.warn('Razorpay native open warning:', err);
+        console.warn('Payment window open warning:', err);
       }
     }
     return false;
@@ -173,12 +173,12 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
 
         if (ok && createRes && createRes.id) {
           setRzpOrderId(createRes.id);
-          setStatusMessage('Razorpay secure checkout active.');
+          setStatusMessage('Secure payment session active.');
         } else {
-          setErrorMessage(createRes?.error || fetchErr || 'Could not initialize Razorpay.');
+          setErrorMessage(createRes?.error || fetchErr || 'Could not initialize payment gateway.');
         }
       } catch (err: any) {
-        if (isMounted) setErrorMessage(err.message || 'Razorpay connection error.');
+        if (isMounted) setErrorMessage(err.message || 'Payment gateway connection error.');
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -193,8 +193,8 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
 
   if (!isOpen) return null;
 
-  const upiIdSample = 'razorpay.digimoms@icici';
-  const qrString = `upi://pay?pa=${upiIdSample}&pn=${encodeURIComponent(restaurantName || 'DigiMoms Restaurant')}&am=${amount}&tn=${encodeURIComponent(rzpOrderId || 'Food Order')}&cu=INR`;
+  const upiIdSample = 'online.checkout@upi';
+  const qrString = `upi://pay?pa=${upiIdSample}&pn=${encodeURIComponent(restaurantName || 'Restaurant')}&am=${amount}&tn=${encodeURIComponent(rzpOrderId || 'Order')}&cu=INR`;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrString)}`;
 
   return (
@@ -212,7 +212,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="font-black text-white text-sm tracking-tight">{title}</h3>
                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-950 text-blue-300 border border-blue-500/40 uppercase">
-                  Razorpay Live
+                  Online Payment
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">{subtitle || (restaurantName ? `Paying to ${restaurantName}` : 'Instant UPI & Card Checkout')}</p>
@@ -322,7 +322,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
             {activeTab === 'qr' && (
               <div className="flex flex-col items-center justify-center p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <p className="text-[11px] text-slate-400 text-center font-medium">
-                  Scan using Google Pay, PhonePe, Paytm, or any UPI app
+                  Scan using any UPI app on your mobile device
                 </p>
                 <div className="p-2.5 bg-white rounded-2xl shadow-xl">
                   <img src={qrCodeUrl} alt="UPI QR Code" className="w-40 h-40 object-contain" />
@@ -335,10 +335,10 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
             {activeTab === 'card' && (
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
                 <p className="text-slate-300 font-medium">
-                  Securely processed by Razorpay Gateway (Visa, MasterCard, RuPay, Maestro).
+                  Securely processed with 256-Bit Bank Grade Encryption (Visa, MasterCard, RuPay, Maestro).
                 </p>
                 <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/30 text-blue-200 text-[11px]">
-                  Click below to open Razorpay 3D-Secure card payment window.
+                  Click below to open secure 3D-Secure card payment window.
                 </div>
               </div>
             )}
@@ -350,7 +350,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
                   Supported Banks: HDFC, ICICI, SBI, Axis, Kotak, PNB & all major Indian Banks.
                 </p>
                 <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/30 text-blue-200 text-[11px]">
-                  Click below to checkout via Razorpay Net Banking.
+                  Click below to checkout via Instant Net Banking.
                 </div>
               </div>
             )}
@@ -378,11 +378,11 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Preparing Razorpay Gateway...
+                    <Loader2 className="w-4 h-4 animate-spin" /> Preparing Secure Gateway...
                   </>
                 ) : (
                   <>
-                    <Lock className="w-4 h-4" /> Open Razorpay & Pay ₹{amount.toFixed(2)}
+                    <Lock className="w-4 h-4" /> Open Payment Window & Pay ₹{amount.toFixed(2)}
                   </>
                 )}
               </button>
@@ -474,7 +474,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
           <span className="flex items-center gap-1">
             <ShieldCheck className="w-3 h-3 text-emerald-400" /> 256-Bit SSL Encrypted
           </span>
-          <span>Official Razorpay India Gateway</span>
+          <span>Official Encrypted Payment Gateway</span>
         </div>
       </div>
     </div>

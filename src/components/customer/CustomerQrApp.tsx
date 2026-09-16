@@ -9,6 +9,7 @@ import {
 import { t } from '../../utils/i18n';
 import { CallWaiterModal } from './CallWaiterModal';
 import { FeedbackModal } from './FeedbackModal';
+import { BottomFeedbackSection } from './BottomFeedbackSection';
 import { BillModal } from '../common/BillModal';
 import { PayUCheckoutModal } from '../common/PayUCheckoutModal';
 import { PhonePeCheckoutModal } from '../common/PhonePeCheckoutModal';
@@ -991,6 +992,18 @@ export const CustomerQrApp: React.FC = () => {
                       <ShoppingBag className="w-5 h-5" /> Order Now
                     </button>
                   </div>
+
+                  {/* Feedback Section at bottom of page after order is placed */}
+                  {(activeSessionOrders.length > 0 || lastPlacedOrder !== null) && (
+                    <div className="w-full pt-4">
+                      <BottomFeedbackSection
+                        restaurantId={restaurant.id}
+                        tableNumber={table.table_number}
+                        orderId={activeSessionOrders[0]?.id || lastPlacedOrder?.id}
+                        customerMobile={customerMobile}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1390,6 +1403,18 @@ export const CustomerQrApp: React.FC = () => {
                 );
               })}
             </div>
+
+            {/* Bottom Feedback Section on Menu Page after order is placed */}
+            {(activeSessionOrders.length > 0 || lastPlacedOrder !== null) && (
+              <div className="w-full pt-6">
+                <BottomFeedbackSection
+                  restaurantId={restaurant.id}
+                  tableNumber={table.table_number}
+                  orderId={activeSessionOrders[0]?.id || lastPlacedOrder?.id}
+                  customerMobile={customerMobile}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -2022,12 +2047,25 @@ export const CustomerQrApp: React.FC = () => {
 
             <div className="space-y-2 pt-1">
               <button
+                id="btn-order-success-rate"
+                onClick={() => {
+                  const ordId = lastPlacedOrder.id;
+                  setLastPlacedOrder(null);
+                  setFeedbackOrder(ordId);
+                }}
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs transition-all flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
+              >
+                <Star className="w-4 h-4 fill-slate-950 text-slate-950" />
+                Rate Food & Dining Experience (মতামত দিন)
+              </button>
+
+              <button
                 id="btn-order-success-go-to-home"
                 onClick={() => {
                   setLastPlacedOrder(null);
                   setCustomerStep('welcome');
                 }}
-                className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2"
               >
                 <Home className="w-4 h-4" />
                 Go to Home

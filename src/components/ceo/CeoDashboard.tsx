@@ -4,7 +4,7 @@ import { SmartImage } from '../common/SmartImage';
 import {
   Building2, Plus, Search, ShieldCheck, DollarSign, Calendar,
   AlertTriangle, RefreshCw, Archive, RotateCcw, Power, Eye, LogOut,
-  Database, Star, FileText, Phone, CreditCard, Edit3, Settings, Sparkles, CheckCircle2, Trash2, Loader2, Globe
+  Database, Star, FileText, Phone, CreditCard, Edit3, Settings, Sparkles, CheckCircle2, Trash2, Loader2, Globe, Gift, History
 } from 'lucide-react';
 import { SqlSchemaViewer } from './SqlSchemaViewer';
 import { CeoPaymentSettings } from './CeoPaymentSettings';
@@ -89,6 +89,7 @@ export const CeoDashboard: React.FC = () => {
     renewRestaurantMonthly,
     archiveRestaurant,
     deleteRestaurantPermanently,
+    deleteOldRestaurantData,
     factoryResetRestaurant,
     executeProductionReset,
     logoutCeo,
@@ -96,6 +97,7 @@ export const CeoDashboard: React.FC = () => {
     feedbackList,
     activityLogs,
     subscriptionHistory,
+    grantFreePlan,
     setActiveView,
     setActiveSlug,
     ceoRazorpayConfig,
@@ -114,18 +116,28 @@ export const CeoDashboard: React.FC = () => {
   const [editingRestaurant, setEditingRestaurant] = useState<Restaurant | null>(null);
   const [showRazorpayModal, setShowRazorpayModal] = useState(false);
 
-  // New trial, free offer & extension modals state
+  // Consolidated Free Access Modal state (replaces 3 separate buttons with 1 unified modal)
+  const [showFreePlanModal, setShowFreePlanModal] = useState<Restaurant | null>(null);
+  const [freePlanDaysInput, setFreePlanDaysInput] = useState<number>(30);
+  const [freePlanReasonInput, setFreePlanReasonInput] = useState<string>('Special Festival Promotional Offer');
+  const [isGrantingFreePlan, setIsGrantingFreePlan] = useState<boolean>(false);
+
+  // History Modal with tabs
+  const [showHistoryModal, setShowHistoryModal] = useState<Restaurant | null>(null);
+  const [historyFilterType, setHistoryFilterType] = useState<'all' | 'paid' | 'free'>('all');
+  
+  // Data Deletion Modal
+  const [showDataModal, setShowDataModal] = useState<Restaurant | null>(null);
+  const [isDeletingData, setIsDeletingData] = useState<boolean>(false);
+
+  // Legacy trial & extension modals state (maintained for fallback)
   const [showTrialModal, setShowTrialModal] = useState<Restaurant | null>(null);
   const [trialDaysInput, setTrialDaysInput] = useState<number>(7);
-
   const [showFreeOfferModal, setShowFreeOfferModal] = useState<Restaurant | null>(null);
   const [freeOfferDaysInput, setFreeOfferDaysInput] = useState<number>(7);
-
   const [showExtensionModal, setShowExtensionModal] = useState<Restaurant | null>(null);
   const [extensionDaysInput, setExtensionDaysInput] = useState<number>(10);
   const [extensionReasonInput, setExtensionReasonInput] = useState<string>('CEO Special Complimentary Extension');
-
-  const [showHistoryModal, setShowHistoryModal] = useState<Restaurant | null>(null);
 
   // Controlled Delete / Archive Modal state
   const [showDeleteModal, setShowDeleteModal] = useState<Restaurant | null>(null);
@@ -176,7 +188,10 @@ export const CeoDashboard: React.FC = () => {
     const map = new Map<string, { totalRevenue: number; paidOrdersCount: number }>();
 
     for (const r of restaurants) {
-      map.set(r.id, { totalRevenue: 0, paidOrdersCount: 0 });
+      map.set(r.id, { 
+        totalRevenue: revenuePeriod === 'lifetime' ? (r.archived_revenue || 0) : 0, 
+        paidOrdersCount: revenuePeriod === 'lifetime' ? (r.archived_orders_count || 0) : 0 
+      });
     }
 
     for (const ord of orders) {
@@ -196,7 +211,6 @@ export const CeoDashboard: React.FC = () => {
           const cashAmt = Number(ord.cash_amount || 0);
           amountToAdd = onlineAmt + cashAmt;
         }
-
         if (amountToAdd > 0) {
           const entry = map.get(ord.restaurant_id) || { totalRevenue: 0, paidOrdersCount: 0 };
           entry.totalRevenue += amountToAdd;
@@ -223,6 +237,85 @@ export const CeoDashboard: React.FC = () => {
     .reduce((sum, s) => sum + Number(s.amount || 0), 0);
   const paidSubscriptionsCount = subscriptionHistory
     .filter(s => (s.payment_status?.toLowerCase() === 'paid' || s.payment_status?.toLowerCase() === 'completed') && Number(s.amount) > 0).length;
+
+  // Dedicated Monthly & Yearly Income for CEO Dashboard
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  const {
+    totalCustomerMonthlySales,
+    totalCustomerYearlySales,
+    restaurantMonthlyMap,
+    restaurantYearlyMap
+  } = React.useMemo(() => {
+    let monthlySum = 0;
+    let yearlySum = 0;
+    const monthlyMap = new Map<string, number>();
+    const yearlyMap = new Map<string, number>();
+
+    for (const r of restaurants) {
+      monthlyMap.set(r.id, 0);
+      const archivedYearly = r.archived_revenue_by_year?.[currentYear.toString()] || 0;
+      yearlyMap.set(r.id, archivedYearly);
+      yearlySum += archivedYearly;
+    }
+
+    for (const ord of orders) {
+      if (ord.order_status === 'cancelled') continue;
+      const pStatus = ord.payment_status;
+      const isPaid = pStatus === 'paid' || pStatus === 'paid_live' || pStatus === 'paid_cash' || pStatus === 'paid_demo';
+      const isPartial = pStatus === 'partially_paid' || pStatus === 'partial';
+
+      if (isPaid || isPartial) {
+        const ordDate = new Date(ord.created_at);
+        let amt = 0;
+        if (isPaid) amt = Number(ord.grand_total || 0);
+        else amt = Number(ord.online_amount || 0) + Number(ord.cash_amount || 0);
+
+        if (amt > 0) {
+          if (ordDate.getFullYear() === currentYear) {
+            yearlySum += amt;
+            yearlyMap.set(ord.restaurant_id, (yearlyMap.get(ord.restaurant_id) || 0) + amt);
+
+            if (ordDate.getMonth() === currentMonth) {
+              monthlySum += amt;
+              monthlyMap.set(ord.restaurant_id, (monthlyMap.get(ord.restaurant_id) || 0) + amt);
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      totalCustomerMonthlySales: Math.round(monthlySum),
+      totalCustomerYearlySales: Math.round(yearlySum),
+      restaurantMonthlyMap: monthlyMap,
+      restaurantYearlyMap: yearlyMap
+    };
+  }, [restaurants, orders, currentYear, currentMonth]);
+
+  const { saasMonthlyRevenue, saasYearlyRevenue } = React.useMemo(() => {
+    let mSum = 0;
+    let ySum = 0;
+    for (const sub of subscriptionHistory) {
+      const isPaid = (sub.payment_status?.toLowerCase() === 'paid' || sub.payment_status?.toLowerCase() === 'completed') && Number(sub.amount || sub.amount_paid || 0) > 0;
+      if (isPaid) {
+        const date = new Date(sub.payment_date || sub.created_at);
+        const amt = Number(sub.amount || sub.amount_paid || 0);
+        if (date.getFullYear() === currentYear) {
+          ySum += amt;
+          if (date.getMonth() === currentMonth) {
+            mSum += amt;
+          }
+        }
+      }
+    }
+    return {
+      saasMonthlyRevenue: Math.round(mSum),
+      saasYearlyRevenue: Math.round(ySum)
+    };
+  }, [subscriptionHistory, currentYear, currentMonth]);
 
   const activeCount = restaurants.filter(r => r.status === 'active' || r.status === 'trial').length;
   const trialCount = restaurants.filter(r => r.status === 'trial').length;
@@ -421,49 +514,49 @@ export const CeoDashboard: React.FC = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1 shadow-sm">
           <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
             <span>Total Restaurants</span>
             <Building2 className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-2xl font-extrabold text-white">{restaurants.length}</div>
-          <div className="text-[11px] text-emerald-400 font-medium">{activeCount} Active / In Trial</div>
+          <div className="text-[11px] text-emerald-400 font-medium">{activeCount} Active / Free Tenants</div>
         </div>
 
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
-          <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
-            <span>Platform Revenue</span>
-            <DollarSign className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white">₹{platformRevenue.toLocaleString('en-IN')}</div>
-          <div className="text-[11px] text-purple-300 font-medium">{paidSubscriptionsCount} verified SaaS fees</div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-slate-900 border border-emerald-500/30 bg-emerald-950/10 space-y-1">
+        <div className="p-5 rounded-2xl bg-slate-900 border border-emerald-500/40 bg-emerald-950/20 space-y-1 shadow-sm">
           <div className="text-xs font-semibold text-emerald-400 flex items-center justify-between">
-            <span>Restaurant Sales ({periodLabelMap[revenuePeriod]})</span>
+            <span>Rest. Monthly Income</span>
             <DollarSign className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-extrabold text-emerald-300">₹{totalCustomerSales.toLocaleString('en-IN')}</div>
-          <div className="text-[11px] text-emerald-400/80 font-medium">Settled customer payments</div>
+          <div className="text-2xl font-extrabold text-emerald-300">₹{totalCustomerMonthlySales.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-emerald-400/80 font-medium">{now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })} Sales</div>
         </div>
 
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
-          <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
-            <span>Active Free Trials</span>
-            <Calendar className="w-4 h-4 text-amber-400" />
+        <div className="p-5 rounded-2xl bg-slate-900 border border-teal-500/40 bg-teal-950/20 space-y-1 shadow-sm">
+          <div className="text-xs font-semibold text-teal-400 flex items-center justify-between">
+            <span>Rest. Yearly Income</span>
+            <DollarSign className="w-4 h-4 text-teal-400" />
           </div>
-          <div className="text-2xl font-extrabold text-amber-400">{trialCount}</div>
-          <div className="text-[11px] text-slate-400 font-medium">15-day trial period</div>
+          <div className="text-2xl font-extrabold text-teal-300">₹{totalCustomerYearlySales.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-teal-400/80 font-medium">{currentYear} Full Year Total Sales</div>
         </div>
 
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+        <div className="p-5 rounded-2xl bg-slate-900 border border-purple-500/30 bg-purple-950/10 space-y-1 shadow-sm">
+          <div className="text-xs font-semibold text-purple-400 flex items-center justify-between">
+            <span>SaaS Platform Revenue</span>
+            <DollarSign className="w-4 h-4 text-purple-400" />
+          </div>
+          <div className="text-2xl font-extrabold text-white">₹{saasMonthlyRevenue.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-purple-300 font-medium">This Mo. • Yearly: ₹{saasYearlyRevenue.toLocaleString('en-IN')}</div>
+        </div>
+
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1 shadow-sm">
           <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
             <span>Average Satisfaction</span>
             <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
           </div>
           <div className="text-2xl font-extrabold text-white">{avgOverallRating} / 5.0</div>
-          <div className="text-[11px] text-slate-400 font-medium">{feedbackList.length} total reviews</div>
+          <div className="text-[11px] text-slate-400 font-medium">{feedbackList.length} total customer ratings</div>
         </div>
       </div>
 
@@ -649,13 +742,16 @@ export const CeoDashboard: React.FC = () => {
                     <th className="p-4">Owner & Mobile</th>
                     <th className="p-4">Status & Monthly Rate</th>
                     <th className="p-4">Trial / Sub Expiry</th>
-                    <th className="p-4 text-right">Customer Revenue ({periodLabelMap[revenuePeriod]})</th>
+                    <th className="p-4 text-right">Income (Month & Year)</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {filteredRestaurants.map((rest) => {
                     const revInfo = restaurantRevenueMap.get(rest.id) || { totalRevenue: 0, paidOrdersCount: 0 };
+                    const mSales = restaurantMonthlyMap.get(rest.id) || 0;
+                    const ySales = restaurantYearlyMap.get(rest.id) || 0;
+
                     return (
                     <tr key={rest.id} className="hover:bg-slate-800/40 transition-all">
                       <td className="p-4">
@@ -723,61 +819,66 @@ export const CeoDashboard: React.FC = () => {
                       </td>
 
                       <td className="p-4 text-right">
-                        <div className="font-extrabold text-emerald-400 text-sm font-mono">
-                          ₹{revInfo.totalRevenue.toLocaleString('en-IN')}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-medium">
-                          {revInfo.paidOrdersCount} {revInfo.paidOrdersCount === 1 ? 'settled order' : 'settled orders'}
+                        <div className="space-y-0.5">
+                          <div className="text-emerald-300 font-bold text-xs font-mono">
+                            Mo: ₹{mSales.toLocaleString('en-IN')}
+                          </div>
+                          <div className="text-teal-400 font-semibold text-[11px] font-mono">
+                            Yr: ₹{ySales.toLocaleString('en-IN')}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-medium font-mono">
+                            All: ₹{revInfo.totalRevenue.toLocaleString('en-IN')}
+                          </div>
                         </div>
                       </td>
 
-                      <td className="p-4 text-right space-x-1 whitespace-nowrap">
+                      <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
                         <button
                           onClick={() => setEditingRestaurant(rest)}
-                          className="px-2 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs inline-flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs inline-flex items-center gap-1"
                           title="Edit Details"
                         >
                           <Edit3 className="w-3 h-3" /> Edit
                         </button>
 
+                        {/* Unified Free Access Button replacing separate Trial / Free Offer / Extension buttons */}
                         <button
-                          onClick={() => setShowTrialModal(rest)}
-                          title="CEO Trial Control"
-                          className="px-2 py-1.5 rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-300 font-medium text-xs border border-amber-500/30"
+                          onClick={() => {
+                            setShowFreePlanModal(rest);
+                            setFreePlanDaysInput(30);
+                            setFreePlanReasonInput('Special Promotional Free Offer');
+                          }}
+                          title="Grant Free Days / Offer with Reason"
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-bold text-xs border border-emerald-500/40 inline-flex items-center gap-1 shadow-sm"
                         >
-                          🎁 Trial
-                        </button>
-
-                        <button
-                          onClick={() => setShowFreeOfferModal(rest)}
-                          title="CEO Free Offer Control"
-                          className="px-2 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 font-medium text-xs border border-emerald-500/30"
-                        >
-                          🎉 Free Offer
-                        </button>
-
-                        <button
-                          onClick={() => setShowExtensionModal(rest)}
-                          title="Give Extra Free Days (No Payment)"
-                          className="px-2 py-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900 text-purple-300 font-medium text-xs border border-purple-500/30"
-                        >
-                          ✨ Extension
+                          <Gift className="w-3.5 h-3.5 text-emerald-400" /> Free Access
                         </button>
 
                         <button
                           onClick={() => renewRestaurantMonthly(rest.id, 1)}
                           title="Renew Subscription 1 Month"
-                          className="px-2 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-300 font-medium text-xs border border-blue-500/30"
+                          className="px-2.5 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-300 font-medium text-xs border border-blue-500/30 inline-flex items-center gap-1"
                         >
-                          💳 Renew 1Mo
+                          <CreditCard className="w-3 h-3" /> Renew 1Mo
                         </button>
 
                         <button
-                          onClick={() => setShowHistoryModal(rest)}
-                          title="View Lifetime Renewal & Trial History"
-                          className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700"
+                          onClick={() => {
+                            setShowHistoryModal(rest);
+                            setHistoryFilterType('all');
+                          }}
+                          title="View Subscription Renewal & Free History"
+                          className="px-2.5 py-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900 text-purple-300 font-medium text-xs border border-purple-500/30 inline-flex items-center gap-1"
                         >
-                          📜 History
+                          <History className="w-3 h-3" /> History
+                        </button>
+
+                        <button
+                          onClick={() => setShowDataModal(rest)}
+                          title="Manage Restaurant Data"
+                          className="px-2.5 py-1.5 rounded-lg bg-orange-950/80 hover:bg-orange-900 text-orange-300 font-medium text-xs border border-orange-500/30 inline-flex items-center gap-1"
+                        >
+                          <Database className="w-3 h-3" /> Data
                         </button>
 
                         <button
@@ -1498,7 +1599,125 @@ export const CeoDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* CEO GRANT FREE OFFER MODAL */}
+      {/* CEO UNIFIED GRANT FREE PLAN / ACCESS MODAL */}
+      {showFreePlanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <Gift className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white">Grant Free Plan / Complimentary Access</h3>
+              </div>
+              <button onClick={() => setShowFreePlanModal(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="text-xs text-slate-300 space-y-1 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+              <p className="font-semibold text-white">{showFreePlanModal.name} (<span className="text-purple-400 font-mono">/r/{showFreePlanModal.slug}</span>)</p>
+              <p className="text-slate-400">Current Subscription Expiry: <span className="font-mono text-purple-300 font-bold">{new Date(showFreePlanModal.subscription_end || Date.now()).toLocaleDateString()}</span></p>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold text-slate-300">Select Free Access Duration (Days)</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[7, 15, 30, 60, 90, 180, 365].map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setFreePlanDaysInput(d)}
+                    className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+                      freePlanDaysInput === d
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md font-extrabold'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/50'
+                    }`}
+                  >
+                    {d >= 365 ? '1 Year' : d >= 30 ? `${Math.round(d/30)} Mo` : `${d} Days`}
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Custom Days</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1825"
+                  value={freePlanDaysInput}
+                  onChange={(e) => setFreePlanDaysInput(Math.max(1, Number(e.target.value)))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  placeholder="Enter custom days..."
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-300">
+                    Reason / Kiser Jonno Dichhi (Mandatory)
+                  </label>
+                  <span className="text-[10px] text-emerald-400 font-mono">Recorded in History</span>
+                </div>
+                <input
+                  type="text"
+                  value={freePlanReasonInput}
+                  onChange={(e) => setFreePlanReasonInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-emerald-500"
+                  placeholder="e.g. Festival Offer / New Tenant Onboarding / VIP Courtesy"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {[
+                    'Festival / উৎসব Promotional Offer',
+                    'New Onboarding Welcome Trial',
+                    'Loyalty Complimentary Perk',
+                    'Customer Satisfaction Service Credit'
+                  ].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setFreePlanReasonInput(preset)}
+                      className="text-[10px] px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowFreePlanModal(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isGrantingFreePlan || !freePlanDaysInput}
+                onClick={async () => {
+                  try {
+                    setIsGrantingFreePlan(true);
+                    await grantFreePlan(
+                      showFreePlanModal.id,
+                      freePlanDaysInput,
+                      freePlanReasonInput || 'Promotional Free Access',
+                      'CEO SuperAdmin'
+                    );
+                    setShowFreePlanModal(null);
+                  } finally {
+                    setIsGrantingFreePlan(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Gift className="w-3.5 h-3.5" />
+                {isGrantingFreePlan ? 'Granting...' : `Confirm +${freePlanDaysInput} Free Days`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CEO GRANT FREE OFFER MODAL (LEGACY FALLBACK) */}
       {showFreeOfferModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
@@ -1513,206 +1732,246 @@ export const CeoDashboard: React.FC = () => {
             <div className="text-xs text-slate-300 space-y-1">
               <p className="font-semibold text-white">{showFreeOfferModal.name} (<span className="text-purple-400 font-mono">/r/{showFreeOfferModal.slug}</span>)</p>
               <p className="text-slate-400">Current Status: <span className="font-bold text-emerald-300 uppercase">{showFreeOfferModal.free_offer_status || 'OFF'}</span></p>
-              {showFreeOfferModal.free_offer_end && (
-                <p className="text-slate-400 text-[11px]">Offer Expiry: {new Date(showFreeOfferModal.free_offer_end).toLocaleString()}</p>
-              )}
             </div>
 
-            <div className="space-y-3">
-              <label className="block text-xs font-semibold text-slate-300">Select or Enter Free Offer Duration (Days)</label>
-              <div className="grid grid-cols-4 gap-2">
-                {[7, 10, 14, 30].map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setFreeOfferDaysInput(d)}
-                    className={`py-2 text-xs font-bold rounded-xl border transition-all ${
-                      freeOfferDaysInput === d
-                        ? 'bg-emerald-500 text-black border-emerald-400 shadow-md'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/50'
-                    }`}
-                  >
-                    {d} Days
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <input
-                  type="number"
-                  min="1"
-                  max="365"
-                  value={freeOfferDaysInput}
-                  onChange={(e) => setFreeOfferDaysInput(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-emerald-500"
-                  placeholder="Custom days..."
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-3 pt-2">
-              {showFreeOfferModal.free_offer_status === 'active' ? (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await endFreeOffer(showFreeOfferModal.id);
-                    setShowFreeOfferModal(null);
-                  }}
-                  className="px-3 py-2 rounded-xl bg-rose-950 text-rose-300 border border-rose-800 hover:bg-rose-900 font-bold text-xs"
-                >
-                  Cancel Free Offer
-                </button>
-              ) : <div />}
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowFreeOfferModal(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    await grantFreeOffer(showFreeOfferModal.id, freeOfferDaysInput);
-                    setShowFreeOfferModal(null);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20"
-                >
-                  Give {freeOfferDaysInput}-Day Free Offer
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CEO FREE EXTENSION MODAL */}
-      {showExtensionModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-purple-400">
-                <Sparkles className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Grant Free Extra Days</h3>
-              </div>
-              <button onClick={() => setShowExtensionModal(null)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-
-            <div className="text-xs text-slate-300 space-y-1">
-              <p className="font-semibold text-white">{showExtensionModal.name}</p>
-              <p className="text-slate-400">Current Subscription Expiry: <span className="font-mono text-purple-300 font-bold">{new Date(showExtensionModal.subscription_end || Date.now()).toLocaleDateString()}</span></p>
-            </div>
-
-            <div className="space-y-3">
-              <label className="block text-xs font-semibold text-slate-300">Free Extra Days</label>
-              <div className="grid grid-cols-4 gap-2">
-                {[7, 10, 15, 30].map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setExtensionDaysInput(d)}
-                    className={`py-2 text-xs font-bold rounded-xl border transition-all ${
-                      extensionDaysInput === d
-                        ? 'bg-purple-600 text-white border-purple-400 shadow-md'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-purple-500/50'
-                    }`}
-                  >
-                    +{d} Days
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Reason / Note for Record</label>
-                <input
-                  type="text"
-                  value={extensionReasonInput}
-                  onChange={(e) => setExtensionReasonInput(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-purple-500"
-                  placeholder="e.g. CEO Complimentary Extension"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2">
               <button
-                onClick={() => setShowExtensionModal(null)}
+                onClick={() => setShowFreeOfferModal(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
               >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  await grantFreeExtension(showExtensionModal.id, extensionDaysInput, extensionReasonInput);
-                  setShowExtensionModal(null);
-                }}
-                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs shadow-lg shadow-purple-600/30"
-              >
-                Grant +{extensionDaysInput} Free Days
+                Close
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* LIFETIME SUBSCRIPTION RENEWAL HISTORY MODAL */}
+      {/* LIFETIME SUBSCRIPTION RENEWAL & FREE HISTORY MODAL */}
+
+      {/* DATA ARCHIVE MODAL */}
+      {showDataModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Database className="w-5 h-5 text-orange-400" />
+                  Manage Restaurant Data
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-1">Surgical Data Deletion for {showDataModal.name}</p>
+              </div>
+              <button onClick={() => setShowDataModal(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-orange-950/20 border border-orange-500/20 rounded-xl space-y-2">
+                <div className="flex gap-2">
+                  <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
+                  <div className="text-xs text-orange-200">
+                    <p className="font-semibold mb-1">Data Deletion Policy</p>
+                    <p>DigiMoms is authorized to request data deletion every 6 to 12 months as per the Service Agreement. This action removes raw order records while preserving:</p>
+                    <ul className="list-disc ml-4 mt-2 text-[10px] text-orange-300 space-y-1">
+                      <li>Lifetime Income tracking (adds deleted revenue to archive)</li>
+                      <li>Current Year Income tracking</li>
+                      <li>Orders from the last 7 days</li>
+                      <li>Subscription & Free Access History</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={async () => {
+                    setIsDeletingData(true);
+                    try {
+                      const count = await deleteOldRestaurantData(showDataModal.id, '6m');
+                      showToast(`Successfully archived ${count} orders older than 6 months.`, 'success');
+                      setShowDataModal(null);
+                    } catch (e: any) {
+                      showToast(e.message || 'Error deleting data', 'error');
+                    } finally {
+                      setIsDeletingData(false);
+                    }
+                  }}
+                  disabled={isDeletingData}
+                  className="py-3 px-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold text-white flex flex-col items-center justify-center gap-1 border border-slate-700 transition-colors disabled:opacity-50"
+                >
+                  {isDeletingData ? <Loader2 className="w-4 h-4 animate-spin text-orange-400" /> : <Trash2 className="w-4 h-4 text-orange-400" />}
+                  <span>Delete &gt; 6 Months Data</span>
+                </button>
+                <button
+                  onClick={async () => {
+                    setIsDeletingData(true);
+                    try {
+                      const count = await deleteOldRestaurantData(showDataModal.id, '1y');
+                      showToast(`Successfully archived ${count} orders older than 1 year.`, 'success');
+                      setShowDataModal(null);
+                    } catch (e: any) {
+                      showToast(e.message || 'Error deleting data', 'error');
+                    } finally {
+                      setIsDeletingData(false);
+                    }
+                  }}
+                  disabled={isDeletingData}
+                  className="py-3 px-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold text-white flex flex-col items-center justify-center gap-1 border border-slate-700 transition-colors disabled:opacity-50"
+                >
+                  {isDeletingData ? <Loader2 className="w-4 h-4 animate-spin text-orange-400" /> : <Archive className="w-4 h-4 text-orange-400" />}
+                  <span>Delete &gt; 1 Year Data</span>
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowDataModal(null)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {showHistoryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 space-y-5 shadow-2xl max-h-[85vh] flex flex-col">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-5 shadow-2xl max-h-[88vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
               <div>
-                <h3 className="text-base font-bold text-white">Lifetime Subscription History</h3>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <History className="w-5 h-5 text-purple-400" />
+                  Renewal & Free Offer History
+                </h3>
                 <p className="text-xs text-purple-400 font-medium">{showHistoryModal.name} (/r/{showHistoryModal.slug})</p>
               </div>
               <button onClick={() => setShowHistoryModal(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
 
-            <div className="overflow-y-auto custom-scrollbar grow">
-              {subscriptionHistory.filter(s => s.restaurant_id === showHistoryModal.id).length === 0 ? (
-                <div className="text-center py-12 text-slate-500 text-xs">
-                  No previous renewal or trial transaction history found for this restaurant.
-                </div>
-              ) : (
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px]">
-                    <tr>
-                      <th className="p-3">Date</th>
-                      <th className="p-3">Type / Plan</th>
-                      <th className="p-3">Duration</th>
-                      <th className="p-3">Amount</th>
-                      <th className="p-3">Payment ID / Mode</th>
-                      <th className="p-3">New Expiry</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
-                    {subscriptionHistory
-                      .filter(s => s.restaurant_id === showHistoryModal.id)
-                      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                      .map((h) => (
-                        <tr key={h.id} className="hover:bg-slate-800/40">
-                          <td className="p-3 text-slate-400">{new Date(h.created_at).toLocaleDateString()}</td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[9px] ${
-                              h.subscription_type === 'RENEWAL' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' :
-                              h.subscription_type === 'TRIAL' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
-                              'bg-purple-950 text-purple-300 border border-purple-800'
-                            }`}>
-                              {h.subscription_type || 'RENEWAL'}
-                            </span>
-                          </td>
-                          <td className="p-3 text-slate-200">{h.duration_months ? `${h.duration_months}Mo` : `${h.days_added} Days`}</td>
-                          <td className="p-3 text-emerald-400 font-bold">₹{h.amount || 0}</td>
-                          <td className="p-3 text-slate-400">
-                            <div>{h.razorpay_payment_id || h.payment_id || 'N/A'}</div>
-                            <div className="text-[10px] text-purple-400 uppercase">{h.payment_mode}</div>
-                          </td>
-                          <td className="p-3 text-purple-300 font-bold">{new Date(h.end_date || h.new_expiry).toLocaleDateString()}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            {/* Filter Tabs */}
+            {(() => {
+              const allItems = subscriptionHistory
+                .filter(s => s.restaurant_id === showHistoryModal.id)
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+              const paidItems = allItems.filter(h => {
+                const type = (h.subscription_type || '').toUpperCase();
+                const isPaidStatus = h.payment_status?.toLowerCase() === 'paid' || h.payment_status?.toLowerCase() === 'completed';
+                return (type === 'RENEWAL' || isPaidStatus) && Number(h.amount || h.amount_paid || 0) > 0;
+              });
+              const freeItems = allItems.filter(h => {
+                const type = (h.subscription_type || '').toUpperCase();
+                const isFree = type === 'FREE' || type === 'TRIAL' || type === 'FREE_OFFER' || type === 'FREE_EXTENSION' || Number(h.amount || h.amount_paid || 0) === 0;
+                return isFree;
+              });
+
+              const displayedItems = historyFilterType === 'paid' ? paidItems : historyFilterType === 'free' ? freeItems : allItems;
+
+              return (
+                <>
+                  <div className="flex items-center gap-2 border-b border-slate-800 pb-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryFilterType('all')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        historyFilterType === 'all'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      All Records ({allItems.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHistoryFilterType('paid')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        historyFilterType === 'paid'
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <CreditCard className="w-3.5 h-3.5" />
+                      💳 Paid Renewals ({paidItems.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHistoryFilterType('free')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        historyFilterType === 'free'
+                          ? 'bg-amber-600 text-white shadow-md'
+                          : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <Gift className="w-3.5 h-3.5" />
+                      🎁 Free & Promotional Offers ({freeItems.length})
+                    </button>
+                  </div>
+
+                  <div className="overflow-y-auto custom-scrollbar grow">
+                    {displayedItems.length === 0 ? (
+                      <div className="text-center py-12 text-slate-500 text-xs">
+                        No transactions found for the selected filter.
+                      </div>
+                    ) : (
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px] sticky top-0 border-b border-slate-800">
+                          <tr>
+                            <th className="p-3">Date</th>
+                            <th className="p-3">Type</th>
+                            <th className="p-3">Duration</th>
+                            <th className="p-3">Amount</th>
+                            <th className="p-3">Reason / Purpose</th>
+                            <th className="p-3">Reference / Mode</th>
+                            <th className="p-3">New Expiry</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                          {displayedItems.map((h) => {
+                            const isFree = (h.subscription_type || '').toUpperCase() !== 'RENEWAL' || Number(h.amount || h.amount_paid || 0) === 0;
+
+                            return (
+                              <tr key={h.id} className="hover:bg-slate-800/40">
+                                <td className="p-3 text-slate-400 whitespace-nowrap">
+                                  {new Date(h.created_at).toLocaleDateString()}
+                                </td>
+                                <td className="p-3">
+                                  <span className={`px-2 py-0.5 rounded font-bold uppercase text-[9px] ${
+                                    isFree
+                                      ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                      : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                  }`}>
+                                    {h.subscription_type || (isFree ? 'FREE OFFER' : 'PAID RENEWAL')}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-slate-200 whitespace-nowrap">
+                                  {h.duration_months ? `${h.duration_months} Month(s)` : `${h.days_added || 30} Days`}
+                                </td>
+                                <td className="p-3 font-bold whitespace-nowrap">
+                                  {Number(h.amount || h.amount_paid || 0) > 0 ? (
+                                    <span className="text-emerald-400">₹{h.amount || h.amount_paid}</span>
+                                  ) : (
+                                    <span className="text-amber-400 font-bold">FREE (₹0)</span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-slate-300 font-sans max-w-xs truncate" title={h.reason || h.notes || 'N/A'}>
+                                  {h.reason || h.notes || (isFree ? 'Promotional Complimentary Access' : 'Monthly Subscription Fee')}
+                                </td>
+                                <td className="p-3 text-slate-400">
+                                  <div className="truncate max-w-[140px]" title={h.razorpay_payment_id || h.payment_id || 'N/A'}>
+                                    {h.razorpay_payment_id || h.payment_id || 'Direct Admin Grant'}
+                                  </div>
+                                  <div className="text-[10px] text-purple-400 uppercase">{h.payment_mode || 'N/A'}</div>
+                                </td>
+                                <td className="p-3 text-purple-300 font-bold whitespace-nowrap">
+                                  {new Date(h.end_date || h.new_expiry).toLocaleDateString()}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
 
             <div className="flex items-center justify-end border-t border-slate-800 pt-3 shrink-0">
               <button

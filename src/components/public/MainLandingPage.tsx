@@ -336,7 +336,7 @@ export const MainLandingPage: React.FC = () => {
                 <span className="px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">{t.journeyFounder}</span>
                 <span className="px-3 py-1 rounded-lg bg-slate-800 border border-slate-700">{t.journeyEstablished}</span>
                 <span className="px-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-amber-400" /> Andulia, Sabang, Paschim Medinipur, WB
+                  <MapPin className="w-3 h-3 text-amber-400" /> Sabang, Paschim Medinipur, West Bengal
                 </span>
               </div>
               <p className="text-slate-300 text-sm leading-relaxed pt-2">

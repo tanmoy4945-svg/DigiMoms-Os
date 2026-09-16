@@ -83,7 +83,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
     isCompletedRef.current = true;
     setIsSuccessConfirmed(true);
     setErrorMessage('');
-    setStatusMessage('Payment verified successfully by PhonePe Gateway!');
+    setStatusMessage('Payment verified successfully!');
 
     if (pollingTimerRef.current) {
       clearInterval(pollingTimerRef.current);
@@ -127,7 +127,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
           mode: data.mode || 'phonepe'
         });
       } else if (isManual) {
-        setErrorMessage(data?.message || 'Payment not detected yet. Please complete payment in your PhonePe / UPI app and click verify again.');
+        setErrorMessage(data?.message || 'Payment not detected yet. Please complete payment in your UPI app and click verify again.');
       }
     } catch (err: any) {
       if (isManual) {
@@ -181,12 +181,12 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
           if (createRes.payUrl) {
             setPayUrl(createRes.payUrl);
           }
-          setStatusMessage('PhonePe secure session active. Complete payment to confirm.');
+          setStatusMessage('Secure payment session active. Complete payment to confirm.');
         } else {
-          setErrorMessage(createRes?.error || fetchErr || 'Could not initialize PhonePe payment.');
+          setErrorMessage(createRes?.error || fetchErr || 'Could not initialize payment gateway.');
         }
       } catch (err: any) {
-        if (isMounted) setErrorMessage(err.message || 'Connection error with PhonePe.');
+        if (isMounted) setErrorMessage(err.message || 'Connection error with payment gateway.');
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -250,7 +250,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="font-black text-white text-sm tracking-tight">{title}</h3>
                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-purple-950 text-purple-300 border border-purple-500/40 uppercase">
-                  PhonePe Live
+                  Online Payment
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">{subtitle || (restaurantName ? `Paying to ${restaurantName}` : 'Instant UPI & Card Checkout')}</p>
@@ -361,7 +361,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
             {activeTab === 'qr' && (
               <div className="flex flex-col items-center justify-center p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <p className="text-[11px] text-slate-400 text-center font-medium">
-                  Scan using PhonePe, Google Pay, Paytm, or any banking app
+                  Scan using any UPI or banking app on your mobile device
                 </p>
                 <div className="p-2.5 bg-white rounded-2xl shadow-xl">
                   <img src={qrCodeUrl} alt="UPI QR Code" className="w-40 h-40 object-contain" />
@@ -374,10 +374,10 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
             {activeTab === 'card' && (
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
                 <p className="text-slate-300 font-medium">
-                  Securely processed by PhonePe Payment Gateway (Visa, MasterCard, RuPay, Maestro).
+                  Securely processed with 256-Bit Bank Grade Encryption (Visa, MasterCard, RuPay, Maestro).
                 </p>
                 <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-[11px]">
-                  Click below to open PhonePe 3D-Secure card checkout window.
+                  Click below to open secure 3D-Secure card checkout window.
                 </div>
               </div>
             )}
@@ -389,7 +389,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
                   Supported Banks: SBI, HDFC, ICICI, Axis, PNB, Kotak, Bank of Baroda & 50+ others.
                 </p>
                 <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-[11px]">
-                  Click below to route securely through PhonePe Net Banking portal.
+                  Click below to route securely through Instant Net Banking portal.
                 </div>
               </div>
             )}
@@ -422,11 +422,11 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Preparing PhonePe Gateway...
+                    <Loader2 className="w-4 h-4 animate-spin" /> Preparing Secure Gateway...
                   </>
                 ) : (
                   <>
-                    <Lock className="w-4 h-4" /> Open PhonePe & Pay ₹{amount.toFixed(2)}
+                    <Lock className="w-4 h-4" /> Open Payment Window & Pay ₹{amount.toFixed(2)}
                   </>
                 )}
               </button>
@@ -489,7 +489,7 @@ export const PhonePeCheckoutModal: React.FC<PhonePeCheckoutModalProps> = ({
           <span className="flex items-center gap-1">
             <ShieldCheck className="w-3 h-3 text-emerald-400" /> 256-Bit Encrypted
           </span>
-          <span>Official PhonePe Merchant Gateway</span>
+          <span>Official Encrypted Payment Gateway</span>
         </div>
       </div>
     </div>

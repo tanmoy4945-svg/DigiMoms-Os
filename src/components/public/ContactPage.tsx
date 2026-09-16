@@ -53,9 +53,9 @@ export const ContactPage: React.FC = () => {
               <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
                 <Mail className="w-6 h-6 text-purple-400 shrink-0" />
                 <div>
-                  <div className="text-xs font-semibold text-slate-400 uppercase">Support Email</div>
-                  <div className="text-base font-bold text-white">support@digimoms.com</div>
-                  <div className="text-xs text-slate-400">tanmoy4945@gmail.com</div>
+                  <div className="text-xs font-semibold text-slate-400 uppercase">Official Email</div>
+                  <div className="text-base font-bold text-white">digimomsagency@gmail.com</div>
+                  <div className="text-xs text-slate-400 font-medium mt-0.5">CEO Touch Email: <span className="text-purple-300">tanmoy4945@gmail.com</span></div>
                 </div>
               </div>
 
@@ -63,7 +63,7 @@ export const ContactPage: React.FC = () => {
                 <MapPin className="w-6 h-6 text-amber-400 shrink-0" />
                 <div>
                   <div className="text-xs font-semibold text-slate-400 uppercase">Registered Address</div>
-                  <div className="text-sm font-bold text-white">Andulia, Lachhmi Chak, Sabang, Paschim Medinipur</div>
+                  <div className="text-sm font-bold text-white">Sabang, Paschim Medinipur</div>
                   <div className="text-xs text-slate-400">West Bengal, 721144, India</div>
                 </div>
               </div>

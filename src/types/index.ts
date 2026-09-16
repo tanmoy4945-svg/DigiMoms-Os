@@ -50,6 +50,9 @@ export interface Restaurant {
   refund_cancellation_policy?: string;
   shipping_delivery_policy?: string;
   contact_us_info?: string;
+  archived_revenue?: number;
+  archived_orders_count?: number;
+  archived_revenue_by_year?: Record<string, number>;
   payment_mode: PaymentMode; // 'demo' | 'live'
   live_gateway?: 'razorpay' | 'phonepe' | 'payu';
   razorpay_key: string;
@@ -99,6 +102,9 @@ export interface Restaurant {
   free_offer_start?: string;
   free_offer_end?: string;
   free_offer_granted_by?: string;
+  custom_domain?: string;
+  custom_domain_verified?: boolean;
+  last_password_change?: string;
   theme: string;
   language: Language;
   timezone: string;
@@ -112,6 +118,7 @@ export interface Staff {
   name: string;
   mobile: string;
   password_hash?: string;
+  last_password_change?: string;
   role: 'waiter' | 'kitchen' | 'manager';
   status: 'active' | 'disabled';
   last_login?: string;
@@ -262,13 +269,17 @@ export interface PaymentTransaction {
 export interface CustomerFeedback {
   id: string;
   restaurant_id: string;
-  order_id: string;
-  table_number: string;
+  order_id?: string;
+  table_number?: string;
   food_rating: number; // 1-5
   service_rating: number;
   cleanliness_rating: number;
   overall_rating: number;
   comment: string;
+  customer_name?: string;
+  customer_mobile?: string;
+  guest_name?: string;
+  is_public?: boolean;
   created_at: string;
 }
 
@@ -319,6 +330,9 @@ export interface SubscriptionHistory {
   restaurant_id: string;
   plan_name?: string;
   amount: number;
+  amount_paid?: number;
+  payment_date?: string;
+  transaction_id?: string;
   duration_months?: number;
   days_added?: number;
   payment_id?: string;
@@ -376,6 +390,8 @@ export interface RestaurantWebsiteSettings {
   special_offers?: { title: string; code?: string; discount?: string; description?: string }[];
   booking_info?: string;
   website_url?: string;
+  custom_domain?: string;
+  custom_domain_verified?: boolean;
   seo_title?: string;
   seo_description?: string;
   seo_keywords?: string;

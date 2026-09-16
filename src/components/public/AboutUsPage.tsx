@@ -65,7 +65,7 @@ export const AboutUsPage: React.FC = () => {
                   <MapPin className="w-4 h-4 text-amber-400 shrink-0" /> Registered Office Address
                 </div>
                 <div className="text-xs font-semibold text-white leading-snug">
-                  Andulia, Lachhmi Chak, Sabang, Paschim Medinipur
+                  Sabang, Paschim Medinipur
                 </div>
                 <div className="text-xs text-slate-400">
                   West Bengal, 721144, India
@@ -92,10 +92,10 @@ export const AboutUsPage: React.FC = () => {
                   <Mail className="w-4 h-4 text-purple-400 shrink-0" /> Official Email
                 </div>
                 <div className="text-sm font-semibold text-white">
-                  tanmoy4945@gmail.com
+                  digimomsagency@gmail.com
                 </div>
                 <div className="text-xs text-slate-400">
-                  support@digimoms.com
+                  CEO Touch: <span className="text-purple-300">tanmoy4945@gmail.com</span>
                 </div>
               </div>
 

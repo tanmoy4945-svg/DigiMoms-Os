@@ -17,6 +17,7 @@ import { normalizeImageUrl } from '../utils/imageUrl';
 import { registerServiceWorker, triggerSystemNotification } from '../utils/notificationService';
 import { safeFetchJson } from '../lib/safeFetch';
 import { sanitizeSensitiveCredentials } from '../utils/productionSafety';
+import { getRestaurantSubscriptionDetails } from '../utils/subscriptionUtils';
 
 export type ActiveView = 
   | 'public-home' 
@@ -117,10 +118,13 @@ interface SaaSContextType {
   endFreeOffer: (id: string) => Promise<void>;
   extendFreeOffer: (id: string, days: number) => Promise<void>;
   grantFreeExtension: (id: string, days: number, reason?: string) => Promise<void>;
+  grantFreePlan: (id: string, days: number, reason: string) => Promise<void>;
+  grantFreeDays: (id: string, days: number, reason: string, purposeType?: string) => Promise<void>;
   renewSubscription: (id: string, months: number) => Promise<void>;
   renewRestaurantMonthly: (id: string, months?: number, paymentDetails?: { transactionId?: string; mode?: string; razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string; payu_txnid?: string; payu_mihpayid?: string; payu_hash?: string }) => Promise<void>;
   archiveRestaurant: (id: string) => Promise<void>;
   deleteRestaurantPermanently: (id: string) => Promise<void>;
+  deleteOldRestaurantData: (id: string, duration: '6m' | '1y') => Promise<number>;
   factoryResetRestaurant: (id: string, ceoPass: string) => Promise<boolean>;
   executeProductionReset: (ceoPassword?: string) => Promise<boolean>;
 
@@ -128,6 +132,7 @@ interface SaaSContextType {
   loginOwner: (mobile: string, pass: string, rememberMe?: boolean) => Restaurant | null;
   logoutOwner: () => void;
   updateOwnerProfile: (updates: Partial<Restaurant>) => Promise<void>;
+  updateOwnerPassword: (oldPassword: string, newPassword: string) => Promise<boolean>;
   addCategory: (name: string) => Promise<void>;
   updateCategory: (id: string, name: string, is_hidden: boolean) => Promise<void>;
   addMenuItem: (item: Omit<MenuItem, 'id' | 'restaurant_id'>) => Promise<void>;
@@ -292,6 +297,14 @@ const parseRouteFromPath = (
     return { view: 'public-about', shortCode: '', slug: '' };
   }
 
+  // Testing & Simulation parameter support for custom domain (?sim_domain=xyz.com)
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('sim_domain') || params.get('custom_domain')) {
+      return { view: 'public-restaurant', shortCode: '', slug: '' };
+    }
+  }
+
   return { view: 'public-home', shortCode: '', slug: '' };
 };
 
@@ -301,10 +314,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return sessionStorage.getItem('digimoms_ceo_auth') === 'true' || localStorage.getItem('digimoms_ceo_auth') === 'true';
   });
   const [currentOwner, setCurrentOwner] = useState<Restaurant | null>(() => {
-    const savedSession = sessionStorage.getItem('digimoms_current_owner');
-    if (savedSession) return JSON.parse(savedSession);
-    const savedLocal = localStorage.getItem('digimoms_current_owner');
-    if (savedLocal) return JSON.parse(savedLocal);
+    try {
+      const savedSession = sessionStorage.getItem('digimoms_current_owner');
+      if (savedSession) {
+        const parsed = JSON.parse(savedSession);
+        if (parsed?.status === 'suspended') return null;
+        return parsed;
+      }
+      const savedLocal = localStorage.getItem('digimoms_current_owner');
+      if (savedLocal) {
+        const parsed = JSON.parse(savedLocal);
+        if (parsed?.status === 'suspended') return null;
+        return parsed;
+      }
+    } catch { /* ignore */ }
     return null;
   });
   const [currentStaff, setCurrentStaff] = useState<Staff | null>(() => {
@@ -556,6 +579,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const MASTER_CEO_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
       let supaCeoConfig: Partial<CeoPaymentConfig> | null = null;
+      let mergedRestaurants: Restaurant[] = restaurants;
 
       if (restData) {
         // Extract CEO master configuration from Supabase if present
@@ -577,7 +601,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn("Failed to parse digimoms_restaurant_overrides", e);
         }
 
-        const mergedRestaurants = restData
+        mergedRestaurants = (restData as any[])
           .filter((r: any) => r.id !== MASTER_CEO_CONFIG_ID && r.status !== 'system_internal' && r.slug !== 'system-ceo-master-config')
           .map((r: any) => {
             let dbExt: Record<string, any> = {};
@@ -626,6 +650,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             return {
               ...r,
+              custom_domain: r.custom_domain || dbExt.custom_domain || localRest.custom_domain || '',
+              custom_domain_verified: r.custom_domain_verified !== undefined ? Boolean(r.custom_domain_verified) : Boolean(dbExt.custom_domain_verified || false),
               monthly_subscription_fee: ov.monthly_subscription_fee ?? r.monthly_subscription_fee ?? 999,
               trial_days: ov.trial_days ?? r.trial_days ?? 0,
               trial_status: ov.trial_status ?? r.trial_status ?? 'off',
@@ -663,7 +689,30 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               payu_merchant_salt: ov.payu_merchant_salt !== undefined ? ov.payu_merchant_salt : (r.payu_merchant_salt || ''),
               payu_env: ov.payu_env !== undefined ? ov.payu_env : (r.payu_env || 'TEST'),
               gateway_verified: ov.gateway_verified !== undefined ? Boolean(ov.gateway_verified) : (r.gateway_verified ?? false),
-              gateway_status_message: ov.gateway_status_message !== undefined ? ov.gateway_status_message : (r.gateway_status_message || '')
+              gateway_status_message: ov.gateway_status_message !== undefined ? ov.gateway_status_message : (r.gateway_status_message || ''),
+              city: ov.city !== undefined ? ov.city : (r.city || ''),
+              state: ov.state !== undefined ? ov.state : (r.state || ''),
+              pincode: ov.pincode !== undefined ? ov.pincode : (r.pincode || ''),
+              maps_location_url: ov.maps_location_url !== undefined ? ov.maps_location_url : (r.maps_location_url || ''),
+              contact_email: ov.contact_email !== undefined ? ov.contact_email : (r.contact_email || ''),
+              whatsapp_number: ov.whatsapp_number !== undefined ? ov.whatsapp_number : (r.whatsapp_number || ''),
+              weekly_closing_day: ov.weekly_closing_day !== undefined ? ov.weekly_closing_day : (r.weekly_closing_day || 'None'),
+              short_description: ov.short_description !== undefined ? ov.short_description : (r.short_description || ''),
+              detailed_description: ov.detailed_description !== undefined ? ov.detailed_description : (r.detailed_description || ''),
+              about_us: ov.about_us !== undefined ? ov.about_us : (r.about_us || ''),
+              enabled_services: ov.enabled_services !== undefined ? ov.enabled_services : (r.enabled_services || []),
+              privacy_policy: ov.privacy_policy !== undefined ? ov.privacy_policy : (r.privacy_policy || ''),
+              terms_conditions: ov.terms_conditions !== undefined ? ov.terms_conditions : (r.terms_conditions || ''),
+              refund_cancellation_policy: ov.refund_cancellation_policy !== undefined ? ov.refund_cancellation_policy : (r.refund_cancellation_policy || ''),
+              shipping_delivery_policy: ov.shipping_delivery_policy !== undefined ? ov.shipping_delivery_policy : (r.shipping_delivery_policy || ''),
+              contact_us_info: ov.contact_us_info !== undefined ? ov.contact_us_info : (r.contact_us_info || ''),
+              website_config: ov.website_config !== undefined ? ov.website_config : (r.website_config || undefined),
+              free_offer_status: ov.free_offer_status !== undefined ? ov.free_offer_status : (r.free_offer_status || 'off'),
+              free_offer_days: ov.free_offer_days !== undefined ? Number(ov.free_offer_days) : (r.free_offer_days ?? 0),
+              free_offer_start: ov.free_offer_start !== undefined ? ov.free_offer_start : (r.free_offer_start || ''),
+              free_offer_end: ov.free_offer_end !== undefined ? ov.free_offer_end : (r.free_offer_end || ''),
+              free_offer_granted_by: ov.free_offer_granted_by !== undefined ? ov.free_offer_granted_by : (r.free_offer_granted_by || ''),
+              last_password_change: ov.last_password_change !== undefined ? ov.last_password_change : (r.last_password_change || '')
             };
           });
 
@@ -671,9 +720,24 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentOwner) {
           const freshOwner = mergedRestaurants.find((r: any) => r.id === currentOwner.id);
           if (freshOwner) {
-            setCurrentOwner(freshOwner as Restaurant);
-            sessionStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
-            localStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
+            if (freshOwner.status === 'suspended') {
+              setCurrentOwner(null);
+              sessionStorage.removeItem('digimoms_current_owner');
+              localStorage.removeItem('digimoms_current_owner');
+              setActiveViewRaw('owner-login');
+              showToast('⚠️ আপনার অ্যাকাউন্টটি অ্যাডমিন দ্বারা স্থগিত (Suspended) করা হয়েছে। লগইন সমাপ্ত।', 'error');
+            } else if (currentOwner.password_hash && freshOwner.password_hash && freshOwner.password_hash !== currentOwner.password_hash) {
+              // Password was changed on another device! Invalidate session immediately
+              setCurrentOwner(null);
+              sessionStorage.removeItem('digimoms_current_owner');
+              localStorage.removeItem('digimoms_current_owner');
+              setActiveViewRaw('owner-login');
+              showToast('⚠️ পাসওয়ার্ড পরিবর্তিত হওয়ায় সুরক্ষার জন্য সমস্ত ডিভাইস থেকে লগআউট করা হয়েছে। নতুন পাসওয়ার্ড দিয়ে পুনরায় লগইন করুন।', 'info');
+            } else {
+              setCurrentOwner(freshOwner as Restaurant);
+              sessionStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
+              localStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
+            }
           }
         } else {
           try {
@@ -683,8 +747,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (parsed?.id) {
                 const freshOwner = mergedRestaurants.find((r: any) => r.id === parsed.id);
                 if (freshOwner) {
-                  setCurrentOwner(freshOwner as Restaurant);
-                  sessionStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
+                  if (freshOwner.status === 'suspended') {
+                    localStorage.removeItem('digimoms_current_owner');
+                    sessionStorage.removeItem('digimoms_current_owner');
+                  } else if (parsed.password_hash && freshOwner.password_hash && freshOwner.password_hash !== parsed.password_hash) {
+                    // Password changed on another device! Invalidate stored session
+                    localStorage.removeItem('digimoms_current_owner');
+                    sessionStorage.removeItem('digimoms_current_owner');
+                  } else {
+                    setCurrentOwner(freshOwner as Restaurant);
+                    sessionStorage.setItem('digimoms_current_owner', JSON.stringify(freshOwner));
+                  }
                 }
               }
             }
@@ -696,9 +769,25 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentStaff) {
           const freshStaff = (staffData as Staff[]).find(s => s.id === currentStaff.id);
           if (freshStaff) {
-            setCurrentStaff(freshStaff);
-            sessionStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
-            localStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+            const parentRest = (mergedRestaurants as Restaurant[]).find((r: any) => r.id === freshStaff.restaurant_id);
+            if (parentRest?.status === 'suspended') {
+              setCurrentStaff(null);
+              sessionStorage.removeItem('digimoms_current_staff');
+              localStorage.removeItem('digimoms_current_staff');
+              setActiveViewRaw('staff-login');
+              showToast('⚠️ রেস্তোরাঁ স্থগিত হওয়ায় স্টাফ সেশন বন্ধ করা হয়েছে।', 'error');
+            } else if (currentStaff.password_hash && freshStaff.password_hash && freshStaff.password_hash !== currentStaff.password_hash) {
+              // Staff password was changed! Invalidate session immediately
+              setCurrentStaff(null);
+              sessionStorage.removeItem('digimoms_current_staff');
+              localStorage.removeItem('digimoms_current_staff');
+              setActiveViewRaw('staff-login');
+              showToast('⚠️ আপনার পাসওয়ার্ড পরিবর্তিত হওয়ায় সমস্ত ডিভাইস থেকে লগআউট করা হয়েছে। নতুন পাসওয়ার্ড দিয়ে পুনরায় লগইন করুন।', 'info');
+            } else {
+              setCurrentStaff(freshStaff);
+              sessionStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+              localStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+            }
           }
         } else {
           try {
@@ -708,9 +797,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (parsed?.id) {
                 const freshStaff = (staffData as Staff[]).find(s => s.id === parsed.id);
                 if (freshStaff) {
-                  setCurrentStaff(freshStaff);
-                  sessionStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
-                  localStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+                  const parentRest = (mergedRestaurants as Restaurant[]).find((r: any) => r.id === freshStaff.restaurant_id);
+                  if (parentRest?.status === 'suspended') {
+                    sessionStorage.removeItem('digimoms_current_staff');
+                    localStorage.removeItem('digimoms_current_staff');
+                  } else if (parsed.password_hash && freshStaff.password_hash && freshStaff.password_hash !== parsed.password_hash) {
+                    // Password changed on another device! Clear stored staff session
+                    sessionStorage.removeItem('digimoms_current_staff');
+                    localStorage.removeItem('digimoms_current_staff');
+                  } else {
+                    setCurrentStaff(freshStaff);
+                    sessionStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+                    localStorage.setItem('digimoms_current_staff', JSON.stringify(freshStaff));
+                  }
                 }
               }
             }
@@ -2162,6 +2261,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const CORE_COLUMNS = new Set([
       'id', 'name', 'slug', 'owner_name', 'owner_mobile', 'password_hash',
       'logo', 'banner', 'address', 'gst', 'fssai', 'business_hours',
+      'custom_domain', 'custom_domain_verified',
       'payment_mode', 'razorpay_key', 'razorpay_secret', 'status',
       'trial_start', 'trial_end', 'subscription_start', 'subscription_end',
       'theme', 'language', 'timezone', 'created_at', 'updated_at'
@@ -2251,6 +2351,21 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const suspendRestaurant = async (id: string) => {
     await supabase.from('restaurants').update({ status: 'suspended', updated_at: new Date().toISOString() }).eq('id', id);
+    setRestaurants(prev => prev.map(r => r.id === id ? { ...r, status: 'suspended' } : r));
+    if (currentOwner?.id === id) {
+      setCurrentOwner(null);
+      sessionStorage.removeItem('digimoms_current_owner');
+      localStorage.removeItem('digimoms_current_owner');
+      setActiveViewRaw('owner-login');
+      showToast('⚠️ আপনার রেস্তোরাঁর অ্যাকাউন্টটি অ্যাডমিন দ্বারা স্থগিত (Suspended) করা হয়েছে।', 'error');
+    }
+    if (currentStaff?.restaurant_id === id) {
+      setCurrentStaff(null);
+      sessionStorage.removeItem('digimoms_current_staff');
+      localStorage.removeItem('digimoms_current_staff');
+      setActiveViewRaw('staff-login');
+      showToast('⚠️ রেস্তোরাঁ স্থগিত হওয়ায় স্টাফ সেশন বন্ধ করা হয়েছে।', 'error');
+    }
     await fetchAllFromSupabase();
     showToast('Restaurant suspended.', 'info');
   };
@@ -2459,6 +2574,67 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showToast(`Granted +${extraDays} free days to '${rest.name}'! Expiry: ${new Date(newExpiry).toLocaleDateString()}`, 'success');
   };
 
+  // CEO UNIFIED FREE PLAN / FREE ACCESS GRANT
+  const grantFreePlan = async (id: string, days: number, reason: string) => {
+    const rest = restaurants.find(r => r.id === id);
+    if (!rest) return;
+
+    const now = Date.now();
+    const currentExpiry = new Date(rest.subscription_end || rest.trial_end || now).getTime();
+    const baseTime = currentExpiry > now ? currentExpiry : now;
+    const newExpiry = new Date(baseTime + days * 24 * 3600 * 1000).toISOString();
+
+    await supabase.from('restaurants').update(sanitizeRestaurantForDb({
+      subscription_end: newExpiry,
+      status: 'active',
+      updated_at: new Date().toISOString()
+    })).eq('id', id);
+
+    const historyRecord: SubscriptionHistory = {
+      id: crypto.randomUUID(),
+      restaurant_id: id,
+      plan_name: `Complimentary Free Plan (${days} Days)`,
+      amount: 0,
+      amount_paid: 0,
+      duration_months: Math.round((days / 30) * 10) / 10,
+      days_added: days,
+      payment_id: `FREE_GRANT_${Date.now()}`,
+      start_date: new Date(baseTime).toISOString(),
+      end_date: newExpiry,
+      previous_expiry: new Date(currentExpiry).toISOString(),
+      new_expiry: newExpiry,
+      payment_status: 'Complimentary / Free Grant',
+      payment_mode: 'free',
+      subscription_type: 'FREE_GRANT',
+      granted_by: 'CEO Admin',
+      reason: reason || 'CEO Free Access Grant',
+      created_at: new Date().toISOString()
+    };
+
+    setSubscriptionHistory(prev => [historyRecord, ...prev]);
+
+    try {
+      await supabase.from('subscription_history').insert([historyRecord]);
+    } catch (err) {
+      console.warn("Free plan history insert error:", err);
+    }
+
+    logAudit({
+      restaurant_id: id,
+      actor_type: 'ceo',
+      actor_id: 'ceo-admin',
+      actor_name: 'Platform CEO',
+      actor_role: 'ceo',
+      action: 'GRANT_FREE_PLAN',
+      description: `Granted ${days} free days to '${rest.name}'. Reason: ${reason}`
+    });
+
+    await fetchAllFromSupabase();
+    showToast(`🎉 Granted ${days} Free Days to '${rest.name}'! (${reason})`, 'success');
+  };
+
+  const grantFreeDays = grantFreePlan;
+
   const renewSubscription = async (id: string, months: number) => {
     await renewRestaurantMonthly(id, months, { mode: 'ceo_manual' });
   };
@@ -2598,6 +2774,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await supabase.from('restaurant_pricing').delete().eq('restaurant_id', id);
       await supabase.from('restaurant_legal_pages').delete().eq('restaurant_id', id);
       await supabase.from('restaurant_social_links').delete().eq('restaurant_id', id);
+      await supabase.from('activity_logs').delete().eq('restaurant_id', id);
+      await supabase.from('audit_logs').delete().eq('restaurant_id', id);
 
       const { error: delErr } = await supabase.from('restaurants').delete().eq('id', id);
       if (delErr) {
@@ -2623,6 +2801,83 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     await fetchAllFromSupabase();
     showToast('Restaurant permanently deleted from database. Mobile number and slug are available for reuse.', 'success');
+  };
+
+  const deleteOldRestaurantData = async (id: string, duration: '6m' | '1y'): Promise<number> => {
+    const cutoff = new Date();
+    if (duration === '6m') cutoff.setMonth(cutoff.getMonth() - 6);
+    else if (duration === '1y') cutoff.setFullYear(cutoff.getFullYear() - 1);
+    
+    const ordersToDelete = orders.filter(o => o.restaurant_id === id && new Date(o.created_at) < cutoff);
+    if (ordersToDelete.length === 0) return 0;
+    
+    let revenueToArchive = 0;
+    const yearlyArchiveMap: Record<string, number> = {};
+    
+    for (const ord of ordersToDelete) {
+        if (ord.order_status === 'cancelled') continue;
+        const pStatus = ord.payment_status;
+        const isPaid = pStatus === 'paid' || pStatus === 'paid_live' || pStatus === 'paid_cash' || pStatus === 'paid_demo';
+        const isPartial = pStatus === 'partially_paid' || pStatus === 'partial';
+        if (isPaid || isPartial) {
+            let amt = 0;
+            if (isPaid) amt = Number(ord.grand_total || 0);
+            else amt = Number(ord.online_amount || 0) + Number(ord.cash_amount || 0);
+            
+            revenueToArchive += amt;
+            const y = new Date(ord.created_at).getFullYear().toString();
+            yearlyArchiveMap[y] = (yearlyArchiveMap[y] || 0) + amt;
+        }
+    }
+    
+    const rest = restaurants.find(r => r.id === id);
+    if (!rest) return 0;
+    const existingArchived = rest.archived_revenue || 0;
+    const existingArchivedCount = rest.archived_orders_count || 0;
+    const existingYearlyMap = rest.archived_revenue_by_year || {};
+    
+    const mergedYearlyMap = { ...existingYearlyMap };
+    for (const [y, amt] of Object.entries(yearlyArchiveMap)) {
+        mergedYearlyMap[y] = (mergedYearlyMap[y] || 0) + amt;
+    }
+    
+    const batchSize = 1000;
+    for (let i = 0; i < ordersToDelete.length; i+= batchSize) {
+        const batchIds = ordersToDelete.slice(i, i+batchSize).map(o => o.id);
+        
+        const itemsToDelete = [];
+        for (const orderId of batchIds) {
+           const items = await supabase.from('order_items').select('id').eq('order_id', orderId);
+           if (items.data) itemsToDelete.push(...items.data.map(item => item.id));
+        }
+        
+        if (itemsToDelete.length > 0) {
+           for (let j = 0; j < itemsToDelete.length; j+= batchSize) {
+               await supabase.from('order_items').delete().in('id', itemsToDelete.slice(j, j+batchSize));
+           }
+        }
+        
+        await supabase.from('orders').delete().in('id', batchIds);
+    }
+    
+    await updateRestaurant(id, { 
+        archived_revenue: existingArchived + revenueToArchive,
+        archived_orders_count: existingArchivedCount + ordersToDelete.length,
+        archived_revenue_by_year: mergedYearlyMap
+    });
+    
+    logAudit({
+      restaurant_id: id,
+      actor_type: 'ceo',
+      actor_id: 'ceo',
+      actor_name: 'CEO SuperAdmin',
+      actor_role: 'ceo',
+      action: 'DELETE_OLD_DATA',
+      description: `CEO permanently deleted ${ordersToDelete.length} orders older than ${duration}. Revenue totals preserved in archive.`
+    });
+
+    await fetchAllFromSupabase();
+    return ordersToDelete.length;
   };
 
   const factoryResetRestaurant = async (id: string, ceoPass: string): Promise<boolean> => {
@@ -2696,8 +2951,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // --- OWNER ACTIONS ---
   const loginOwner = (mobile: string, pass: string, rememberMe: boolean = false): Restaurant | null => {
-    const rest = restaurants.find(r => r.owner_mobile === mobile && r.password_hash === pass);
+    const cleanMobile = (mobile || '').trim();
+    const cleanPass = (pass || '').trim();
+    const rest = restaurants.find(r => (r.owner_mobile || '').trim() === cleanMobile && (r.password_hash || '').trim() === cleanPass);
     if (rest) {
+      if (rest.status === 'suspended') {
+        showToast('⚠️ আপনার রেস্তোরাঁর অ্যাকাউন্টটি অ্যাডমিন দ্বারা স্থগিত (Suspended) করা হয়েছে। লগইন নিষিদ্ধ। অনুগ্রহ করে সাপোর্টে যোগাযোগ করুন।', 'error');
+        return null;
+      }
       setCurrentOwner(rest);
       if (rememberMe) {
         localStorage.setItem('digimoms_current_owner', JSON.stringify(rest));
@@ -2752,6 +3013,53 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'UPDATE_RESTAURANT_PROFILE',
       description: `Updated restaurant settings for ${currentOwner.name}`
     });
+  };
+
+  const updateOwnerPassword = async (oldPassword: string, newPassword: string): Promise<boolean> => {
+    if (!currentOwner) return false;
+    const cleanOld = (oldPassword || '').trim();
+    const cleanNew = (newPassword || '').trim();
+
+    if (cleanOld !== (currentOwner.password_hash || '').trim()) {
+      showToast('❌ Current / Old password is incorrect. Please check and re-enter.', 'error');
+      return false;
+    }
+
+    if (cleanNew.length < 4) {
+      showToast('❌ New password must be at least 4 characters long.', 'error');
+      return false;
+    }
+
+    if (cleanNew === cleanOld) {
+      showToast('⚠️ New password cannot be identical to your old password.', 'info');
+      return false;
+    }
+
+    const changeTimestamp = new Date().toISOString();
+    
+    // Update restaurant password_hash and last_password_change in Supabase
+    await updateRestaurant(currentOwner.id, {
+      password_hash: cleanNew,
+      last_password_change: changeTimestamp
+    });
+
+    logAudit({
+      restaurant_id: currentOwner.id,
+      actor_type: 'owner',
+      actor_id: currentOwner.id,
+      actor_name: currentOwner.owner_name,
+      actor_role: 'owner',
+      action: 'OWNER_PASSWORD_CHANGED',
+      description: `Owner password changed. Terminating all active device sessions immediately.`
+    });
+
+    // Logout from current device immediately
+    setCurrentOwner(null);
+    sessionStorage.removeItem('digimoms_current_owner');
+    localStorage.removeItem('digimoms_current_owner');
+    setActiveView('owner-login');
+    showToast('✅ Password changed successfully! All device sessions have been terminated. Please log in with your new password.', 'success');
+    return true;
   };
 
   const addCategory = async (name: string) => {
@@ -3000,7 +3308,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const trimmed = newPassword.trim();
-    const { error } = await supabase.from('staff').update({ password_hash: trimmed }).eq('id', staffId);
+    const changeTimestamp = new Date().toISOString();
+    const { error } = await supabase.from('staff').update({ password_hash: trimmed, last_password_change: changeTimestamp }).eq('id', staffId);
     if (error) {
       console.error("Update staff password error:", error);
       showToast(`Failed to update password: ${error.message}`, 'error');
@@ -3015,19 +3324,43 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         actor_name: currentOwner.owner_name,
         actor_role: 'owner',
         action: 'UPDATE_STAFF_PASSWORD',
-        description: `Updated password for staff '${existing.name}' (${existing.role})`
+        description: `Updated password for staff '${existing.name}' (${existing.role}). Forced logout across all terminals.`
       });
     }
 
-    setStaffList(prev => prev.map(s => s.id === staffId ? { ...s, password_hash: trimmed } : s));
-    showToast(`Password updated successfully for '${existing.name}'`, 'success');
+    setStaffList(prev => prev.map(s => s.id === staffId ? { ...s, password_hash: trimmed, last_password_change: changeTimestamp } : s));
+    showToast(`Password updated successfully for '${existing.name}'. All staff terminals will be logged out.`, 'success');
+
+    // If current device is logged in as this staff member, log out immediately
+    if (currentStaff && currentStaff.id === staffId) {
+      setCurrentStaff(null);
+      sessionStorage.removeItem('digimoms_current_staff');
+      localStorage.removeItem('digimoms_current_staff');
+      setActiveView('staff-login');
+      showToast('🔒 Staff credentials were changed. This terminal has been logged out.', 'info');
+    }
+
     await fetchAllFromSupabase();
   };
 
   // --- STAFF ACTIONS ---
   const loginStaff = (mobile: string, pass: string): Staff | null => {
-    const found = staffList.find(s => s.mobile === mobile && s.password_hash === pass && s.status === 'active');
+    const cleanMobile = (mobile || '').trim();
+    const cleanPass = (pass || '').trim();
+    const found = staffList.find(s => (s.mobile || '').trim() === cleanMobile && (s.password_hash || '').trim() === cleanPass && s.status === 'active');
     if (found) {
+      const parentRest = restaurants.find(r => r.id === found.restaurant_id);
+      if (parentRest) {
+        if (parentRest.status === 'suspended') {
+          showToast('⚠️ রেস্তোরাঁটি অ্যাডমিন দ্বারা স্থগিত (Suspended) রয়েছে। স্টাফ লগইন নিষিদ্ধ।', 'error');
+          return null;
+        }
+        const subDetails = getRestaurantSubscriptionDetails(parentRest);
+        if (subDetails.isExpired) {
+          showToast('⚠️ রেস্তোরাঁর সাবস্ক্রিপশন প্ল্যান শেষ হয়ে গেছে। অনুগ্রহ করে ওনারকে প্ল্যান রিনিউ করতে বলুন।', 'error');
+          return null;
+        }
+      }
       setCurrentStaff(found);
       sessionStorage.setItem('digimoms_current_staff', JSON.stringify(found));
       localStorage.setItem('digimoms_current_staff', JSON.stringify(found));
@@ -4838,17 +5171,37 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       id: crypto.randomUUID(),
       restaurant_id: feedback.restaurant_id,
       order_id: feedback.order_id || null,
-      table_number: feedback.table_number,
+      table_number: feedback.table_number || 'Takeaway/Online',
       food_rating: feedback.food_rating,
       service_rating: feedback.service_rating,
       cleanliness_rating: feedback.cleanliness_rating,
       overall_rating: feedback.overall_rating,
-      comment: feedback.comment || ''
+      comment: feedback.comment || '',
+      customer_name: (feedback as any).customer_name || (feedback as any).guest_name || 'Valued Guest',
+      customer_mobile: (feedback as any).customer_mobile || null,
+      guest_name: (feedback as any).guest_name || (feedback as any).customer_name || 'Valued Guest',
+      is_public: true,
+      created_at: new Date().toISOString()
     };
-    const { error } = await supabase.from('customer_feedback').insert([newFb]);
-    if (error) console.error("Submit feedback error:", error);
+    setFeedbackList(prev => [newFb as CustomerFeedback, ...prev]);
+    try {
+      const { error } = await supabase.from('customer_feedback').insert([{
+        id: newFb.id,
+        restaurant_id: newFb.restaurant_id,
+        order_id: newFb.order_id,
+        table_number: newFb.table_number,
+        food_rating: newFb.food_rating,
+        service_rating: newFb.service_rating,
+        cleanliness_rating: newFb.cleanliness_rating,
+        overall_rating: newFb.overall_rating,
+        comment: newFb.comment
+      }]);
+      if (error) console.error("Submit feedback error:", error);
+    } catch (e) {
+      console.warn("Feedback Supabase insert catch:", e);
+    }
     await fetchAllFromSupabase();
-    showToast('Thank you for rating your dining experience!', 'success');
+    showToast('Thank you for your valuable feedback and rating!', 'success');
   };
 
   // Public Website Helpers
@@ -5040,8 +5393,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       paymentTransactions, confirmCashPayment, processRazorpayOnlinePayment, processPayUOnlinePayment, processPhonePeOnlinePayment, updateOrderPaymentMethod,
       loginCeo, logoutCeo, ceoRazorpayConfig, updateCeoRazorpayConfig, ceoPaymentConfig, updateCeoPaymentConfig,
       addRestaurant, updateRestaurant, suspendRestaurant,
-      resumeRestaurant, grantTrial, endTrial, extendTrial, grantFreeOffer, endFreeOffer, extendFreeOffer, grantFreeExtension, renewSubscription, renewRestaurantMonthly, archiveRestaurant, deleteRestaurantPermanently,
-      factoryResetRestaurant, executeProductionReset, loginOwner, logoutOwner, updateOwnerProfile,
+      resumeRestaurant, grantTrial, endTrial, extendTrial, grantFreeOffer, endFreeOffer, extendFreeOffer, grantFreeExtension, grantFreePlan, grantFreeDays, renewSubscription, renewRestaurantMonthly, archiveRestaurant, deleteRestaurantPermanently, deleteOldRestaurantData,
+      factoryResetRestaurant, executeProductionReset, loginOwner, logoutOwner, updateOwnerProfile, updateOwnerPassword,
       addCategory, updateCategory, addMenuItem, updateMenuItem, toggleMenuItemAvailability,
       addTable, clearTableSession, addStaffMember, toggleStaffStatus, deleteStaffMember, updateStaffPassword,
       loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder, recordOfflinePayment,

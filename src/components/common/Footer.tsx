@@ -120,7 +120,7 @@ export const Footer: React.FC = () => {
               <strong className="text-white">Trade Name:</strong> DigiMoms Marketing Agency
             </p>
             <p className="text-xs text-slate-300 leading-snug">
-              <strong className="text-white">Address:</strong> Andulia, Lachhmi Chak, Sabang, Paschim Medinipur, West Bengal, 721144.
+              <strong className="text-white">Address:</strong> Sabang, Paschim Medinipur, West Bengal, 721144.
             </p>
             <p className="flex items-center gap-2 pt-1 text-xs text-slate-200">
               <Phone className="w-4 h-4 text-blue-400" />
