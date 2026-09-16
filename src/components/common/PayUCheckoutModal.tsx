@@ -94,8 +94,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
     }, 1500);
   }, [onSuccess]);
 
-  const [manualTxnInput, setManualTxnInput] = useState('');
-  const [showManualConfirmBox, setShowManualConfirmBox] = useState(false);
+
 
   // Query Server Status endpoint to check if PayU has confirmed payment
   const checkPaymentStatus = useCallback(async (isManual = false) => {
@@ -539,49 +538,6 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                       </>
                     )}
                   </button>
-
-                  {showManualConfirmBox ? (
-                    <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-2.5 animate-fade-in">
-                      <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Manual Payment Confirmation
-                      </div>
-                      <p className="text-[11px] text-slate-400">
-                        If you completed the payment, enter your Payment ID or Bank UTR/UPI Ref to confirm immediately:
-                      </p>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="e.g. 192837465 or UTR Ref"
-                          value={manualTxnInput}
-                          onChange={(e) => setManualTxnInput(e.target.value)}
-                          className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:border-emerald-500 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            completePayment({
-                              txnid: txnid,
-                              mihpayid: manualTxnInput.trim() || `txn_${Date.now()}`,
-                              hash: hash,
-                              amount: amount
-                            });
-                          }}
-                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer"
-                        >
-                          Confirm
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setShowManualConfirmBox(true)}
-                      className="w-full text-center text-[11px] text-slate-400 hover:text-emerald-400 underline decoration-slate-600 transition-colors py-1 cursor-pointer"
-                    >
-                      Already paid? Confirm with Transaction / UPI Ref
-                    </button>
-                  )}
-
                   <div className="flex gap-2">
                     <button
                       type="button"

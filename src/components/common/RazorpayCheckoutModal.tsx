@@ -59,8 +59,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
   const [rzpOrderId, setRzpOrderId] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<string>('');
-  const [manualUtrInput, setManualUtrInput] = useState<string>('');
-  const [showManualBox, setShowManualBox] = useState<boolean>(false);
+
 
   const isCompletedRef = useRef<boolean>(false);
 
@@ -152,7 +151,6 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
     setIsSuccessConfirmed(false);
     setErrorMessage('');
     setStatusMessage('');
-    setShowManualBox(false);
     setIsLoading(true);
 
     const initOrder = async () => {
@@ -426,46 +424,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
                   {isVerifyingManual ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                   I Have Paid (Verify Status)
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowManualBox(!showManualBox)}
-                  className="px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs border border-slate-800"
-                >
-                  UTR Ref
-                </button>
               </div>
-
-              {showManualBox && (
-                <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2 mt-2">
-                  <label className="text-[10px] uppercase font-bold text-slate-400 block">Enter 12-Digit UPI / Bank Reference Number</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="e.g. 423512984561"
-                      value={manualUtrInput}
-                      onChange={(e) => setManualUtrInput(e.target.value)}
-                      className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-mono focus:outline-none focus:border-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!manualUtrInput || manualUtrInput.trim().length < 6) {
-                          setErrorMessage('Please enter a valid UPI / Bank reference number.');
-                          return;
-                        }
-                        completePayment({
-                          razorpay_payment_id: manualUtrInput.trim(),
-                          razorpay_order_id: rzpOrderId,
-                          amount
-                        });
-                      }}
-                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs"
-                    >
-                      Confirm
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </>
         )}
