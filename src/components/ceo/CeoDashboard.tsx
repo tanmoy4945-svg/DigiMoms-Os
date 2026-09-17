@@ -13,6 +13,7 @@ import { CeoBackupManager } from './CeoBackupManager';
 import { CeoAgreementGenerator } from './CeoAgreementGenerator';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RestaurantWebsiteManager } from '../owner/RestaurantWebsiteManager';
+import { CeoHealthMonitor } from './CeoHealthMonitor';
 import { Restaurant } from '../../types';
 
 export type RevenuePeriod = 'this_month' | 'today' | 'yesterday' | 'this_week' | 'last_month' | 'this_year' | 'lifetime';

@@ -2382,10 +2382,23 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let { error } = await supabase.from('subscription_history').insert([record]);
     if (error && (error.code === '42703' || error.message?.includes('column'))) {
       console.warn("Retrying subscription_history insert without new columns:", error);
-      const { granted_by, reason, subscription_type, previous_expiry, new_expiry, days_added, start_date, end_date, plan_name, ...core } = record as any;
-      const retry = await supabase.from('subscription_history').insert([core]);
-      if (retry.error) {
-        console.error("Core subscription_history insert failed:", retry.error);
+      const { granted_by, reason, subscription_type, previous_expiry, new_expiry, days_added, start_date, end_date, plan_name, razorpay_order_id, razorpay_payment_id, ...core } = record as any;
+      
+      const retry1 = await supabase.from('subscription_history').insert([core]);
+      if (retry1.error) {
+         console.warn("Second insert failed, trying minimal core:", retry1.error);
+         const minimal = {
+             id: record.id,
+             restaurant_id: record.restaurant_id,
+             amount: record.amount,
+             payment_status: record.payment_status,
+             created_at: record.created_at,
+             duration_months: record.duration_months || 0
+         };
+         const retry2 = await supabase.from('subscription_history').insert([minimal]);
+         if (retry2.error) {
+             console.error("Ultimate minimal insert failed:", retry2.error);
+         }
       }
     } else if (error) {
       console.error("Subscription history insert error:", error);
