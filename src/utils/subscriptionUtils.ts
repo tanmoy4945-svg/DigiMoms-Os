@@ -48,31 +48,41 @@ export function getRestaurantSubscriptionDetails(
   const now = referenceNow;
   const isSuspended = restaurant.status === 'suspended';
 
+  // Helper to ensure expiration happens at midnight (23:59:59.999) of the given date
+  const getEndOfDayMs = (dateString: string | undefined | null): number => {
+    if (!dateString) return 0;
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return 0;
+    d.setHours(23, 59, 59, 999);
+    return d.getTime();
+  };
+
+  const trialEndMs = getEndOfDayMs(restaurant.trial_end);
   const isTrialActive =
     !isSuspended &&
     restaurant.trial_status === 'active' &&
-    new Date(restaurant.trial_end || 0).getTime() > now;
+    trialEndMs > now;
 
+  const freeEndMs = getEndOfDayMs(restaurant.free_offer_end);
   const isFreeActive =
     !isSuspended &&
     restaurant.free_offer_status === 'active' &&
-    new Date(restaurant.free_offer_end || 0).getTime() > now;
+    freeEndMs > now;
 
+  const subEndBaseMs = getEndOfDayMs(restaurant.subscription_end);
   const isSubActive =
     !isSuspended &&
     restaurant.status === 'active' &&
-    new Date(restaurant.subscription_end || 0).getTime() > now;
+    subEndBaseMs > now;
 
   // Determine effective subscription end date across paid subscription, trial, and free offers
-  let subEndDate = new Date(restaurant.subscription_end || now).getTime();
+  let subEndDate = subEndBaseMs || now;
   if (restaurant.trial_end) {
-    const trialEndMs = new Date(restaurant.trial_end).getTime();
     if (isTrialActive || trialEndMs > subEndDate) {
       subEndDate = Math.max(subEndDate, trialEndMs);
     }
   }
   if (restaurant.free_offer_end) {
-    const freeEndMs = new Date(restaurant.free_offer_end).getTime();
     if (isFreeActive || freeEndMs > subEndDate) {
       subEndDate = Math.max(subEndDate, freeEndMs);
     }

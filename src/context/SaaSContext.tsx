@@ -2377,6 +2377,21 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // RULE 2: CEO CAN MANUALLY GIVE TRIAL
+
+  const safeInsertSubscriptionHistory = async (record: SubscriptionHistory) => {
+    let { error } = await supabase.from('subscription_history').insert([record]);
+    if (error && (error.code === '42703' || error.message?.includes('column'))) {
+      console.warn("Retrying subscription_history insert without new columns:", error);
+      const { granted_by, reason, subscription_type, previous_expiry, new_expiry, days_added, start_date, end_date, plan_name, ...core } = record as any;
+      const retry = await supabase.from('subscription_history').insert([core]);
+      if (retry.error) {
+        console.error("Core subscription_history insert failed:", retry.error);
+      }
+    } else if (error) {
+      console.error("Subscription history insert error:", error);
+    }
+  };
+
   const grantTrial = async (id: string, days: number) => {
     const rest = restaurants.find(r => r.id === id);
     if (!rest) return;
@@ -2398,8 +2413,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    try {
-      await supabase.from('subscription_history').insert([{
+    const historyRecord = {
         id: crypto.randomUUID(),
         restaurant_id: id,
         plan_name: `CEO Trial (${days} Days)`,
@@ -2416,10 +2430,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         granted_by: 'CEO',
         reason: `CEO manually granted ${days}-day trial`,
         created_at: new Date().toISOString()
-      }]);
-    } catch (err) {
-      console.warn("Trial subscription history insert error:", err);
-    }
+    };
+    await safeInsertSubscriptionHistory(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`Granted ${days}-day trial to '${rest.name}'!`, 'success');
@@ -2472,8 +2484,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     })).eq('id', id);
 
-    try {
-      await supabase.from('subscription_history').insert([{
+    const historyRecord = {
         id: crypto.randomUUID(),
         restaurant_id: id,
         plan_name: `CEO Free Offer (${days} Days)`,
@@ -2490,10 +2501,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         granted_by: 'CEO',
         reason: `CEO manually granted ${days}-day Free Offer`,
         created_at: new Date().toISOString()
-      }]);
-    } catch (err) {
-      console.warn("Free offer subscription history insert error:", err);
-    }
+    };
+    await safeInsertSubscriptionHistory(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`Granted ${days}-day Free Offer to '${rest.name}'!`, 'success');
@@ -2613,11 +2622,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setSubscriptionHistory(prev => [historyRecord, ...prev]);
 
-    try {
-      await supabase.from('subscription_history').insert([historyRecord]);
-    } catch (err) {
-      console.warn("Free plan history insert error:", err);
-    }
+    await safeInsertSubscriptionHistory(historyRecord);
 
     logAudit({
       restaurant_id: id,
@@ -2736,11 +2741,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setSubscriptionHistory(prev => [historyRecord, ...prev]);
 
-    try {
-      await supabase.from('subscription_history').insert([historyRecord]);
-    } catch (err) {
-      console.warn("Error inserting subscription history into Supabase:", err);
-    }
+    await safeInsertSubscriptionHistory(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`🎉 Monthly Subscription Paid (₹${feeAmount}) & Extended by ${months} Calendar Month!`, 'success');
