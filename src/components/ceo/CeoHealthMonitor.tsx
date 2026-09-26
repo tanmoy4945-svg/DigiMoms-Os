@@ -126,7 +126,7 @@ export function CeoHealthMonitor() {
           <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ${metrics.status === 'safe' ? 'bg-emerald-500' : metrics.status === 'warning' ? 'bg-amber-500' : 'bg-red-500'}`}
-              style={{ width: \`\${Math.min(100, metrics.percentage)}%\` }}
+              style={{ width: `${Math.min(100, metrics.percentage)}%` }}
             />
           </div>
         </div>
@@ -144,7 +144,7 @@ export function CeoHealthMonitor() {
           <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ${metrics.storageStatus === 'safe' ? 'bg-emerald-500' : metrics.storageStatus === 'warning' ? 'bg-amber-500' : 'bg-red-500'}`}
-              style={{ width: \`\${Math.min(100, metrics.storagePercentage)}%\` }}
+              style={{ width: `${Math.min(100, metrics.storagePercentage)}%` }}
             />
           </div>
         </div>

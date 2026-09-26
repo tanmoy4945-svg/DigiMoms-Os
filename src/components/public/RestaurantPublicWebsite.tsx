@@ -11,7 +11,7 @@ import {
   QrCode, MapPin, Clock, ShieldCheck, Utensils, Star, Phone, Search,
   MessageCircle, Mail, ExternalLink, Calendar, CheckCircle2, ChevronRight,
   Info, Sparkles, Building2, Globe, FileText, Loader2, AlertCircle,
-  UserCheck, ChefHat, Lock
+  UserCheck, ChefHat, Lock, X
 } from 'lucide-react';
 
 export const RestaurantPublicWebsite: React.FC = () => {
@@ -34,6 +34,8 @@ export const RestaurantPublicWebsite: React.FC = () => {
   const [restMenu, setRestMenu] = useState<MenuItem[]>([]);
   const [restCategories, setRestCategories] = useState<MenuCategory[]>([]);
   const [restTable, setRestTable] = useState<Table | null>(null);
+  const [restTables, setRestTables] = useState<Table[]>([]);
+  const [showTableModal, setShowTableModal] = useState<boolean>(false);
   const [webSettings, setWebSettings] = useState<RestaurantWebsiteSettings | null>(null);
   const [legalSettings, setLegalSettings] = useState<RestaurantLegalPages | null>(null);
   const [socialSettings, setSocialSettings] = useState<RestaurantSocialLinks | null>(null);
@@ -147,11 +149,11 @@ export const RestaurantPublicWebsite: React.FC = () => {
           setRestaurant(rest as Restaurant);
         }
 
-        // 2. Fetch associated menus, categories, and table for QR ordering
+        // 2. Fetch associated menus, categories, and tables for QR ordering
         const [{ data: menuData }, { data: catData }, { data: tableData }] = await Promise.all([
           supabase.from('menus').select('*').eq('restaurant_id', rest.id).order('sort_order', { ascending: true }),
           supabase.from('menu_categories').select('*').eq('restaurant_id', rest.id).order('sort_order', { ascending: true }),
-          supabase.from('tables').select('*').eq('restaurant_id', rest.id).limit(1)
+          supabase.from('tables').select('*').eq('restaurant_id', rest.id).order('table_number', { ascending: true })
         ]);
 
         if (isMounted) {
@@ -176,7 +178,9 @@ export const RestaurantPublicWebsite: React.FC = () => {
           }
 
           if (catData) setRestCategories(catData.filter((c: any) => !c.is_hidden) as MenuCategory[]);
-          if (tableData && tableData.length > 0) setRestTable(tableData[0] as Table);
+          if (tableData && tableData.length > 0) {
+            setRestTables(tableData as Table[]);
+          }
         }
 
         // 3. Fetch website configuration tables if present
@@ -304,11 +308,12 @@ export const RestaurantPublicWebsite: React.FC = () => {
   });
 
   const launchCustomerQr = () => {
-    if (restTable) {
-      setActiveShortCode(restTable.short_code);
-    }
-    setActiveView('customer-qr');
+    if (!restaurant) return;
+    setShowTableModal(true);
   };
+
+  const savedTableCode = restaurant ? localStorage.getItem(`digimoms_table_${restaurant.id}`) : null;
+  const savedTable = savedTableCode ? restTables.find(t => t.short_code === savedTableCode) : null;
 
   const SERVICE_LABELS: Record<string, { title: string; desc: string; icon: any }> = {
     dine_in: { title: 'Dine-in Service', desc: 'Comfortable seated dining with table service', icon: Utensils },
@@ -540,6 +545,19 @@ export const RestaurantPublicWebsite: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Remembered Table Banner */}
+        {savedTable && (
+          <div className="bg-blue-600/15 border-b border-blue-500/30 px-4 py-2.5 text-center text-xs text-blue-200 flex items-center justify-center gap-3">
+            <span>📍 Your Device is Connected to <strong className="text-white font-black">{savedTable.table_number}</strong></span>
+            <button
+              onClick={() => setShowTableModal(true)}
+              className="underline text-amber-300 font-bold hover:text-white"
+            >
+              Change Table
+            </button>
+          </div>
+        )}
 
       {/* Main Content Area */}
       <div className="max-w-7xl mx-auto px-4 lg:px-8 space-y-8">
@@ -1087,6 +1105,66 @@ export const RestaurantPublicWebsite: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      {/* Table Selection Modal when ordering from public website */}
+      {showTableModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-black text-white">Select Your Dining Table</h3>
+                <p className="text-xs text-slate-400">{restaurant.name}</p>
+              </div>
+              <button
+                onClick={() => setShowTableModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Please choose your table number before ordering. Your device will remember this table for live order status tracking even if you refresh!
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+              {restTables.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    localStorage.setItem(`digimoms_table_${restaurant.id}`, t.short_code);
+                    setActiveShortCode(t.short_code);
+                    setShowTableModal(false);
+                    setActiveView('customer-qr');
+                  }}
+                  className="p-3 rounded-2xl bg-slate-950 hover:bg-blue-600/20 border border-slate-800 hover:border-blue-500 text-center transition-all group"
+                >
+                  <div className="text-sm font-extrabold text-white group-hover:text-blue-300">{t.table_number}</div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">Code: {t.short_code}</div>
+                </button>
+              ))}
+
+              {restTables.length === 0 && (
+                <div className="col-span-full py-6 text-center text-xs text-slate-400 bg-slate-950 rounded-2xl border border-slate-800">
+                  No tables configured yet. You can proceed directly to order.
+                </div>
+              )}
+            </div>
+
+            {restTables.length === 0 && (
+              <button
+                onClick={() => {
+                  setShowTableModal(false);
+                  setActiveView('customer-qr');
+                }}
+                className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg transition-all"
+              >
+                Continue to Order
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

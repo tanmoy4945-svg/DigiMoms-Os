@@ -708,7 +708,9 @@ export const OwnerDashboard: React.FC = () => {
 
           {/* SaaS Subscription Overview & Expiry Details Card */}
           {(() => {
-            const ownerSubHist = subscriptionHistory.filter(s => s.restaurant_id === currentOwner.id);
+            const ownerSubHist = subscriptionHistory
+              .filter(s => s.restaurant_id === currentOwner.id)
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
             const lastPayment = ownerSubHist[0];
             const startDateFormatted = currentOwner.subscription_start
               ? new Date(currentOwner.subscription_start).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -1320,7 +1322,9 @@ export const OwnerDashboard: React.FC = () => {
             </div>
 
             {(() => {
-              const ownerSubHist = subscriptionHistory.filter(s => s.restaurant_id === currentOwner.id);
+              const ownerSubHist = subscriptionHistory
+                .filter(s => s.restaurant_id === currentOwner.id)
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
               const paidList = ownerSubHist.filter(s => {
                 const amt = Number(s.amount ?? s.amount_paid ?? 0);
                 const status = (s.payment_status || '').toLowerCase();

@@ -1859,7 +1859,7 @@ export const CeoDashboard: React.FC = () => {
               });
               const freeItems = allItems.filter(h => {
                 const type = (h.subscription_type || '').toUpperCase();
-                const isFree = type === 'FREE' || type === 'TRIAL' || type === 'FREE_OFFER' || type === 'FREE_EXTENSION' || Number(h.amount || h.amount_paid || 0) === 0;
+                const isFree = type.includes('FREE') || type.includes('TRIAL') || type.includes('COMPLIMENTARY') || Number(h.amount || h.amount_paid || 0) === 0;
                 return isFree;
               });
 

@@ -126,13 +126,11 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
           amount: data.amount || amount
         });
       } else if (isManual) {
-        setErrorMessage('Payment status is still pending or verifying. If you completed payment, click "Confirm with Transaction Ref" below.');
-        setShowManualConfirmBox(true);
+        setErrorMessage('Payment status is still pending. If you completed payment, please wait a moment and click Check Status again.');
       }
     } catch (err: any) {
       if (isManual) {
-        setErrorMessage('Unable to connect to gateway status server. You can confirm your payment with your UPI or transaction reference below.');
-        setShowManualConfirmBox(true);
+        setErrorMessage('Unable to check payment status right now. Please try again in a few seconds.');
       }
     } finally {
       if (isManual) {

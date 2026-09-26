@@ -320,6 +320,10 @@ ALTER TABLE public.restaurant_services DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.restaurant_pricing DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.restaurant_legal_pages DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.restaurant_social_links DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscription_history DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payment_transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ceo_payment_settings DISABLE ROW LEVEL SECURITY;
 
 -- PERMISSIVE POLICIES IF RLS IS ENABLED
 DROP POLICY IF EXISTS "Public Read Restaurants" ON public.restaurants;
@@ -341,6 +345,10 @@ CREATE POLICY "Allow All Services" ON public.restaurant_services FOR ALL USING (
 CREATE POLICY "Allow All Pricing" ON public.restaurant_pricing FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow All Legal Pages" ON public.restaurant_legal_pages FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow All Social Links" ON public.restaurant_social_links FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Subscription History" ON public.subscription_history FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Audit Logs" ON public.audit_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Payment Transactions" ON public.payment_transactions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All Ceo Payment Settings" ON public.ceo_payment_settings FOR ALL USING (true) WITH CHECK (true);
 `;
 
   const copyToClipboard = () => {

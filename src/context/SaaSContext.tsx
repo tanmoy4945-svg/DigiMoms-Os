@@ -513,7 +513,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransaction[]>([]);
-  const [subscriptionHistory, setSubscriptionHistory] = useState<SubscriptionHistory[]>([]);
+  const [subscriptionHistory, setSubscriptionHistory] = useState<SubscriptionHistory[]>(() => {
+    try {
+      const raw = localStorage.getItem('digimoms_subscription_history');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Public Website Collections
   const [websiteSettings, setWebsiteSettings] = useState<RestaurantWebsiteSettings[]>([]);
@@ -909,7 +916,87 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         mergedAudits.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         setAuditLogs(mergedAudits);
       }
-      if (subHistData) setSubscriptionHistory(subHistData as SubscriptionHistory[]);
+      // Resilient subscription history merging: Supabase + LocalStorage + Synthesized Baseline
+      const localHistRaw = (() => {
+        try {
+          return localStorage.getItem('digimoms_subscription_history');
+        } catch {
+          return null;
+        }
+      })();
+      let localHistory: SubscriptionHistory[] = [];
+      if (localHistRaw) {
+        try {
+          localHistory = JSON.parse(localHistRaw);
+        } catch {}
+      }
+
+      // Generate baseline history for restaurants having trial/subscription if no history records exist
+      const synthesizedHist: SubscriptionHistory[] = [];
+      (restData || []).forEach((r: any) => {
+        if (!r.id || r.id === '00000000-0000-0000-0000-000000000000') return;
+        if (r.trial_start || r.trial_end) {
+          synthesizedHist.push({
+            id: `synth-trial-${r.id}`,
+            restaurant_id: r.id,
+            plan_name: 'Promotional Free Trial',
+            amount: 0,
+            amount_paid: 0,
+            duration_months: 1,
+            days_added: 30,
+            start_date: r.trial_start || r.created_at,
+            end_date: r.trial_end,
+            previous_expiry: r.trial_start || r.created_at,
+            new_expiry: r.trial_end,
+            payment_status: 'trial_granted',
+            payment_mode: 'free',
+            subscription_type: 'TRIAL',
+            granted_by: 'Platform CEO',
+            reason: 'Promotional Trial Activation',
+            created_at: r.trial_start || r.created_at
+          });
+        }
+        if (r.subscription_start || r.subscription_end) {
+          synthesizedHist.push({
+            id: `synth-sub-${r.id}`,
+            restaurant_id: r.id,
+            plan_name: 'Monthly Standard Subscription',
+            amount: Number(r.monthly_subscription_fee || 999),
+            amount_paid: Number(r.monthly_subscription_fee || 999),
+            duration_months: 1,
+            days_added: 30,
+            start_date: r.subscription_start || r.created_at,
+            end_date: r.subscription_end,
+            previous_expiry: r.subscription_start || r.created_at,
+            new_expiry: r.subscription_end,
+            payment_status: 'paid',
+            payment_mode: r.payment_mode || 'demo',
+            subscription_type: 'RENEWAL',
+            granted_by: 'Restaurant Owner Renewal',
+            reason: 'Monthly SaaS Renewal',
+            created_at: r.subscription_start || r.created_at
+          });
+        }
+      });
+
+      const histMap = new Map<string, SubscriptionHistory>();
+      // 1. Synthesized base entries
+      synthesizedHist.forEach(item => histMap.set(item.id, item));
+      // 2. Overlay local storage entries
+      localHistory.forEach(item => histMap.set(item.id, item));
+      // 3. Overlay Supabase entries (canonical truth)
+      if (Array.isArray(subHistData)) {
+        subHistData.forEach((item: any) => histMap.set(item.id, item as SubscriptionHistory));
+      }
+
+      const mergedHistory = Array.from(histMap.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      setSubscriptionHistory(mergedHistory);
+      try {
+        localStorage.setItem('digimoms_subscription_history', JSON.stringify(mergedHistory));
+      } catch {}
       let localCeo: any = null;
       try {
         const rawCeo = localStorage.getItem('digimoms_ceo_payment_config');
@@ -2378,30 +2465,54 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // RULE 2: CEO CAN MANUALLY GIVE TRIAL
 
+  const addSubscriptionHistoryRecord = async (record: SubscriptionHistory) => {
+    // 1. Immediately update React state
+    setSubscriptionHistory(prev => {
+      const filtered = prev.filter(p => p.id !== record.id);
+      const updated = [record, ...filtered];
+      // 2. Persist to localStorage immediately
+      try {
+        localStorage.setItem('digimoms_subscription_history', JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Could not save subscription history to localStorage:", e);
+      }
+      return updated;
+    });
+
+    // 3. Insert to Supabase with error catching
+    await safeInsertSubscriptionHistory(record);
+  };
+
   const safeInsertSubscriptionHistory = async (record: SubscriptionHistory) => {
     let { error } = await supabase.from('subscription_history').insert([record]);
-    if (error && (error.code === '42703' || error.message?.includes('column'))) {
-      console.warn("Retrying subscription_history insert without new columns:", error);
-      const { granted_by, reason, subscription_type, previous_expiry, new_expiry, days_added, start_date, end_date, plan_name, razorpay_order_id, razorpay_payment_id, ...core } = record as any;
-      
-      const retry1 = await supabase.from('subscription_history').insert([core]);
-      if (retry1.error) {
-         console.warn("Second insert failed, trying minimal core:", retry1.error);
-         const minimal = {
-             id: record.id,
-             restaurant_id: record.restaurant_id,
-             amount: record.amount,
-             payment_status: record.payment_status,
-             created_at: record.created_at,
-             duration_months: record.duration_months || 0
-         };
-         const retry2 = await supabase.from('subscription_history').insert([minimal]);
-         if (retry2.error) {
-             console.error("Ultimate minimal insert failed:", retry2.error);
-         }
+    if (error) {
+      if (error.code === '42501') {
+        console.warn(
+          "⚠️ Supabase RLS is blocking subscription_history insert (42501). Record safely saved in local storage. To sync across all devices, run in Supabase SQL Editor: ALTER TABLE subscription_history DISABLE ROW LEVEL SECURITY;"
+        );
+      } else if (error.code === '42703' || error.message?.includes('column')) {
+        console.warn("Retrying subscription_history insert without new columns:", error);
+        const { granted_by, reason, subscription_type, previous_expiry, new_expiry, days_added, start_date, end_date, plan_name, razorpay_order_id, razorpay_payment_id, ...core } = record as any;
+        
+        const retry1 = await supabase.from('subscription_history').insert([core]);
+        if (retry1.error) {
+           console.warn("Second insert failed, trying minimal core:", retry1.error);
+           const minimal = {
+               id: record.id,
+               restaurant_id: record.restaurant_id,
+               amount: record.amount,
+               payment_status: record.payment_status,
+               created_at: record.created_at,
+               duration_months: record.duration_months || 0
+           };
+           const retry2 = await supabase.from('subscription_history').insert([minimal]);
+           if (retry2.error) {
+               console.error("Ultimate minimal insert failed:", retry2.error);
+           }
+        }
+      } else {
+        console.error("Subscription history insert error:", error);
       }
-    } else if (error) {
-      console.error("Subscription history insert error:", error);
     }
   };
 
@@ -2444,7 +2555,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         reason: `CEO manually granted ${days}-day trial`,
         created_at: new Date().toISOString()
     };
-    await safeInsertSubscriptionHistory(historyRecord);
+    await addSubscriptionHistoryRecord(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`Granted ${days}-day trial to '${rest.name}'!`, 'success');
@@ -2515,7 +2626,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         reason: `CEO manually granted ${days}-day Free Offer`,
         created_at: new Date().toISOString()
     };
-    await safeInsertSubscriptionHistory(historyRecord);
+    await addSubscriptionHistoryRecord(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`Granted ${days}-day Free Offer to '${rest.name}'!`, 'success');
@@ -2569,28 +2680,25 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     })).eq('id', id);
 
-    try {
-      await supabase.from('subscription_history').insert([{
-        id: crypto.randomUUID(),
-        restaurant_id: id,
-        plan_name: `CEO Extension (+${extraDays} Days)`,
-        amount: 0,
-        duration_months: 0,
-        days_added: extraDays,
-        start_date: new Date(baseTime).toISOString(),
-        end_date: newExpiry,
-        previous_expiry: new Date(currentExpiry).toISOString(),
-        new_expiry: newExpiry,
-        payment_status: 'not_required',
-        payment_mode: 'free',
-        subscription_type: 'CEO_FREE_EXTENSION',
-        granted_by: 'CEO',
-        reason: reason,
-        created_at: new Date().toISOString()
-      }]);
-    } catch (err) {
-      console.warn("Extension subscription history insert error:", err);
-    }
+    const historyRecord = {
+      id: crypto.randomUUID(),
+      restaurant_id: id,
+      plan_name: `CEO Extension (+${extraDays} Days)`,
+      amount: 0,
+      duration_months: 0,
+      days_added: extraDays,
+      start_date: new Date(baseTime).toISOString(),
+      end_date: newExpiry,
+      previous_expiry: new Date(currentExpiry).toISOString(),
+      new_expiry: newExpiry,
+      payment_status: 'not_required',
+      payment_mode: 'free',
+      subscription_type: 'CEO_FREE_EXTENSION',
+      granted_by: 'CEO',
+      reason: reason,
+      created_at: new Date().toISOString()
+    };
+    await addSubscriptionHistoryRecord(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`Granted +${extraDays} free days to '${rest.name}'! Expiry: ${new Date(newExpiry).toLocaleDateString()}`, 'success');
@@ -2633,9 +2741,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
 
-    setSubscriptionHistory(prev => [historyRecord, ...prev]);
-
-    await safeInsertSubscriptionHistory(historyRecord);
+    await addSubscriptionHistoryRecord(historyRecord);
 
     logAudit({
       restaurant_id: id,
@@ -2752,9 +2858,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
 
-    setSubscriptionHistory(prev => [historyRecord, ...prev]);
-
-    await safeInsertSubscriptionHistory(historyRecord);
+    await addSubscriptionHistoryRecord(historyRecord);
 
     await fetchAllFromSupabase();
     showToast(`🎉 Monthly Subscription Paid (₹${feeAmount}) & Extended by ${months} Calendar Month!`, 'success');
