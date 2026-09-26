@@ -194,7 +194,7 @@ export const TableManagement: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Standard shop UPI tabletop stand format. Features a large high-contrast QR code, 3-language ordering header (English, বাংলা, हिंदी), WhatsApp support, and official DigiMoms footer.
+            Standard shop UPI tabletop stand format. Features a large high-contrast QR code, 3-language ordering header (English, বাংলা, हिंदी), direct WhatsApp Chat Ordering support, and official DigiMoms footer.
           </p>
         </div>
 

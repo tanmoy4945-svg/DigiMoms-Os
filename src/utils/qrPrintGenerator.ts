@@ -10,7 +10,7 @@ export interface QrPrintOptions {
   address?: string;
 }
 
-// Single unique signature palette: Deep Royal Navy with 24K Gold
+// Single signature palette: Deep Royal Navy & 24K Gold
 export const STAND_THEME = {
   name: 'Royal Sapphire Navy & 24K Gold',
   bgGradStart: '#091530',
@@ -102,9 +102,9 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Core Canvas Engine: Standard Countertop UPI Stand Size (1000 x 1500 px, 2:3 ratio).
- * QR Code is HUGE (720x720px), Text is BIG and BOLD, completely filling the stand space.
- * 100% Canvas 2D - no small cramped text, no tiny QR, pixel-perfect!
+ * Core Canvas Engine: Standard Countertop Stand Size (1000 x 1500 px, 2:3 ratio).
+ * Clean, concise, no extra text clutter.
+ * QR and text fit the stand size with perfect spacing.
  */
 export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTMLCanvasElement> {
   if ('fonts' in document) {
@@ -116,7 +116,6 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   }
 
   const theme = STAND_THEME;
-  const displayHost = window.location.host;
   const qrDataUrl = await generateQrDataUrl(options.shortCode, theme.qrDark);
 
   const contactPhone = options.restaurantContact || '9475388085';
@@ -131,17 +130,17 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // 1. OUTER STAND CONTAINER (952 x 1452, 24px margin)
-  const standX = 24;
-  const standY = 24;
-  const standW = 952;
-  const standH = 1452;
-  const standRadius = 38;
+  // 1. OUTER STAND CONTAINER (950 x 1450, 25px margin)
+  const standX = 25;
+  const standY = 25;
+  const standW = 950;
+  const standH = 1450;
+  const standRadius = 36;
 
   // Stand shadow
   ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-  ctx.shadowBlur = 28;
-  ctx.shadowOffsetY = 14;
+  ctx.shadowBlur = 24;
+  ctx.shadowOffsetY = 12;
 
   drawRoundedRect(ctx, standX, standY, standW, standH, standRadius);
   ctx.fillStyle = '#050a16';
@@ -163,7 +162,7 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   ctx.fillRect(standX, standY, standW, standH);
 
   // Subtle ambient glow
-  const topGlow = ctx.createRadialGradient(500, 120, 10, 500, 120, 450);
+  const topGlow = ctx.createRadialGradient(500, 100, 10, 500, 100, 450);
   topGlow.addColorStop(0, 'rgba(251, 191, 36, 0.22)');
   topGlow.addColorStop(1, 'transparent');
   ctx.fillStyle = topGlow;
@@ -171,7 +170,7 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
 
   ctx.restore();
 
-  // 3. GOLD RIM BORDER (Stand edge)
+  // 3. GOLD BORDER RIM
   ctx.save();
   drawRoundedRect(ctx, standX, standY, standW, standH, standRadius);
   const borderGrad = ctx.createLinearGradient(standX, standY, standX + standW, standY + standH);
@@ -179,15 +178,15 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   borderGrad.addColorStop(0.3, theme.goldBorder);
   borderGrad.addColorStop(0.7, '#d97706');
   borderGrad.addColorStop(1, '#fef08a');
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 5;
   ctx.strokeStyle = borderGrad;
   ctx.stroke();
   ctx.restore();
 
-  // 4. HEADER SECTION (TABLE BADGE, RESTAURANT NAME, 3-LANGUAGE TITLE)
-  let curY = standY + 32;
+  // 4. HEADER: TABLE BADGE + RESTAURANT NAME (SHORT & PUNCHY)
+  let curY = standY + 30;
 
-  // TABLE BADGE (Large, bold, prominent at top)
+  // Table Badge
   ctx.save();
   const tableText = `★ ${options.tableNumber.toUpperCase()} ★`;
   ctx.font = '900 32px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -195,10 +194,10 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   const tableBadgeHeight = 48;
   const tableBadgeX = (1000 - tableBadgeWidth) / 2;
 
-  drawRoundedRect(ctx, tableBadgeX, curY, tableBadgeWidth, tableBadgeHeight, 15);
+  drawRoundedRect(ctx, tableBadgeX, curY, tableBadgeWidth, tableBadgeHeight, 14);
   ctx.fillStyle = theme.tableBadgeBg;
   ctx.fill();
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2;
   ctx.strokeStyle = '#ffffff';
   ctx.stroke();
 
@@ -210,11 +209,11 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
 
   curY += tableBadgeHeight + 14;
 
-  // RESTAURANT NAME (Large, Bold, Auto-scaled)
+  // Restaurant Name (Bold, scaled to never clip)
   ctx.save();
-  let restFontSize = 50;
+  let restFontSize = 48;
   ctx.font = `900 ${restFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-  while (ctx.measureText(options.restaurantName.toUpperCase()).width > 880 && restFontSize > 28) {
+  while (ctx.measureText(options.restaurantName.toUpperCase()).width > 860 && restFontSize > 28) {
     restFontSize -= 2;
     ctx.font = `900 ${restFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
   }
@@ -227,54 +226,37 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   ctx.fillText(options.restaurantName.toUpperCase(), 500, curY);
   ctx.restore();
 
-  curY += restFontSize + 6;
+  curY += restFontSize + 12;
 
-  // Optional Address
-  if (options.address) {
-    ctx.save();
-    ctx.font = '600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`📍 ${options.address}`, 500, curY);
-    ctx.restore();
-    curY += 24;
-  } else {
-    curY += 2;
-  }
-
-  // 3-LANGUAGE ORDER HEADING (BIG & CLEAR)
+  // 3-Language Order Heading (Short & Crisp)
   ctx.save();
-  // English: SCAN TO ORDER
-  ctx.font = '900 38px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.font = '900 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.fillStyle = theme.goldBorder;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText('⚡ SCAN TO ORDER ⚡', 500, curY);
+  ctx.fillText('SCAN TO ORDER', 500, curY);
 
-  curY += 46;
+  curY += 44;
 
-  // Bengali & Hindi translations (Large, bold, crisp fonts)
   ctx.font = 'bold 24px "Hind Siliguri", "Noto Sans Bengali", "Noto Sans Devanagari", sans-serif';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText('বাংলা: অর্ডার করতে স্ক্যান করুন   •   हिंदी: ऑर्डर करने के लिए स्कैन करें', 500, curY);
+  ctx.fillText('অর্ডার করতে স্ক্যান করুন  |  ऑर्डर करने के लिए स्कैन करें', 500, curY);
   ctx.restore();
 
-  curY += 40;
+  curY += 38;
 
-  // 5. WHITE QR CARD (ENORMOUS - FILLS THE CENTRAL STAND!)
-  // Width: 900 px, Height: 930 px
-  const plateW = 900;
-  const plateH = 930;
+  // 5. CENTER WHITE QR CARD (LARGE & CLEAN)
+  const plateW = 880;
+  const plateH = 820;
   const plateX = (1000 - plateW) / 2;
   const plateY = curY;
 
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-  ctx.shadowBlur = 24;
-  ctx.shadowOffsetY = 10;
+  ctx.shadowBlur = 20;
+  ctx.shadowOffsetY = 8;
 
-  drawRoundedRect(ctx, plateX, plateY, plateW, plateH, 28);
+  drawRoundedRect(ctx, plateX, plateY, plateW, plateH, 26);
   ctx.fillStyle = '#ffffff';
   ctx.fill();
 
@@ -285,10 +267,10 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   ctx.restore();
 
   // Inside White Card:
-  let innerY = plateY + 16;
+  let innerY = plateY + 18;
 
-  // QR CODE (GIANT 700 x 700 px - Huge & Dominated!)
-  const qrSize = 700;
+  // QR Code (GIANT 640 x 640 px)
+  const qrSize = 640;
   const qrX = (1000 - qrSize) / 2;
   const qrY = innerY;
 
@@ -305,62 +287,52 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
 
   innerY += qrSize + 16;
 
-  // TABLE CODE & DIRECT LINK
+  // Table Code badge + WhatsApp Order info (Short & Crisp inside card)
   ctx.save();
   ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.fillStyle = '#0f172a';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
 
-  const codeLabel = 'Table Code: ';
-  ctx.fillText(codeLabel, 440, innerY);
+  const codePillW = 340;
+  const codePillH = 42;
+  const codePillX = (1000 - codePillW) / 2;
 
-  const codeStr = ` ${options.shortCode} `;
-  ctx.font = '900 26px monospace';
-  const codeW = ctx.measureText(codeStr).width + 20;
-  drawRoundedRect(ctx, 510, innerY - 4, codeW, 36, 8);
+  drawRoundedRect(ctx, codePillX, innerY, codePillW, codePillH, 10);
   ctx.fillStyle = '#eff6ff';
   ctx.fill();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = '#3b82f6';
   ctx.stroke();
+
   ctx.fillStyle = '#1d4ed8';
+  ctx.font = '900 24px monospace';
+  ctx.fillText(`Table Code: ${options.shortCode}`, 500, innerY + codePillH / 2);
+  ctx.restore();
+
+  innerY += codePillH + 16;
+
+  // SHORT WHATSAPP / CALL ORDER LINE (Requested by user)
+  ctx.save();
+  const waBarW = 680;
+  const waBarH = 46;
+  const waBarX = (1000 - waBarW) / 2;
+
+  drawRoundedRect(ctx, waBarX, innerY, waBarW, waBarH, 12);
+  ctx.fillStyle = '#ecfdf5';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#10b981';
+  ctx.stroke();
+
+  ctx.font = '900 22px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.fillStyle = '#047857';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(options.shortCode, 510 + codeW / 2, innerY + 14);
+  ctx.fillText(`💬 WhatsApp Order / Call: +91 ${whatsappNum}`, 500, innerY + waBarH / 2);
   ctx.restore();
 
-  innerY += 46;
-
-  // RESTAURANT CONTACT / WHATSAPP (BIG & PROMINENT DIRECTLY ON WHITE CARD)
-  ctx.save();
-  ctx.font = '900 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-  ctx.fillStyle = '#0f172a';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-
-  if (contactPhone === whatsappNum) {
-    ctx.fillText(`📞 Call / WhatsApp: +91 ${contactPhone}`, 500, innerY);
-  } else {
-    ctx.fillText(`📞 Call: +91 ${contactPhone}   |   💬 WA: +91 ${whatsappNum}`, 500, innerY);
-  }
-
-  innerY += 34;
-
-  // Short Direct URL
-  ctx.font = '600 17px monospace';
-  ctx.fillStyle = '#64748b';
-  ctx.fillText(`direct link: ${displayHost}/q/${options.shortCode}`, 500, innerY);
-
-  innerY += 26;
-
-  // Friendly Scan Tip
-  ctx.font = '700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-  ctx.fillStyle = '#059669';
-  ctx.fillText('📱 Open Camera or any QR Scanner ➔ Scan to View Menu & Order', 500, innerY);
-  ctx.restore();
-
-  curY += plateH + 22;
+  curY += plateH + 28;
 
   // 6. MANDATORY DIGIMOMS FOOTER (EXACT REQUIREMENT AS REQUESTED)
   ctx.save();
@@ -370,25 +342,25 @@ export async function renderStandToCanvas(options: QrPrintOptions): Promise<HTML
   lineGrad.addColorStop(0.5, 'rgba(251, 191, 36, 0.6)');
   lineGrad.addColorStop(1, 'transparent');
   ctx.strokeStyle = lineGrad;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.moveTo(120, curY);
   ctx.lineTo(880, curY);
   ctx.stroke();
 
-  curY += 16;
+  curY += 24;
 
   // Line 1: Resturent Os Service Provide by DigiMoms (9475388085 WhatsApp)
-  ctx.font = 'bold 21px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.fillStyle = '#f1f5f9';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillText('Restaurant Os Service Provide by DigiMoms (9475388085 WhatsApp)', 500, curY);
 
-  curY += 28;
+  curY += 32;
 
   // Line 2: visit : www.digimoms.in
-  ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.font = 'bold 21px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.fillStyle = theme.goldBorder;
   ctx.fillText('visit : www.digimoms.in', 500, curY);
   ctx.restore();
