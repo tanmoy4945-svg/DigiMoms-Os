@@ -137,7 +137,19 @@ async function startServer() {
   });
 
   app.post('/api/ceo/staff', async (req, res) => {
-    const staffList = req.body || [];
+    const incomingList = req.body || [];
+    const currentList = readJsonFile<any[]>('ceo_staff.json', []);
+    
+    // Merge incoming list with current list so accounts are never lost
+    const mergedMap = new Map();
+    for (const item of currentList) {
+      if (item && item.id) mergedMap.set(item.id, item);
+    }
+    for (const item of incomingList) {
+      if (item && item.id) mergedMap.set(item.id, item);
+    }
+    const staffList = Array.from(mergedMap.values());
+
     writeJsonFile('ceo_staff.json', staffList);
     try {
       for (const staff of staffList) {

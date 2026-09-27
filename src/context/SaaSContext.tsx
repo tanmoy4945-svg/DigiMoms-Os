@@ -1799,10 +1799,18 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .then(res => res.json())
       .then(json => {
         if (json.success && Array.isArray(json.data)) {
-          setCeoStaffList(json.data);
-          try {
-            localStorage.setItem('digimoms_ceo_staff', JSON.stringify(json.data));
-          } catch {}
+          if (json.data.length > 0) {
+            setCeoStaffList(prev => {
+              const map = new Map();
+              for (const s of prev) map.set(s.id, s);
+              for (const s of json.data) map.set(s.id, s);
+              const merged = Array.from(map.values());
+              try {
+                localStorage.setItem('digimoms_ceo_staff', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
         }
       })
       .catch(() => {});
