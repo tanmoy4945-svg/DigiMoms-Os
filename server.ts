@@ -124,14 +124,40 @@ async function startServer() {
   });
 
   // API Route: Persistent CEO Staff Management
-  app.get('/api/ceo/staff', (req, res) => {
+  app.get('/api/ceo/staff', async (req, res) => {
+    try {
+      const { data, error } = await serverSupabase.from('ceo_staff').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
+        writeJsonFile('ceo_staff.json', data);
+        return res.json({ success: true, data });
+      }
+    } catch {}
     const staffList = readJsonFile<any[]>('ceo_staff.json', []);
     res.json({ success: true, data: staffList });
   });
 
-  app.post('/api/ceo/staff', (req, res) => {
+  app.post('/api/ceo/staff', async (req, res) => {
     const staffList = req.body || [];
     writeJsonFile('ceo_staff.json', staffList);
+    try {
+      for (const staff of staffList) {
+        await serverSupabase.from('ceo_staff').upsert({
+          id: staff.id,
+          name: staff.name,
+          mobile: staff.mobile,
+          password_hash: staff.password_hash,
+          role: staff.role,
+          status: staff.status,
+          permissions: staff.permissions,
+          last_password_change: staff.last_password_change,
+          last_login: staff.last_login,
+          created_at: staff.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+      }
+    } catch (err) {
+      console.warn('Supabase ceo_staff sync warning:', err);
+    }
     res.json({ success: true, data: staffList });
   });
 
