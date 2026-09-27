@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { ShieldCheck, Lock, Smartphone, Key, ArrowRight } from 'lucide-react';
+import { ShieldCheck, Lock, Smartphone, Key, ArrowRight, UserCheck } from 'lucide-react';
 
 export const CeoLogin: React.FC = () => {
-  const { loginCeo, setActiveView } = useSaaS();
+  const { loginCeo, loginCeoStaffMember, setActiveView } = useSaaS();
+  const [loginMode, setLoginMode] = useState<'master' | 'staff'>('master');
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
@@ -11,8 +12,14 @@ export const CeoLogin: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (loginCeo(mobile, password, pin, rememberMe)) {
-      setActiveView('ceo-dashboard');
+    if (loginMode === 'master') {
+      if (loginCeo(mobile, password, pin, rememberMe)) {
+        setActiveView('ceo-dashboard');
+      }
+    } else {
+      if (loginCeoStaffMember(mobile, password, rememberMe)) {
+        setActiveView('ceo-dashboard');
+      }
     }
   };
 
@@ -23,23 +30,51 @@ export const CeoLogin: React.FC = () => {
 
         <div className="text-center space-y-2">
           <div className="w-14 h-14 rounded-2xl bg-purple-600/20 text-purple-400 flex items-center justify-center mx-auto border border-purple-500/30">
-            <ShieldCheck className="w-8 h-8" />
+            {loginMode === 'master' ? <ShieldCheck className="w-8 h-8" /> : <UserCheck className="w-8 h-8 text-amber-400" />}
           </div>
-          <h1 className="text-2xl font-extrabold text-white">CEO Control Center</h1>
+          <h1 className="text-2xl font-extrabold text-white">
+            {loginMode === 'master' ? 'CEO Control Center' : 'CEO Staff / Worker Login'}
+          </h1>
           <p className="text-slate-400 text-xs">
-            Super Administrator Authentication for DigiMoms SaaS Platform
+            {loginMode === 'master' 
+              ? 'Super Administrator Master Authentication' 
+              : 'Amazon-Style Child Access (Restricted to Assigned Permissions)'}
           </p>
+        </div>
+
+        {/* Mode Switcher Tabs */}
+        <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+          <button
+            type="button"
+            onClick={() => setLoginMode('master')}
+            className={`py-2 rounded-xl text-xs font-bold transition-all ${
+              loginMode === 'master' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Master CEO
+          </button>
+          <button
+            type="button"
+            onClick={() => setLoginMode('staff')}
+            className={`py-2 rounded-xl text-xs font-bold transition-all ${
+              loginMode === 'staff' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Worker / Staff
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">CEO Mobile Number</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              {loginMode === 'master' ? 'CEO Mobile Number' : 'Staff / Worker Mobile Number'}
+            </label>
             <div className="relative">
               <Smartphone className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
               <input
                 type="tel"
                 required
-                placeholder="Enter registered mobile number"
+                placeholder="Enter mobile number"
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:border-purple-500 outline-none"
@@ -48,13 +83,15 @@ export const CeoLogin: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">CEO Master Password</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              {loginMode === 'master' ? 'CEO Master Password' : 'Staff Terminal Password'}
+            </label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
               <input
                 type="password"
                 required
-                placeholder="Enter Master Password"
+                placeholder={loginMode === 'master' ? 'Enter Master Password' : 'Enter Staff Password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:border-purple-500 outline-none"
@@ -62,21 +99,23 @@ export const CeoLogin: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">CEO Secret Security PIN (6 Digits)</label>
-            <div className="relative">
-              <Key className="w-4 h-4 text-amber-500 absolute left-3.5 top-3" />
-              <input
-                type="password"
-                required
-                maxLength={6}
-                placeholder="Enter 6-Digit PIN"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                className="w-full bg-slate-950 border border-amber-500/40 rounded-xl pl-10 pr-4 py-2.5 text-sm text-amber-300 font-mono tracking-widest focus:border-amber-400 outline-none placeholder:text-slate-600 placeholder:tracking-normal"
-              />
+          {loginMode === 'master' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">CEO Secret Security PIN (6 Digits)</label>
+              <div className="relative">
+                <Key className="w-4 h-4 text-amber-500 absolute left-3.5 top-3" />
+                <input
+                  type="password"
+                  required
+                  maxLength={6}
+                  placeholder="Enter 6-Digit PIN"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  className="w-full bg-slate-950 border border-amber-500/40 rounded-xl pl-10 pr-4 py-2.5 text-sm text-amber-300 font-mono tracking-widest focus:border-amber-400 outline-none placeholder:text-slate-600 placeholder:tracking-normal"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center justify-between text-xs">
             <label className="flex items-center gap-2 cursor-pointer text-slate-300">
@@ -92,11 +131,25 @@ export const CeoLogin: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full py-3.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2"
+            className={`w-full py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
+              loginMode === 'master' 
+                ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30' 
+                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30'
+            }`}
           >
-            Authenticate CEO Session <ArrowRight className="w-4 h-4" />
+            {loginMode === 'master' ? 'Authenticate Master CEO' : 'Login as Staff / Worker'} <ArrowRight className="w-4 h-4" />
           </button>
         </form>
+
+        <div className="pt-4 border-t border-slate-800 text-center">
+          <p className="text-[11px] text-slate-400">
+            {loginMode === 'master' ? (
+              <span>Are you a worker/staff member? <button onClick={() => setLoginMode('staff')} className="text-amber-400 font-bold hover:underline">Click here for Worker Login</button></span>
+            ) : (
+              <span>Need Master Access? <button onClick={() => setLoginMode('master')} className="text-purple-400 font-bold hover:underline">Click here for Master CEO Login</button></span>
+            )}
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
 import { SmartImage } from '../common/SmartImage';
+import { FoodImageModal } from '../common/FoodImageModal';
 import { supabase } from '../../lib/supabase';
 import {
   Restaurant, MenuItem, MenuCategory, Table,
@@ -11,7 +12,7 @@ import {
   QrCode, MapPin, Clock, ShieldCheck, Utensils, Star, Phone, Search,
   MessageCircle, Mail, ExternalLink, Calendar, CheckCircle2, ChevronRight,
   Info, Sparkles, Building2, Globe, FileText, Loader2, AlertCircle,
-  UserCheck, ChefHat, Lock, X
+  UserCheck, ChefHat, Lock, X, Maximize2
 } from 'lucide-react';
 
 export const RestaurantPublicWebsite: React.FC = () => {
@@ -41,6 +42,7 @@ export const RestaurantPublicWebsite: React.FC = () => {
   const [socialSettings, setSocialSettings] = useState<RestaurantSocialLinks | null>(null);
   const [servicesList, setServicesList] = useState<RestaurantServiceItem[]>([]);
   const [pricingList, setPricingList] = useState<RestaurantPricingItem[]>([]);
+  const [fullScreenImageItem, setFullScreenImageItem] = useState<MenuItem | null>(null);
 
   useEffect(() => {
     // Parse tab from current subpath e.g. /r/slug/privacy-policy
@@ -611,11 +613,24 @@ export const RestaurantPublicWebsite: React.FC = () => {
                   key={item.id}
                   className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800/80 hover:border-slate-700 transition-all flex gap-4"
                 >
-                  <SmartImage
-                    src={item.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300'}
-                    alt={item.name}
-                    className="w-24 h-24 rounded-2xl object-cover border border-slate-800 shrink-0"
-                  />
+                  <div
+                    onClick={() => setFullScreenImageItem(item)}
+                    className="relative group cursor-pointer w-24 h-24 rounded-2xl overflow-hidden border border-slate-800 shrink-0"
+                    title="Click to view photo in full screen"
+                  >
+                    <SmartImage
+                      src={item.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=300'}
+                      alt={item.name}
+                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Maximize2 className="w-5 h-5 text-white drop-shadow-md" />
+                    </div>
+                    <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[8px] text-white font-bold flex items-center gap-0.5 pointer-events-none">
+                      <Maximize2 className="w-2.5 h-2.5 text-amber-400" />
+                      <span>ZOOM</span>
+                    </div>
+                  </div>
                   <div className="space-y-1.5 flex-1 flex flex-col justify-between">
                     <div>
                       <div className="flex items-center justify-between gap-1">
@@ -1165,6 +1180,16 @@ export const RestaurantPublicWebsite: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Full-Screen Food Image Viewer Modal */}
+      <FoodImageModal
+        item={fullScreenImageItem}
+        onClose={() => setFullScreenImageItem(null)}
+        onAction={() => {
+          launchCustomerQr();
+        }}
+        actionLabel="Order At Table"
+      />
     </div>
   );
 };

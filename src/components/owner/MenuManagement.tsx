@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
-import { Plus, Edit2, Eye, EyeOff, Trash2, Utensils, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Plus, Edit2, Eye, EyeOff, Trash2, Utensils, Check, AlertCircle, Loader2, Maximize2 } from 'lucide-react';
 import { MenuItem } from '../../types';
 import { validateAndNormalizeImageUrl } from '../../utils/imageUrl';
 import { SmartImage } from '../common/SmartImage';
+import { CompressedImageUploader } from '../common/CompressedImageUploader';
+import { FoodImageModal } from '../common/FoodImageModal';
 
 export const MenuManagement: React.FC = () => {
   const { currentOwner, categories, menuItems, addCategory, addMenuItem, updateMenuItem, toggleMenuItemAvailability } = useSaaS();
@@ -12,6 +14,7 @@ export const MenuManagement: React.FC = () => {
   const [showCatModal, setShowCatModal] = useState(false);
   const [showDishModal, setShowDishModal] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  const [fullScreenImageItem, setFullScreenImageItem] = useState<MenuItem | null>(null);
 
   const [isValidatingImage, setIsValidatingImage] = useState(false);
   const [dishImageError, setDishImageError] = useState<string | null>(null);
@@ -187,7 +190,16 @@ export const MenuManagement: React.FC = () => {
                   <tr key={dish.id} className="hover:bg-slate-800/40 transition-all">
                     <td className="p-4">
                       <div className="flex items-center gap-3">
-                        <SmartImage src={dish.image_url} alt={dish.name} className="w-10 h-10 rounded-xl object-cover border border-slate-800" />
+                        <div
+                          onClick={() => setFullScreenImageItem(dish)}
+                          className="relative group cursor-pointer w-11 h-11 rounded-xl overflow-hidden border border-slate-800 shrink-0"
+                          title="Click to view full screen photo"
+                        >
+                          <SmartImage src={dish.image_url} alt={dish.name} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Maximize2 className="w-3.5 h-3.5 text-white" />
+                          </div>
+                        </div>
                         <div>
                           <div className="font-bold text-white text-sm">{dish.name}</div>
                           <p className="text-[11px] text-slate-400 line-clamp-1">{dish.description}</p>
@@ -318,28 +330,16 @@ export const MenuManagement: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Image URL
-                  <span className="text-[10px] text-slate-400 block font-normal">(Google Drive, Supabase, CDN, or direct URL)</span>
-                </label>
-                <input
-                  type="text"
-                  value={dishForm.image_url}
-                  onChange={(e) => {
-                    setDishImageError(null);
-                    setDishForm({ ...dishForm, image_url: e.target.value });
-                  }}
-                  placeholder="Paste Image URL (e.g. Google Drive, Supabase, CDN...)"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:border-emerald-500 outline-none"
-                />
-                {dishForm.image_url && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <SmartImage src={dishForm.image_url} alt="Dish Preview" className="w-12 h-12 rounded-xl object-cover border border-slate-800" />
-                    <span className="text-[10px] text-slate-400">Live Preview</span>
-                  </div>
-                )}
-              </div>
+              <CompressedImageUploader
+                label="Food Item Image"
+                type="food"
+                value={dishForm.image_url}
+                onChange={(url) => {
+                  setDishImageError(null);
+                  setDishForm({ ...dishForm, image_url: url });
+                }}
+                helperText="Upload any photo — automatically compressed to 60-120 KB for blazing-fast mobile dining."
+              />
 
               {dishImageError && (
                 <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2">
@@ -410,6 +410,19 @@ export const MenuManagement: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Full-Screen Food Image Viewer Modal */}
+      <FoodImageModal
+        item={fullScreenImageItem}
+        onClose={() => setFullScreenImageItem(null)}
+        onAction={(item) => {
+          const matchedDish = restMenu.find(m => m.name === item.name);
+          if (matchedDish) {
+            openEditModal(matchedDish);
+          }
+        }}
+        actionLabel="Edit This Dish"
+      />
     </div>
   );
 };

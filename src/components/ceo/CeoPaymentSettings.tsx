@@ -5,7 +5,9 @@ import { verifyCeoGatewayConfig } from '../../lib/paymentAdapters';
 import { CeoPaymentConfig } from '../../types';
 
 export const CeoPaymentSettings: React.FC = () => {
-  const { ceoPaymentConfig, updateCeoPaymentConfig, subscriptionHistory } = useSaaS();
+  const { ceoPaymentConfig, updateCeoPaymentConfig, subscriptionHistory, currentCeoStaff, showToast } = useSaaS();
+  const isMasterCeo = !currentCeoStaff;
+  const canEditPay = isMasterCeo || currentCeoStaff?.permissions?.can_edit_payments === true;
 
   const [primaryGateway, setPrimaryGateway] = useState<'phonepe' | 'razorpay' | 'payu' | 'demo'>(
     ceoPaymentConfig?.primary_gateway || 'payu'
@@ -62,6 +64,10 @@ export const CeoPaymentSettings: React.FC = () => {
   }, [ceoPaymentConfig]);
 
   const handleVerifyPhonePe = async () => {
+    if (!canEditPay) {
+      showToast('Access Denied: You have View-Only permissions for payments.', 'error');
+      return;
+    }
     setIsVerifying(true);
     setVerifyMessage('Running PhonePe SHA-256 Checksum Signature Verification test...');
 
@@ -90,6 +96,10 @@ export const CeoPaymentSettings: React.FC = () => {
   };
 
   const handleVerifyRazorpay = async () => {
+    if (!canEditPay) {
+      showToast('Access Denied: You have View-Only permissions for payments.', 'error');
+      return;
+    }
     setIsVerifying(true);
     setVerifyMessage('Running Razorpay Key & Secret format verification test...');
 
@@ -114,6 +124,10 @@ export const CeoPaymentSettings: React.FC = () => {
   };
 
   const handleVerifyPayU = async () => {
+    if (!canEditPay) {
+      showToast('Access Denied: You have View-Only permissions for payments.', 'error');
+      return;
+    }
     setIsVerifying(true);
     setVerifyMessage('Running PayU SHA-512 Hash Generation and format verification test...');
 
@@ -141,6 +155,10 @@ export const CeoPaymentSettings: React.FC = () => {
 
   const handleSaveAll = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditPay) {
+      showToast('Access Denied: You have View-Only permissions for payments. Gateway keys and settings cannot be edited.', 'error');
+      return;
+    }
 
     let isPhonepeValid = phonepeVerified;
     let isRazorpayValid = razorpayVerified;

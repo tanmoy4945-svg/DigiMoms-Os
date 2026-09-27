@@ -3,6 +3,7 @@ import { useSaaS } from '../../context/SaaSContext';
 import { Building2, Image, MapPin, Clock, FileText, Save, Globe, Shield, Phone, Sparkles, CheckSquare, Square, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { validateAndNormalizeImageUrl } from '../../utils/imageUrl';
 import { SmartImage } from '../common/SmartImage';
+import { CompressedImageUploader } from '../common/CompressedImageUploader';
 
 export const SettingsManagement: React.FC = () => {
   const { currentOwner, updateOwnerProfile } = useSaaS();
@@ -275,53 +276,30 @@ For feedback, reservations, or inquiries, please call us or send a WhatsApp mess
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Logo Image URL
-                  <span className="text-[10px] text-slate-400 block font-normal">(Google Drive, Supabase, CDN, or direct URL)</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.logo}
-                  onChange={(e) => {
-                    setImageError(null);
-                    setSaveSuccessMsg(null);
-                    setForm({ ...form, logo: e.target.value });
-                  }}
-                  placeholder="Paste image URL (e.g. Google Drive, Supabase, CDN...)"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-blue-500 outline-none"
-                />
-                {form.logo && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <SmartImage src={form.logo} alt="Logo Preview" className="w-12 h-12 rounded-xl object-cover border border-slate-800" />
-                    <span className="text-[10px] text-slate-400">Live Preview</span>
-                  </div>
-                )}
-              </div>
+              <CompressedImageUploader
+                label="Restaurant Logo"
+                type="logo"
+                value={form.logo}
+                onChange={(url) => {
+                  setImageError(null);
+                  setSaveSuccessMsg(null);
+                  setForm({ ...form, logo: url });
+                }}
+                helperText="Upload any logo — auto-compressed to 20-40 KB for razor-sharp, lightweight display."
+              />
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Banner Image URL
-                  <span className="text-[10px] text-slate-400 block font-normal">(Google Drive, Supabase, CDN, or direct URL)</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.banner}
-                  onChange={(e) => {
-                    setImageError(null);
-                    setSaveSuccessMsg(null);
-                    setForm({ ...form, banner: e.target.value });
-                  }}
-                  placeholder="Paste image URL (e.g. Google Drive, Supabase, CDN...)"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-blue-500 outline-none"
-                />
-                {form.banner && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <SmartImage src={form.banner} alt="Banner Preview" className="w-24 h-12 rounded-xl object-cover border border-slate-800" />
-                    <span className="text-[10px] text-slate-400">Live Preview</span>
-                  </div>
-                )}
-              </div>
+              <CompressedImageUploader
+                label="Restaurant Banner / Cover"
+                type="banner"
+                value={form.banner}
+                onChange={(url) => {
+                  setImageError(null);
+                  setSaveSuccessMsg(null);
+                  setForm({ ...form, banner: url });
+                }}
+                previewHeightClass="w-24 h-12"
+                helperText="Upload any banner — auto-compressed to 150-200 KB for high-speed website loading."
+              />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { validateAndNormalizeImageUrl } from '../../utils/imageUrl';
 import { SmartImage } from '../common/SmartImage';
+import { CompressedImageUploader } from '../common/CompressedImageUploader';
 import {
   RestaurantWebsiteSettings, RestaurantServiceItem, RestaurantPricingItem,
   RestaurantLegalPages, RestaurantSocialLinks
@@ -387,49 +388,30 @@ export const RestaurantWebsiteManager: React.FC<RestaurantWebsiteManagerProps> =
             </div>
 
             <div>
-              <label className="block font-bold text-slate-300 mb-1">
-                Logo URL
-                <span className="text-[10px] text-slate-400 block font-normal">(Google Drive, Supabase, CDN, or direct image URL)</span>
-              </label>
-              <input
-                type="text"
+              <CompressedImageUploader
+                label="Website Logo"
+                type="logo"
                 value={homeForm.logo}
-                onChange={e => {
+                onChange={(url) => {
                   setHomeImageError(null);
-                  setHomeForm({ ...homeForm, logo: e.target.value });
+                  setHomeForm({ ...homeForm, logo: url });
                 }}
-                placeholder="Paste Image URL (Google Drive, Supabase, CDN...)"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
+                helperText="Auto-compressed to 20-40 KB."
               />
-              {homeForm.logo && (
-                <div className="mt-2 flex items-center gap-2">
-                  <SmartImage src={homeForm.logo} alt="Logo Preview" className="w-10 h-10 rounded-xl object-cover border border-slate-800" />
-                  <span className="text-[10px] text-slate-400">Live Preview</span>
-                </div>
-              )}
             </div>
 
             <div className="md:col-span-2">
-              <label className="block font-bold text-slate-300 mb-1">
-                Cover / Banner URL
-                <span className="text-[10px] text-slate-400 block font-normal">(Google Drive, Supabase, CDN, or direct image URL)</span>
-              </label>
-              <input
-                type="text"
+              <CompressedImageUploader
+                label="Cover / Hero Banner"
+                type="banner"
                 value={homeForm.banner}
-                onChange={e => {
+                onChange={(url) => {
                   setHomeImageError(null);
-                  setHomeForm({ ...homeForm, banner: e.target.value });
+                  setHomeForm({ ...homeForm, banner: url });
                 }}
-                placeholder="Paste Image URL (Google Drive, Supabase, CDN...)"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
+                previewHeightClass="w-32 h-14"
+                helperText="Auto-compressed to 150-200 KB."
               />
-              {homeForm.banner && (
-                <div className="mt-2 flex items-center gap-2">
-                  <SmartImage src={homeForm.banner} alt="Banner Preview" className="w-20 h-10 rounded-xl object-cover border border-slate-800" />
-                  <span className="text-[10px] text-slate-400">Live Preview</span>
-                </div>
-              )}
             </div>
 
             <div className="md:col-span-2">
@@ -1142,28 +1124,16 @@ export const RestaurantWebsiteManager: React.FC<RestaurantWebsiteManagerProps> =
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">
-                  Image URL
-                  <span className="text-[10px] text-slate-400 block font-normal">(Google Drive, Supabase, CDN, or direct URL)</span>
-                </label>
-                <input
-                  type="text"
-                  value={serviceForm.image}
-                  onChange={e => {
-                    setServiceImageError(null);
-                    setServiceForm({ ...serviceForm, image: e.target.value });
-                  }}
-                  placeholder="Paste Image URL (e.g. Google Drive, Supabase, CDN...)"
-                  className="w-full px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono"
-                />
-                {serviceForm.image && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <SmartImage src={serviceForm.image} alt="Service Preview" className="w-12 h-12 rounded-xl object-cover border border-slate-800" />
-                    <span className="text-[10px] text-slate-400">Live Preview</span>
-                  </div>
-                )}
-              </div>
+              <CompressedImageUploader
+                label="Service Photo"
+                type="food"
+                value={serviceForm.image}
+                onChange={(url) => {
+                  setServiceImageError(null);
+                  setServiceForm({ ...serviceForm, image: url });
+                }}
+                helperText="Auto-compressed to 60-120 KB."
+              />
 
               {serviceImageError && (
                 <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2">

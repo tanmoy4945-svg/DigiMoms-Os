@@ -17,9 +17,10 @@ import { RazorpayCheckoutModal } from '../common/RazorpayCheckoutModal';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
 import { MenuItem, MenuCategory, TableSession, Table, Language, Restaurant, Order, CouponConfig } from '../../types';
-import { FileText, Printer } from 'lucide-react';
+import { FileText, Printer, Maximize2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { SmartImage } from '../common/SmartImage';
+import { FoodImageModal } from '../common/FoodImageModal';
 import { safeFetchJson } from '../../lib/safeFetch';
 
 interface CartItem {
@@ -177,6 +178,7 @@ export const CustomerQrApp: React.FC = () => {
   // Modals & Quantity Popup State
   const [detailsItem, setDetailsItem] = useState<MenuItem | null>(null);
   const [quantityPopupItem, setQuantityPopupItem] = useState<{ item: MenuItem; quantity: number; instructions: string } | null>(null);
+  const [fullScreenImageItem, setFullScreenImageItem] = useState<MenuItem | null>(null);
 
   // Active Session for Table (Loaded once per table/restaurant, stable & persistent)
   const [session, setSession] = useState<TableSession | null>(null);
@@ -1352,7 +1354,20 @@ export const CustomerQrApp: React.FC = () => {
                 const qty = getItemQuantity(item.id);
                 return (
                   <div key={item.id} className="p-4 rounded-3xl bg-slate-900 border border-slate-800/80 flex gap-4 transition-all hover:border-slate-700">
-                    <SmartImage src={item.image_url} alt={item.name} className="w-24 h-24 rounded-2xl object-cover border border-slate-800 shrink-0" />
+                    <div
+                      onClick={() => setFullScreenImageItem(item)}
+                      className="relative group cursor-pointer w-24 h-24 rounded-2xl overflow-hidden border border-slate-800 shrink-0"
+                      title="Click to view photo in full screen"
+                    >
+                      <SmartImage src={item.image_url} alt={item.name} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Maximize2 className="w-5 h-5 text-white drop-shadow-md" />
+                      </div>
+                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[8px] text-white font-bold flex items-center gap-0.5 pointer-events-none">
+                        <Maximize2 className="w-2.5 h-2.5 text-amber-400" />
+                        <span>ZOOM</span>
+                      </div>
+                    </div>
 
                     <div className="flex-1 flex flex-col justify-between">
                       <div>
@@ -1533,7 +1548,20 @@ export const CustomerQrApp: React.FC = () => {
               <button onClick={() => setDetailsItem(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
 
-            <SmartImage src={detailsItem.image_url} alt={detailsItem.name} className="w-full h-40 rounded-2xl object-cover border border-slate-800" />
+            <div
+              onClick={() => setFullScreenImageItem(detailsItem)}
+              className="relative group cursor-pointer w-full h-44 rounded-2xl overflow-hidden border border-slate-800"
+              title="Click to view photo in full screen"
+            >
+              <SmartImage src={detailsItem.image_url} alt={detailsItem.name} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Maximize2 className="w-6 h-6 text-white drop-shadow-lg" />
+              </div>
+              <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded-full bg-slate-950/80 backdrop-blur-md text-[10px] text-white font-bold flex items-center gap-1.5 shadow-lg border border-slate-800">
+                <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
+                <span>View Full Screen</span>
+              </div>
+            </div>
 
             <div className="space-y-2 text-xs text-slate-300">
               <div className="flex items-center justify-between">
@@ -2324,6 +2352,20 @@ export const CustomerQrApp: React.FC = () => {
           isSubscription={false}
         />
       )}
+
+      {/* Full-Screen Food Image Viewer Modal */}
+      <FoodImageModal
+        item={fullScreenImageItem}
+        onClose={() => setFullScreenImageItem(null)}
+        onAction={(item) => {
+          setQuantityPopupItem({
+            item: item as MenuItem,
+            quantity: getItemQuantity((item as MenuItem).id) || 1,
+            instructions: getItemInstructions((item as MenuItem).id)
+          });
+        }}
+        actionLabel="Order / Add to Cart"
+      />
 
       {/* FOOTER SIGNATURE ON ALL CUSTOMER PAGES */}
       <footer className="text-center py-6 border-t border-slate-900/80 text-slate-500 text-xs font-medium">

@@ -112,6 +112,20 @@ export interface Restaurant {
   updated_at: string;
 }
 
+export interface StaffPermissions {
+  can_view_menu?: boolean;
+  can_edit_menu?: boolean;
+  can_view_tables?: boolean;
+  can_edit_tables?: boolean;
+  can_view_orders?: boolean;
+  can_edit_orders?: boolean;
+  can_view_reports?: boolean;
+  can_view_settings?: boolean;
+  can_edit_settings?: boolean;
+  can_view_staff?: boolean;
+  can_edit_staff?: boolean;
+}
+
 export interface Staff {
   id: string;
   restaurant_id: string;
@@ -121,6 +135,35 @@ export interface Staff {
   last_password_change?: string;
   role: 'waiter' | 'kitchen' | 'manager';
   status: 'active' | 'disabled';
+  permissions?: StaffPermissions;
+  last_login?: string;
+  created_at: string;
+}
+
+export interface CeoStaffPermissions {
+  can_view_restaurants?: boolean;
+  can_edit_restaurants?: boolean;
+  can_view_subscriptions?: boolean;
+  can_edit_subscriptions?: boolean;
+  can_view_payments?: boolean;
+  can_edit_payments?: boolean;
+  can_view_reports?: boolean;
+  can_view_sql?: boolean;
+  can_view_storage?: boolean;
+  can_view_backup?: boolean;
+  can_view_feedback?: boolean;
+  can_view_logs?: boolean;
+}
+
+export interface CeoStaffMember {
+  id: string;
+  name: string;
+  mobile: string;
+  password_hash: string;
+  role: 'manager' | 'support' | 'billing';
+  status: 'active' | 'disabled';
+  permissions: CeoStaffPermissions;
+  last_password_change?: string;
   last_login?: string;
   created_at: string;
 }

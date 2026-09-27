@@ -4,7 +4,7 @@ import { SmartImage } from '../common/SmartImage';
 import {
   Building2, Plus, Search, ShieldCheck, DollarSign, Calendar,
   AlertTriangle, RefreshCw, Archive, RotateCcw, Power, Eye, LogOut,
-  Database, Star, FileText, Phone, CreditCard, Edit3, Settings, Sparkles, CheckCircle2, Trash2, Loader2, Globe, Gift, History
+  Database, Star, FileText, Phone, CreditCard, Edit3, Settings, Sparkles, CheckCircle2, Trash2, Loader2, Globe, Gift, History, Users
 } from 'lucide-react';
 import { SqlSchemaViewer } from './SqlSchemaViewer';
 import { CeoPaymentSettings } from './CeoPaymentSettings';
@@ -14,6 +14,7 @@ import { CeoAgreementGenerator } from './CeoAgreementGenerator';
 import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RestaurantWebsiteManager } from '../owner/RestaurantWebsiteManager';
 import { CeoHealthMonitor } from './CeoHealthMonitor';
+import { CeoStaffManagement } from './CeoStaffManagement';
 import { Restaurant } from '../../types';
 
 export type RevenuePeriod = 'this_month' | 'today' | 'yesterday' | 'this_week' | 'last_month' | 'this_year' | 'lifetime';
@@ -103,10 +104,40 @@ export const CeoDashboard: React.FC = () => {
     setActiveSlug,
     ceoRazorpayConfig,
     updateCeoRazorpayConfig,
-    showToast
+    showToast,
+    ceoStaffList,
+    currentCeoStaff
   } = useSaaS();
 
-  const [activeTab, setActiveTab] = useState<'restaurants' | 'agreement' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>('restaurants');
+  const isMasterCeo = !currentCeoStaff;
+  const canViewRest = isMasterCeo || currentCeoStaff?.permissions?.can_view_restaurants !== false;
+  const canEditRest = isMasterCeo || currentCeoStaff?.permissions?.can_edit_restaurants === true;
+  const canViewSubs = isMasterCeo || currentCeoStaff?.permissions?.can_view_subscriptions !== false;
+  const canEditSubs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_subscriptions === true;
+  const canViewPay = isMasterCeo || currentCeoStaff?.permissions?.can_view_payments !== false;
+  const canEditPay = isMasterCeo || currentCeoStaff?.permissions?.can_edit_payments === true;
+  const canViewRep = isMasterCeo || currentCeoStaff?.permissions?.can_view_reports !== false;
+  const canViewSql = isMasterCeo || currentCeoStaff?.permissions?.can_view_sql === true;
+  const canViewStorage = isMasterCeo || currentCeoStaff?.permissions?.can_view_storage !== false;
+  const canViewBackup = isMasterCeo || currentCeoStaff?.permissions?.can_view_backup === true;
+  const canViewFeedback = isMasterCeo || currentCeoStaff?.permissions?.can_view_feedback !== false;
+  const canViewLogs = isMasterCeo || currentCeoStaff?.permissions?.can_view_logs !== false;
+  const canManageTeam = isMasterCeo;
+
+  const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
+    if (currentCeoStaff) {
+      if (canViewRest) return 'restaurants';
+      if (canViewPay) return 'payment-settings';
+      if (canViewSubs) return 'agreement';
+      if (canViewStorage) return 'storage';
+      if (canViewFeedback) return 'feedback';
+      if (canViewLogs) return 'logs';
+      if (canViewSql) return 'sql';
+      if (canViewBackup) return 'backup';
+      return 'restaurants';
+    }
+    return 'restaurants';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [managingWebsiteRest, setManagingWebsiteRest] = useState<Restaurant | null>(null);
@@ -475,7 +506,7 @@ export const CeoDashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-extrabold text-white">CEO Control Center</h1>
               <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-xs font-bold uppercase border border-purple-500/30">
-                Super Admin
+                {isMasterCeo ? 'Super Admin' : `Staff: ${currentCeoStaff?.role}`}
               </span>
             </div>
             <p className="text-xs text-slate-400">Global SaaS Multi-Tenant Infrastructure Manager</p>
@@ -490,28 +521,50 @@ export const CeoDashboard: React.FC = () => {
             <CreditCard className="w-4 h-4 text-emerald-400" /> Razorpay Account ({(ceoRazorpayConfig?.mode || 'demo').toUpperCase()})
           </button>
 
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all"
-          >
-            <Plus className="w-4 h-4" /> Add Restaurant
-          </button>
+          {canEditRest ? (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Add Restaurant
+            </button>
+          ) : (
+            <button
+              onClick={() => showToast('Access Denied: You have View-Only permissions for restaurants.', 'error')}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-500 font-bold text-xs border border-slate-800 flex items-center gap-2 cursor-not-allowed opacity-60"
+              title="View-Only Permission"
+            >
+              <Plus className="w-4 h-4" /> Add Restaurant (Locked)
+            </button>
+          )}
 
-          <button
-            onClick={() => setShowProdResetModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold text-xs border border-rose-800 flex items-center gap-2 transition-all shadow-md"
-          >
-            <Trash2 className="w-4 h-4 text-rose-400" /> Production Reset
-          </button>
+          {isMasterCeo && (
+            <button
+              onClick={() => setShowProdResetModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold text-xs border border-rose-800 flex items-center gap-2 transition-all shadow-md cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" /> Production Reset
+            </button>
+          )}
 
           <button
             onClick={logoutCeo}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 font-bold text-xs flex items-center gap-2 border border-slate-700 transition-all"
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 font-bold text-xs flex items-center gap-2 border border-slate-700 transition-all cursor-pointer"
           >
-            <LogOut className="w-4 h-4" /> Logout CEO
+            <LogOut className="w-4 h-4" /> {isMasterCeo ? 'Logout CEO' : 'Logout Staff'}
           </button>
         </div>
       </div>
+
+      {currentCeoStaff && (
+        <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between text-xs text-amber-200">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-amber-400" />
+            <span>Logged in as Staff / Child Access: <strong>{currentCeoStaff.name}</strong> ({currentCeoStaff.role.toUpperCase()}). You only have access to permissions granted by Master CEO.</span>
+          </div>
+          <span className="font-mono text-[10px] bg-amber-500/20 px-2 py-0.5 rounded text-amber-300">Restricted Account</span>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -562,79 +615,111 @@ export const CeoDashboard: React.FC = () => {
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-        <button
-          onClick={() => setActiveTab('restaurants')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'restaurants' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Building2 className="w-4 h-4" /> Manage Tenants ({restaurants.length})
-        </button>
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
+        {canManageTeam && (
+          <button
+            onClick={() => setActiveTab('team')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'team' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4 text-purple-400" /> CEO Team & Staff ({ceoStaffList.length})
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('agreement')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'agreement' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <FileText className="w-4 h-4 text-pink-400" /> Restaurant Agreement
-        </button>
+        {canViewRest && (
+          <button
+            onClick={() => setActiveTab('restaurants')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'restaurants' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Building2 className="w-4 h-4" /> Manage Tenants ({restaurants.length})
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('payment-settings')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'payment-settings' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <CreditCard className="w-4 h-4 text-emerald-400" /> Subscription Gateway & Payments
-        </button>
+        {canViewSubs && (
+          <button
+            onClick={() => setActiveTab('agreement')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'agreement' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <FileText className="w-4 h-4 text-pink-400" /> Restaurant Agreement
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('sql')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'sql' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Database className="w-4 h-4" /> Supabase SQL Migrations
-        </button>
+        {canViewPay && (
+          <button
+            onClick={() => setActiveTab('payment-settings')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'payment-settings' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <CreditCard className="w-4 h-4 text-emerald-400" /> Subscription Gateway & Payments
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('storage')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'storage' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Settings className="w-4 h-4 text-blue-400" /> System / Storage
-        </button>
+        {canViewSql && (
+          <button
+            onClick={() => setActiveTab('sql')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'sql' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Database className="w-4 h-4" /> Supabase SQL Migrations
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('backup')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'backup' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 text-amber-400" /> System / Backup
-        </button>
+        {canViewStorage && (
+          <button
+            onClick={() => setActiveTab('storage')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'storage' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Settings className="w-4 h-4 text-blue-400" /> System / Storage
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('feedback')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'feedback' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Star className="w-4 h-4" /> Global Customer Feedback
-        </button>
+        {canViewBackup && (
+          <button
+            onClick={() => setActiveTab('backup')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'backup' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-amber-400" /> System / Backup
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('logs')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-            activeTab === 'logs' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <FileText className="w-4 h-4" /> System Audit Trail
-        </button>
-      </div>      {/* TAB 1: RESTAURANT TENANT MANAGEMENT */}
+        {canViewFeedback && (
+          <button
+            onClick={() => setActiveTab('feedback')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'feedback' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Star className="w-4 h-4" /> Global Customer Feedback
+          </button>
+        )}
+
+        {canViewLogs && (
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'logs' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <FileText className="w-4 h-4" /> System Audit Trail
+          </button>
+        )}
+      </div>
+
+      {/* TAB: CEO TEAM & STAFF MANAGEMENT */}
+      {activeTab === 'team' && canManageTeam && <CeoStaffManagement />}
+
+      {/* TAB 1: RESTAURANT TENANT MANAGEMENT */}
       {activeTab === 'restaurants' && (
         <div className="space-y-6">
           {/* 7-DAY EXPIRY RENEWAL ALERTS BOX FOR CEO */}
@@ -835,8 +920,14 @@ export const CeoDashboard: React.FC = () => {
 
                       <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
                         <button
-                          onClick={() => setEditingRestaurant(rest)}
-                          className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs inline-flex items-center gap-1"
+                          onClick={() => {
+                            if (!canEditRest) {
+                              showToast('Access Denied: You do not have permission to edit restaurants.', 'error');
+                              return;
+                            }
+                            setEditingRestaurant(rest);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs inline-flex items-center gap-1 cursor-pointer"
                           title="Edit Details"
                         >
                           <Edit3 className="w-3 h-3" /> Edit
@@ -845,20 +936,30 @@ export const CeoDashboard: React.FC = () => {
                         {/* Unified Free Access Button replacing separate Trial / Free Offer / Extension buttons */}
                         <button
                           onClick={() => {
+                            if (!canEditSubs && !canEditRest) {
+                              showToast('Access Denied: You do not have permission to manage subscriptions or free access.', 'error');
+                              return;
+                            }
                             setShowFreePlanModal(rest);
                             setFreePlanDaysInput(30);
                             setFreePlanReasonInput('Special Promotional Free Offer');
                           }}
                           title="Grant Free Days / Offer with Reason"
-                          className="px-2.5 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-bold text-xs border border-emerald-500/40 inline-flex items-center gap-1 shadow-sm"
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-bold text-xs border border-emerald-500/40 inline-flex items-center gap-1 shadow-sm cursor-pointer"
                         >
                           <Gift className="w-3.5 h-3.5 text-emerald-400" /> Free Access
                         </button>
 
                         <button
-                          onClick={() => renewRestaurantMonthly(rest.id, 1)}
+                          onClick={() => {
+                            if (!canEditSubs && !canEditRest) {
+                              showToast('Access Denied: You do not have permission to renew subscriptions.', 'error');
+                              return;
+                            }
+                            renewRestaurantMonthly(rest.id, 1);
+                          }}
                           title="Renew Subscription 1 Month"
-                          className="px-2.5 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-300 font-medium text-xs border border-blue-500/30 inline-flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-300 font-medium text-xs border border-blue-500/30 inline-flex items-center gap-1 cursor-pointer"
                         >
                           <CreditCard className="w-3 h-3" /> Renew 1Mo
                         </button>
@@ -869,23 +970,35 @@ export const CeoDashboard: React.FC = () => {
                             setHistoryFilterType('all');
                           }}
                           title="View Subscription Renewal & Free History"
-                          className="px-2.5 py-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900 text-purple-300 font-medium text-xs border border-purple-500/30 inline-flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900 text-purple-300 font-medium text-xs border border-purple-500/30 inline-flex items-center gap-1 cursor-pointer"
                         >
                           <History className="w-3 h-3" /> History
                         </button>
 
                         <button
-                          onClick={() => setShowDataModal(rest)}
+                          onClick={() => {
+                            if (!canEditRest) {
+                              showToast('Access Denied: You do not have permission to manage restaurant data.', 'error');
+                              return;
+                            }
+                            setShowDataModal(rest);
+                          }}
                           title="Manage Restaurant Data"
-                          className="px-2.5 py-1.5 rounded-lg bg-orange-950/80 hover:bg-orange-900 text-orange-300 font-medium text-xs border border-orange-500/30 inline-flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-lg bg-orange-950/80 hover:bg-orange-900 text-orange-300 font-medium text-xs border border-orange-500/30 inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Database className="w-3 h-3" /> Data
                         </button>
 
                         <button
-                          onClick={() => setManagingWebsiteRest(rest)}
+                          onClick={() => {
+                            if (!canEditRest) {
+                              showToast('Access Denied: You do not have permission to manage website.', 'error');
+                              return;
+                            }
+                            setManagingWebsiteRest(rest);
+                          }}
                           title="Manage Public Website & Portfolio"
-                          className="px-2.5 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-500/30 font-medium text-xs inline-flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-500/30 font-medium text-xs inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Globe className="w-3.5 h-3.5 text-blue-400" /> Website
                         </button>
@@ -896,42 +1009,64 @@ export const CeoDashboard: React.FC = () => {
                             setActiveView('public-restaurant');
                           }}
                           title="View Public Site"
-                          className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs"
+                          className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5 inline" />
                         </button>
 
                         {rest.status === 'suspended' ? (
                           <button
-                            onClick={() => resumeRestaurant(rest.id)}
-                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-medium text-xs"
+                            onClick={() => {
+                              if (!canEditRest) {
+                                showToast('Access Denied: You do not have permission to resume restaurants.', 'error');
+                                return;
+                              }
+                              resumeRestaurant(rest.id);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-medium text-xs cursor-pointer"
                           >
                             Resume
                           </button>
                         ) : (
                           <button
-                            onClick={() => suspendRestaurant(rest.id)}
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-950/80 text-rose-300 hover:bg-rose-900 font-medium text-xs border border-rose-500/30"
+                            onClick={() => {
+                              if (!canEditRest) {
+                                showToast('Access Denied: You do not have permission to suspend restaurants.', 'error');
+                                return;
+                              }
+                              suspendRestaurant(rest.id);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-950/80 text-rose-300 hover:bg-rose-900 font-medium text-xs border border-rose-500/30 cursor-pointer"
                           >
                             Suspend
                           </button>
                         )}
 
                         <button
-                          onClick={() => setShowResetModal(rest.id)}
-                          className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs"
+                          onClick={() => {
+                            if (!canEditRest) {
+                              showToast('Access Denied: You do not have permission to reset restaurants.', 'error');
+                              return;
+                            }
+                            setShowResetModal(rest.id);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs cursor-pointer"
                         >
                           Reset
                         </button>
 
                         <button
                           onClick={() => {
+                            if (!canEditRest) {
+                              showToast('Access Denied: You do not have permission to delete or archive restaurants.', 'error');
+                              return;
+                            }
                             setShowDeleteModal(rest);
                             setDeleteMode('archive');
                             setDeleteConfirmInput('');
                           }}
                           title="Archive or Permanently Delete Restaurant"
-                          className="px-2.5 py-1.5 rounded-lg bg-red-950 hover:bg-red-900 text-red-200 border border-red-700/50 font-medium text-xs inline-flex items-center gap-1"
+                          className="px-2.5 py-1.5 rounded-lg bg-red-950 hover:bg-red-900 text-red-200 border border-red-700/50 font-medium text-xs inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-red-400" /> Delete / Archive
                         </button>
