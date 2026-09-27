@@ -123,6 +123,18 @@ async function startServer() {
     res.json({ success: true, data: updated });
   });
 
+  // API Route: Persistent CEO Staff Management
+  app.get('/api/ceo/staff', (req, res) => {
+    const staffList = readJsonFile<any[]>('ceo_staff.json', []);
+    res.json({ success: true, data: staffList });
+  });
+
+  app.post('/api/ceo/staff', (req, res) => {
+    const staffList = req.body || [];
+    writeJsonFile('ceo_staff.json', staffList);
+    res.json({ success: true, data: staffList });
+  });
+
   // Helper: Sanitize restaurant configuration to prevent payment secrets & credential exposure
   function sanitizeRestaurantConfig(cfg: Record<string, any>, maskSecrets = true): Record<string, any> {
     if (!cfg) return {};

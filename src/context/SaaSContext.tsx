@@ -1794,6 +1794,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
+  useEffect(() => {
+    fetch('/api/ceo/staff')
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.data)) {
+          setCeoStaffList(json.data);
+          try {
+            localStorage.setItem('digimoms_ceo_staff', JSON.stringify(json.data));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [currentCeoStaff, setCurrentCeoStaff] = useState<CeoStaffMember | null>(() => {
     try {
       const saved = sessionStorage.getItem('digimoms_current_ceo_staff') || localStorage.getItem('digimoms_current_ceo_staff');
@@ -1808,6 +1822,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       localStorage.setItem('digimoms_ceo_staff', JSON.stringify(list));
     } catch {}
+    fetch('/api/ceo/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(list)
+    }).catch(() => {});
   };
 
   const addCeoStaffMember = async (name: string, mobile: string, pass: string, role: 'manager' | 'support' | 'billing', permissions: CeoStaffPermissions) => {
