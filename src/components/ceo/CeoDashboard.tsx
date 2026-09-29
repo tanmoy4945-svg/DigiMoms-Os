@@ -111,24 +111,44 @@ export const CeoDashboard: React.FC = () => {
 
   const isMasterCeo = !currentCeoStaff;
   const canViewRest = isMasterCeo || currentCeoStaff?.permissions?.can_view_restaurants !== false;
-  const canEditRest = isMasterCeo || currentCeoStaff?.permissions?.can_edit_restaurants === true;
-  const canViewSubs = isMasterCeo || currentCeoStaff?.permissions?.can_view_subscriptions !== false;
-  const canEditSubs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_subscriptions === true;
+  const canEditRest = isMasterCeo || currentCeoStaff?.permissions?.can_edit_restaurants === true || currentCeoStaff?.permissions?.can_setup_restaurants === true;
+  const canSetupRest = isMasterCeo || currentCeoStaff?.permissions?.can_setup_restaurants === true || currentCeoStaff?.permissions?.can_edit_restaurants === true;
+  const canDeleteRest = isMasterCeo || currentCeoStaff?.permissions?.can_delete_restaurants === true;
+  const canManageFreePlans = isMasterCeo || currentCeoStaff?.permissions?.can_manage_free_plans === true || currentCeoStaff?.permissions?.can_edit_subscriptions === true;
+
+  const canViewSubs = isMasterCeo || currentCeoStaff?.permissions?.can_view_subscriptions !== false || currentCeoStaff?.permissions?.can_view_agreements !== false;
+  const canEditSubs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_subscriptions === true || currentCeoStaff?.permissions?.can_edit_agreements === true;
+
   const canViewPay = isMasterCeo || currentCeoStaff?.permissions?.can_view_payments !== false;
   const canEditPay = isMasterCeo || currentCeoStaff?.permissions?.can_edit_payments === true;
+
+  const canViewTeam = isMasterCeo || currentCeoStaff?.permissions?.can_view_team === true || currentCeoStaff?.permissions?.can_manage_team === true;
+  const canManageTeam = isMasterCeo || currentCeoStaff?.permissions?.can_manage_team === true;
+
   const canViewRep = isMasterCeo || currentCeoStaff?.permissions?.can_view_reports !== false;
+  const canEditRep = isMasterCeo || currentCeoStaff?.permissions?.can_edit_reports === true;
+
   const canViewSql = isMasterCeo || currentCeoStaff?.permissions?.can_view_sql === true;
+  const canEditSql = isMasterCeo || currentCeoStaff?.permissions?.can_edit_sql === true;
+
   const canViewStorage = isMasterCeo || currentCeoStaff?.permissions?.can_view_storage !== false;
+  const canEditStorage = isMasterCeo || currentCeoStaff?.permissions?.can_edit_storage === true;
+
   const canViewBackup = isMasterCeo || currentCeoStaff?.permissions?.can_view_backup === true;
+  const canEditBackup = isMasterCeo || currentCeoStaff?.permissions?.can_edit_backup === true;
+
   const canViewFeedback = isMasterCeo || currentCeoStaff?.permissions?.can_view_feedback !== false;
+  const canEditFeedback = isMasterCeo || currentCeoStaff?.permissions?.can_edit_feedback === true;
+
   const canViewLogs = isMasterCeo || currentCeoStaff?.permissions?.can_view_logs !== false;
-  const canManageTeam = isMasterCeo;
+  const canEditLogs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_logs === true;
 
   const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
     if (currentCeoStaff) {
       if (canViewRest) return 'restaurants';
       if (canViewPay) return 'payment-settings';
       if (canViewSubs) return 'agreement';
+      if (canViewTeam) return 'team';
       if (canViewStorage) return 'storage';
       if (canViewFeedback) return 'feedback';
       if (canViewLogs) return 'logs';
@@ -616,7 +636,7 @@ export const CeoDashboard: React.FC = () => {
 
       {/* Navigation Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
-        {canManageTeam && (
+        {canViewTeam && (
           <button
             onClick={() => setActiveTab('team')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
@@ -717,7 +737,7 @@ export const CeoDashboard: React.FC = () => {
       </div>
 
       {/* TAB: CEO TEAM & STAFF MANAGEMENT */}
-      {activeTab === 'team' && canManageTeam && <CeoStaffManagement />}
+      {activeTab === 'team' && canViewTeam && <CeoStaffManagement canManage={canManageTeam} />}
 
       {/* TAB 1: RESTAURANT TENANT MANAGEMENT */}
       {activeTab === 'restaurants' && (
@@ -936,7 +956,7 @@ export const CeoDashboard: React.FC = () => {
                         {/* Unified Free Access Button replacing separate Trial / Free Offer / Extension buttons */}
                         <button
                           onClick={() => {
-                            if (!canEditSubs && !canEditRest) {
+                            if (!canManageFreePlans && !canEditSubs && !canEditRest) {
                               showToast('Access Denied: You do not have permission to manage subscriptions or free access.', 'error');
                               return;
                             }
@@ -1057,7 +1077,7 @@ export const CeoDashboard: React.FC = () => {
 
                         <button
                           onClick={() => {
-                            if (!canEditRest) {
+                            if (!canDeleteRest && !canEditRest) {
                               showToast('Access Denied: You do not have permission to delete or archive restaurants.', 'error');
                               return;
                             }

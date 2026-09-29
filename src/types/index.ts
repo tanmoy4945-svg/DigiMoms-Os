@@ -141,18 +141,52 @@ export interface Staff {
 }
 
 export interface CeoStaffPermissions {
+  // 1. Restaurant Management & Full Setup
   can_view_restaurants?: boolean;
   can_edit_restaurants?: boolean;
+  can_setup_restaurants?: boolean; // Full Restaurant Setup: Website, Menu, Tables, QRs, Staff Onboarding
+  can_delete_restaurants?: boolean; // Delete, Archive, Reset Restaurant Data
+  can_manage_free_plans?: boolean; // Grant Free Access / Promotional Trial Extension
+
+  // 2. Subscriptions & Plans
   can_view_subscriptions?: boolean;
   can_edit_subscriptions?: boolean;
+
+  // 3. Restaurant Agreements & Legal
+  can_view_agreements?: boolean;
+  can_edit_agreements?: boolean;
+
+  // 4. Payment Gateways & Settings
   can_view_payments?: boolean;
   can_edit_payments?: boolean;
+
+  // 5. CEO Team & Staff Management
+  can_view_team?: boolean;
+  can_manage_team?: boolean;
+
+  // 6. Reports & Financial Analytics
   can_view_reports?: boolean;
+  can_edit_reports?: boolean;
+
+  // 7. Supabase SQL Console & Database
   can_view_sql?: boolean;
+  can_edit_sql?: boolean;
+
+  // 8. Storage & System Assets
   can_view_storage?: boolean;
+  can_edit_storage?: boolean;
+
+  // 9. System Backup & Restore
   can_view_backup?: boolean;
+  can_edit_backup?: boolean;
+
+  // 10. Customer Feedback & Reviews
   can_view_feedback?: boolean;
+  can_edit_feedback?: boolean;
+
+  // 11. System Audit Trail Logs
   can_view_logs?: boolean;
+  can_edit_logs?: boolean;
 }
 
 export interface CeoStaffMember {

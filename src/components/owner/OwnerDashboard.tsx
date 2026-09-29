@@ -5,13 +5,14 @@ import {
   Building2, Utensils, QrCode, Users, CreditCard, BarChart3,
   Star, Settings, LogOut, CheckCircle2, Clock, PhoneCall, ShoppingBag, Bell, AlertTriangle, ShieldCheck, Sparkles,
   FileText, Printer, Download, Globe, Banknote, Lock, History, AlertCircle, RefreshCw,
-  KeyRound, Eye, EyeOff, MessageCircle, Phone, Mail, Info, Calendar, Gift
+  KeyRound, Eye, EyeOff, MessageCircle, Phone, Mail, Info, Calendar, Gift, Receipt
 } from 'lucide-react';
 import { MenuManagement } from './MenuManagement';
 import { TableManagement } from './TableManagement';
 import { StaffManagement } from './StaffManagement';
 import { PaymentSettings } from './PaymentSettings';
 import { ReportsAnalytics } from './ReportsAnalytics';
+import { GstReportsAnalytics } from './GstReportsAnalytics';
 import { FeedbackViewer } from './FeedbackViewer';
 import { SettingsManagement } from './SettingsManagement';
 import { RestaurantWebsiteManager } from './RestaurantWebsiteManager';
@@ -54,7 +55,7 @@ export const OwnerDashboard: React.FC = () => {
     showToast
   } = useSaaS();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'tables' | 'staff' | 'payments' | 'reports' | 'feedback' | 'settings' | 'public-website'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'tables' | 'staff' | 'payments' | 'reports' | 'gst-reports' | 'feedback' | 'settings' | 'public-website'>('overview');
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [showPayUSubscriptionModal, setShowPayUSubscriptionModal] = useState(false);
   const [showPhonePeSubscriptionModal, setShowPhonePeSubscriptionModal] = useState(false);
@@ -652,6 +653,21 @@ export const OwnerDashboard: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab('gst-reports')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+            activeTab === 'gst-reports' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Receipt className="w-4 h-4 text-emerald-400" />
+          <span>GST Tax Report</span>
+          {currentOwner.gst && (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">
+              Active
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('feedback')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
             activeTab === 'feedback' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
@@ -1100,6 +1116,7 @@ export const OwnerDashboard: React.FC = () => {
       {activeTab === 'staff' && <StaffManagement />}
       {activeTab === 'payments' && <PaymentSettings />}
       {activeTab === 'reports' && <ReportsAnalytics />}
+      {activeTab === 'gst-reports' && <GstReportsAnalytics onOpenSettings={() => setActiveTab('settings')} />}
       {activeTab === 'feedback' && <FeedbackViewer />}
       {activeTab === 'settings' && <SettingsManagement />}
       {activeTab === 'public-website' && <RestaurantWebsiteManager restaurantId={currentOwner.id} />}

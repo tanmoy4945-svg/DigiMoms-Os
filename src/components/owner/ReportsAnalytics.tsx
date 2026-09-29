@@ -4,16 +4,17 @@ import {
   BarChart3, Download, TrendingUp, DollarSign, ShoppingBag,
   CreditCard, Shield, Clock, Users, FileText, CheckCircle2,
   AlertCircle, Printer, Search, Filter, Layers, RefreshCw,
-  ArrowRight, Phone, Check, X
+  ArrowRight, Phone, Check, X, Receipt
 } from 'lucide-react';
 import { generateInvoicePdf } from '../../utils/pdfGenerator';
 import { BillModal } from '../common/BillModal';
+import { GstReportsAnalytics } from './GstReportsAnalytics';
 import { Order } from '../../types';
 
 export const ReportsAnalytics: React.FC = () => {
   const { currentOwner, orders, auditLogs, paymentTransactions, showToast } = useSaaS();
 
-  const [activeTab, setActiveTab] = useState<'sales' | 'transactions' | 'audit'>('sales');
+  const [activeTab, setActiveTab] = useState<'sales' | 'transactions' | 'gst' | 'audit'>('sales');
   
   // Sales Filters
   const [salesFilterMode, setSalesFilterMode] = useState<'all' | 'cash' | 'demo' | 'online' | 'partial'>('all');
@@ -358,6 +359,15 @@ export const ReportsAnalytics: React.FC = () => {
             </button>
 
             <button
+              onClick={() => setActiveTab('gst')}
+              className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'gst' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Receipt className="w-4 h-4 text-emerald-400" /> Monthly GST Report
+            </button>
+
+            <button
               onClick={() => setActiveTab('audit')}
               className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
                 activeTab === 'audit' ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30' : 'text-slate-400 hover:text-white'
@@ -367,21 +377,25 @@ export const ReportsAnalytics: React.FC = () => {
             </button>
           </div>
 
-          {activeTab === 'sales' ? (
+          {activeTab === 'sales' && (
             <button
               onClick={exportCsv}
               className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-600/30 transition-all flex items-center gap-1.5"
             >
               <Download className="w-4 h-4" /> Export Sales CSV
             </button>
-          ) : activeTab === 'transactions' ? (
+          )}
+
+          {activeTab === 'transactions' && (
             <button
               onClick={exportTransactionsCsv}
               className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-1.5"
             >
               <Download className="w-4 h-4" /> Export Transactions CSV
             </button>
-          ) : (
+          )}
+
+          {activeTab === 'audit' && (
             <button
               onClick={exportAuditCsv}
               className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 transition-all flex items-center gap-1.5"
@@ -850,6 +864,10 @@ export const ReportsAnalytics: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === 'gst' && (
+        <GstReportsAnalytics />
       )}
 
       {/* Bill View Modal */}
