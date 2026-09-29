@@ -10,14 +10,15 @@ export const CeoLogin: React.FC = () => {
   const [pin, setPin] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loginMode === 'master') {
       if (loginCeo(mobile, password, pin, rememberMe)) {
         setActiveView('ceo-dashboard');
       }
     } else {
-      if (loginCeoStaffMember(mobile, password, rememberMe)) {
+      const ok = await loginCeoStaffMember(mobile, password, rememberMe);
+      if (ok) {
         setActiveView('ceo-dashboard');
       }
     }

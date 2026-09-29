@@ -138,39 +138,57 @@ async function startServer() {
 
   app.post('/api/ceo/staff', async (req, res) => {
     const incomingList = req.body || [];
-    const currentList = readJsonFile<any[]>('ceo_staff.json', []);
-    
-    // Merge incoming list with current list so accounts are never lost
-    const mergedMap = new Map();
-    for (const item of currentList) {
-      if (item && item.id) mergedMap.set(item.id, item);
+    const isReplace = req.query.replace === 'true';
+    let staffList = incomingList;
+
+    if (!isReplace) {
+      const currentList = readJsonFile<any[]>('ceo_staff.json', []);
+      const mergedMap = new Map();
+      for (const item of currentList) {
+        if (item && item.id) mergedMap.set(item.id, item);
+      }
+      for (const item of incomingList) {
+        if (item && item.id) mergedMap.set(item.id, item);
+      }
+      staffList = Array.from(mergedMap.values());
     }
-    for (const item of incomingList) {
-      if (item && item.id) mergedMap.set(item.id, item);
-    }
-    const staffList = Array.from(mergedMap.values());
 
     writeJsonFile('ceo_staff.json', staffList);
     try {
-      for (const staff of staffList) {
-        await serverSupabase.from('ceo_staff').upsert({
-          id: staff.id,
-          name: staff.name,
-          mobile: staff.mobile,
-          password_hash: staff.password_hash,
-          role: staff.role,
-          status: staff.status,
-          permissions: staff.permissions,
-          last_password_change: staff.last_password_change,
-          last_login: staff.last_login,
-          created_at: staff.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
+      for (const staff of incomingList) {
+        if (staff && staff.id) {
+          await serverSupabase.from('ceo_staff').upsert({
+            id: staff.id,
+            name: staff.name,
+            mobile: staff.mobile,
+            password_hash: staff.password_hash,
+            role: staff.role,
+            status: staff.status,
+            permissions: staff.permissions,
+            last_password_change: staff.last_password_change,
+            last_login: staff.last_login,
+            created_at: staff.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+        }
       }
     } catch (err) {
       console.warn('Supabase ceo_staff sync warning:', err);
     }
     res.json({ success: true, data: staffList });
+  });
+
+  app.delete('/api/ceo/staff/:id', async (req, res) => {
+    const id = req.params.id;
+    try {
+      await serverSupabase.from('ceo_staff').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase ceo_staff delete warning:', err);
+    }
+    const currentList = readJsonFile<any[]>('ceo_staff.json', []);
+    const filtered = currentList.filter(s => s.id !== id);
+    writeJsonFile('ceo_staff.json', filtered);
+    res.json({ success: true, data: filtered });
   });
 
   // Helper: Sanitize restaurant configuration to prevent payment secrets & credential exposure

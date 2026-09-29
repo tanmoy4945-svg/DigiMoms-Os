@@ -111,7 +111,7 @@ interface SaaSContextType {
 
   // CEO Actions
   loginCeo: (mobile: string, pass: string, pin: string, rememberMe?: boolean) => boolean;
-  loginCeoStaffMember: (mobile: string, pass: string, rememberMe?: boolean) => boolean;
+  loginCeoStaffMember: (mobile: string, pass: string, rememberMe?: boolean) => Promise<boolean>;
   logoutCeo: () => void;
   ceoRazorpayConfig: CeoRazorpayConfig;
   updateCeoRazorpayConfig: (config: Partial<CeoRazorpayConfig>) => void;
@@ -1166,6 +1166,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data: socData } = await supabase.from('restaurant_social_links').select('*');
         if (socData) setRestaurantSocialLinks(socData as RestaurantSocialLinks[]);
       } catch (e) { /* table might not exist yet */ }
+
+      // Fetch CEO Staff directly from Supabase
+      try {
+        const { data: supaCeoStaff } = await supabase.from('ceo_staff').select('*').order('created_at', { ascending: false });
+        if (supaCeoStaff && Array.isArray(supaCeoStaff) && supaCeoStaff.length > 0) {
+          setCeoStaffList(supaCeoStaff as CeoStaffMember[]);
+          try {
+            localStorage.setItem('digimoms_ceo_staff', JSON.stringify(supaCeoStaff));
+          } catch {}
+        }
+      } catch (e) { /* ceo_staff might not exist or error */ }
     } catch (err) {
       console.error("Error fetching data from Supabase:", err);
     }
@@ -1794,12 +1805,31 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
+  // Direct Supabase query + server fallback on startup + Realtime subscription
   useEffect(() => {
-    fetch('/api/ceo/staff')
-      .then(res => res.json())
-      .then(json => {
-        if (json.success && Array.isArray(json.data)) {
-          if (json.data.length > 0) {
+    async function loadCeoStaffFromSupabase() {
+      try {
+        const { data: supaData, error } = await supabase
+          .from('ceo_staff')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && supaData && Array.isArray(supaData)) {
+          setCeoStaffList(supaData as CeoStaffMember[]);
+          try {
+            localStorage.setItem('digimoms_ceo_staff', JSON.stringify(supaData));
+          } catch {}
+          return;
+        }
+      } catch (err) {
+        console.warn('Initial load ceo_staff Supabase notice:', err);
+      }
+
+      // Fallback to server disk if Supabase query failed
+      fetch('/api/ceo/staff')
+        .then(res => res.json())
+        .then(json => {
+          if (json.success && Array.isArray(json.data) && json.data.length > 0) {
             setCeoStaffList(prev => {
               const map = new Map();
               for (const s of prev) map.set(s.id, s);
@@ -1811,9 +1841,32 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               return merged;
             });
           }
+        })
+        .catch(() => {});
+    }
+
+    loadCeoStaffFromSupabase();
+
+    // Supabase Realtime Channel for ceo_staff
+    const ceoStaffChannel = supabase
+      .channel('public:ceo_staff_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ceo_staff' }, (payload: any) => {
+        const { eventType, new: newRow, old: oldRow } = payload;
+        if (eventType === 'INSERT' && newRow?.id) {
+          setCeoStaffList(prev => [newRow as CeoStaffMember, ...prev.filter(s => s.id !== newRow.id)]);
+        } else if (eventType === 'UPDATE' && newRow?.id) {
+          setCeoStaffList(prev => prev.map(s => s.id === newRow.id ? (newRow as CeoStaffMember) : s));
+          setCurrentCeoStaff(curr => curr?.id === newRow.id ? (newRow as CeoStaffMember) : curr);
+        } else if (eventType === 'DELETE' && oldRow?.id) {
+          setCeoStaffList(prev => prev.filter(s => s.id !== oldRow.id));
+          setCurrentCeoStaff(curr => curr?.id === oldRow.id ? null : curr);
         }
       })
-      .catch(() => {});
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ceoStaffChannel);
+    };
   }, []);
 
   const [currentCeoStaff, setCurrentCeoStaff] = useState<CeoStaffMember | null>(() => {
@@ -1825,37 +1878,93 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const saveCeoStaffList = (list: CeoStaffMember[]) => {
-    setCeoStaffList(list);
-    try {
-      localStorage.setItem('digimoms_ceo_staff', JSON.stringify(list));
-    } catch {}
-    fetch('/api/ceo/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(list)
-    }).catch(() => {});
-  };
-
   const addCeoStaffMember = async (name: string, mobile: string, pass: string, role: 'manager' | 'support' | 'billing', permissions: CeoStaffPermissions) => {
+    const cleanMobile = mobile.trim();
+    const cleanName = name.trim();
+
+    // Check duplicate mobile in memory
+    const existing = ceoStaffList.find(s => s.mobile.trim() === cleanMobile);
+    if (existing) {
+      showToast(`A staff member with mobile number ${cleanMobile} already exists!`, 'error');
+      throw new Error(`Mobile ${cleanMobile} already exists`);
+    }
+
     const newStaff: CeoStaffMember = {
       id: crypto.randomUUID(),
-      name,
-      mobile,
+      name: cleanName,
+      mobile: cleanMobile,
       password_hash: pass,
       role,
       status: 'active',
       permissions,
       created_at: new Date().toISOString()
     };
-    const next = [newStaff, ...ceoStaffList];
-    saveCeoStaffList(next);
-    showToast(`CEO staff member '${name}' created successfully!`, 'success');
+
+    // 1. Direct Supabase INSERT
+    const { data: supaRows, error } = await supabase.from('ceo_staff').insert([{
+      id: newStaff.id,
+      name: newStaff.name,
+      mobile: newStaff.mobile,
+      password_hash: newStaff.password_hash,
+      role: newStaff.role,
+      status: newStaff.status,
+      permissions: newStaff.permissions,
+      created_at: newStaff.created_at,
+      updated_at: newStaff.created_at
+    }]).select();
+
+    if (error) {
+      console.error("Supabase ceo_staff insert error:", error);
+      showToast(`Supabase Error: ${error.message}`, 'error');
+      throw error;
+    }
+
+    const savedStaff = (supaRows && supaRows[0]) ? (supaRows[0] as CeoStaffMember) : newStaff;
+
+    // 2. Update React state & LocalStorage
+    const next = [savedStaff, ...ceoStaffList];
+    setCeoStaffList(next);
+    try {
+      localStorage.setItem('digimoms_ceo_staff', JSON.stringify(next));
+    } catch {}
+
+    // 3. Backup to server disk
+    fetch('/api/ceo/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next)
+    }).catch(() => {});
+
+    showToast(`✅ CEO staff member '${cleanName}' permanently saved to Supabase!`, 'success');
   };
 
   const updateCeoStaffMember = async (id: string, updates: Partial<CeoStaffMember>) => {
-    const next = ceoStaffList.map(s => s.id === id ? { ...s, ...updates } : s);
-    saveCeoStaffList(next);
+    const nowIso = new Date().toISOString();
+    const dbPayload: any = { updated_at: nowIso };
+    if (updates.name !== undefined) dbPayload.name = updates.name.trim();
+    if (updates.mobile !== undefined) dbPayload.mobile = updates.mobile.trim();
+    if (updates.role !== undefined) dbPayload.role = updates.role;
+    if (updates.status !== undefined) dbPayload.status = updates.status;
+    if (updates.permissions !== undefined) dbPayload.permissions = updates.permissions;
+    if (updates.password_hash !== undefined) dbPayload.password_hash = updates.password_hash;
+    if (updates.last_password_change !== undefined) dbPayload.last_password_change = updates.last_password_change;
+    if (updates.last_login !== undefined) dbPayload.last_login = updates.last_login;
+
+    // 1. Direct Supabase UPDATE
+    const { error } = await supabase.from('ceo_staff').update(dbPayload).eq('id', id);
+    if (error) {
+      console.error("Supabase ceo_staff update error:", error);
+      showToast(`Supabase Update Error: ${error.message}`, 'error');
+      throw error;
+    }
+
+    // 2. React state & LocalStorage
+    const next = ceoStaffList.map(s => s.id === id ? { ...s, ...updates, updated_at: nowIso } : s);
+    setCeoStaffList(next);
+    try {
+      localStorage.setItem('digimoms_ceo_staff', JSON.stringify(next));
+    } catch {}
+
     if (currentCeoStaff?.id === id) {
       const updated = next.find(s => s.id === id) || null;
       setCurrentCeoStaff(updated);
@@ -1866,51 +1975,102 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch {}
     }
-    showToast('CEO staff member updated successfully!', 'success');
+
+    // 3. Backup to server disk
+    fetch('/api/ceo/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next)
+    }).catch(() => {});
+
+    showToast('CEO staff member updated in Supabase successfully!', 'success');
   };
 
   const toggleCeoStaffStatus = async (id: string) => {
-    const next = ceoStaffList.map(s => s.id === id ? { ...s, status: s.status === 'active' ? 'disabled' as const : 'active' as const } : s);
-    saveCeoStaffList(next);
-    showToast('CEO staff status updated.', 'success');
+    const target = ceoStaffList.find(s => s.id === id);
+    if (!target) return;
+    const newStatus = target.status === 'active' ? ('disabled' as const) : ('active' as const);
+    await updateCeoStaffMember(id, { status: newStatus });
   };
 
   const deleteCeoStaffMember = async (id: string) => {
+    // 1. Direct Supabase DELETE
+    const { error } = await supabase.from('ceo_staff').delete().eq('id', id);
+    if (error) {
+      console.error("Supabase ceo_staff delete error:", error);
+      showToast(`Failed to delete from Supabase: ${error.message}`, 'error');
+      throw error;
+    }
+
+    // 2. React state & LocalStorage
     const next = ceoStaffList.filter(s => s.id !== id);
-    saveCeoStaffList(next);
+    setCeoStaffList(next);
+    try {
+      localStorage.setItem('digimoms_ceo_staff', JSON.stringify(next));
+    } catch {}
+
     if (currentCeoStaff?.id === id) {
       setCurrentCeoStaff(null);
       sessionStorage.removeItem('digimoms_current_ceo_staff');
       localStorage.removeItem('digimoms_current_ceo_staff');
     }
-    showToast('CEO staff member deleted.', 'info');
+
+    // 3. Server delete API
+    fetch(`/api/ceo/staff/${id}`, { method: 'DELETE' }).catch(() => {});
+
+    showToast('CEO staff member permanently deleted from Supabase.', 'info');
   };
 
   const updateCeoStaffPassword = async (staffId: string, newPass: string) => {
     const now = new Date().toISOString();
-    const next = ceoStaffList.map(s => s.id === staffId ? { ...s, password_hash: newPass, last_password_change: now } : s);
-    saveCeoStaffList(next);
-    if (currentCeoStaff?.id === staffId) {
-      const updated = next.find(s => s.id === staffId) || null;
-      setCurrentCeoStaff(updated);
-      try {
-        if (updated) {
-          sessionStorage.setItem('digimoms_current_ceo_staff', JSON.stringify(updated));
-          localStorage.setItem('digimoms_current_ceo_staff', JSON.stringify(updated));
-        }
-      } catch {}
-    }
-    showToast('CEO staff password updated successfully!', 'success');
+    await updateCeoStaffMember(staffId, {
+      password_hash: newPass,
+      last_password_change: now
+    });
   };
 
-  const loginCeoStaffMember = (mobile: string, pass: string, rememberMe: boolean = false): boolean => {
-    const found = ceoStaffList.find(s => s.mobile.trim() === mobile.trim() && s.password_hash === pass && s.status === 'active');
+  const loginCeoStaffMember = async (mobile: string, pass: string, rememberMe: boolean = false): Promise<boolean> => {
+    const cleanMobile = mobile.trim();
+    let found = ceoStaffList.find(s => s.mobile.trim() === cleanMobile && s.password_hash === pass);
+
+    // If not found in state or list empty, query Supabase directly
+    if (!found) {
+      try {
+        const { data: directData, error: directErr } = await supabase
+          .from('ceo_staff')
+          .select('*')
+          .eq('mobile', cleanMobile)
+          .maybeSingle();
+
+        if (directData && !directErr && directData.password_hash === pass) {
+          found = directData as CeoStaffMember;
+          setCeoStaffList(prev => {
+            if (prev.some(s => s.id === (directData as any).id)) return prev;
+            return [directData as CeoStaffMember, ...prev];
+          });
+        }
+      } catch (err) {
+        console.warn("Direct Supabase login check notice:", err);
+      }
+    }
+
     if (found) {
-      setCurrentCeoStaff(found);
+      if (found.status !== 'active') {
+        showToast('This staff account has been disabled by the Master CEO.', 'error');
+        return false;
+      }
+
+      const now = new Date().toISOString();
+      try {
+        await supabase.from('ceo_staff').update({ last_login: now }).eq('id', found.id);
+      } catch {}
+
+      const updatedFound = { ...found, last_login: now };
+      setCurrentCeoStaff(updatedFound);
       setCeoAuthenticated(true);
       try {
-        sessionStorage.setItem('digimoms_current_ceo_staff', JSON.stringify(found));
-        localStorage.setItem('digimoms_current_ceo_staff', JSON.stringify(found));
+        sessionStorage.setItem('digimoms_current_ceo_staff', JSON.stringify(updatedFound));
+        localStorage.setItem('digimoms_current_ceo_staff', JSON.stringify(updatedFound));
         if (rememberMe) {
           localStorage.setItem('digimoms_ceo_auth', 'true');
         } else {
@@ -1920,6 +2080,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast(`Welcome back, ${found.name} (CEO Staff / Child Access)!`, 'success');
       return true;
     }
+
     showToast('Invalid CEO Staff credentials or account disabled.', 'error');
     return false;
   };

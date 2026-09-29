@@ -40,41 +40,64 @@ export const CeoStaffManagement: React.FC = () => {
 
   const [passwordInput, setPasswordInput] = useState('');
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newMobile || !newPassword) {
+    if (!newName.trim() || !newMobile.trim() || !newPassword.trim()) {
       showToast('Please fill all required fields for CEO staff.', 'error');
       return;
     }
-    await addCeoStaffMember(newName, newMobile, newPassword, newRole, newPermissions);
-    setNewName('');
-    setNewMobile('');
-    setNewPassword('ceoStaff123');
-    setShowAddModal(false);
+    setIsSubmitting(true);
+    try {
+      await addCeoStaffMember(newName.trim(), newMobile.trim(), newPassword.trim(), newRole, newPermissions);
+      setNewName('');
+      setNewMobile('');
+      setNewPassword('ceoStaff123');
+      setShowAddModal(false);
+    } catch (err) {
+      // Error toast is handled inside addCeoStaffMember
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
-    await updateCeoStaffMember(editingStaff.id, {
-      name: editingStaff.name,
-      mobile: editingStaff.mobile,
-      role: editingStaff.role,
-      permissions: editingStaff.permissions
-    });
-    setEditingStaff(null);
+    setIsSubmitting(true);
+    try {
+      await updateCeoStaffMember(editingStaff.id, {
+        name: editingStaff.name.trim(),
+        mobile: editingStaff.mobile.trim(),
+        role: editingStaff.role,
+        permissions: editingStaff.permissions
+      });
+      setEditingStaff(null);
+    } catch (err) {
+      // Error toast handled inside updateCeoStaffMember
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!showPasswordModal || !passwordInput) return;
-    if (passwordInput.length < 6) {
+    if (!showPasswordModal || !passwordInput.trim()) return;
+    if (passwordInput.trim().length < 6) {
       showToast('Password must be at least 6 characters long.', 'error');
       return;
     }
-    await updateCeoStaffPassword(showPasswordModal.id, passwordInput);
-    setShowPasswordModal(null);
-    setPasswordInput('');
+    setIsSubmitting(true);
+    try {
+      await updateCeoStaffPassword(showPasswordModal.id, passwordInput.trim());
+      setShowPasswordModal(null);
+      setPasswordInput('');
+    } catch (err) {
+      // Error toast handled inside updateCeoStaffMember
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
