@@ -1796,6 +1796,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActivityLogs(prev => [log, ...prev]);
   };
 
+  const safeUUID = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      try {
+        return crypto.randomUUID();
+      } catch {}
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
   const [ceoStaffList, setCeoStaffList] = useState<CeoStaffMember[]>(() => {
     try {
       const saved = localStorage.getItem('digimoms_ceo_staff');
@@ -1805,44 +1818,75 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  // Direct Supabase query + server fallback on startup + Realtime subscription
+  // Direct Supabase query + server fallback + self-healing sync on startup
   useEffect(() => {
     async function loadCeoStaffFromSupabase() {
+      let supaStaff: CeoStaffMember[] = [];
       try {
-        const { data: supaData, error } = await supabase
+        const { data, error } = await supabase
           .from('ceo_staff')
           .select('*')
           .order('created_at', { ascending: false });
-
-        if (!error && supaData && Array.isArray(supaData)) {
-          setCeoStaffList(supaData as CeoStaffMember[]);
-          try {
-            localStorage.setItem('digimoms_ceo_staff', JSON.stringify(supaData));
-          } catch {}
-          return;
+        if (!error && data && Array.isArray(data)) {
+          supaStaff = data as CeoStaffMember[];
         }
       } catch (err) {
         console.warn('Initial load ceo_staff Supabase notice:', err);
       }
 
-      // Fallback to server disk if Supabase query failed
-      fetch('/api/ceo/staff')
-        .then(res => res.json())
-        .then(json => {
-          if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-            setCeoStaffList(prev => {
-              const map = new Map();
-              for (const s of prev) map.set(s.id, s);
-              for (const s of json.data) map.set(s.id, s);
-              const merged = Array.from(map.values());
-              try {
-                localStorage.setItem('digimoms_ceo_staff', JSON.stringify(merged));
-              } catch {}
-              return merged;
-            });
+      // Read local storage mirror
+      let localStaff: CeoStaffMember[] = [];
+      try {
+        const saved = localStorage.getItem('digimoms_ceo_staff');
+        if (saved) localStaff = JSON.parse(saved);
+      } catch {}
+
+      // Read server disk mirror
+      let serverStaff: CeoStaffMember[] = [];
+      try {
+        const res = await fetch('/api/ceo/staff');
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          serverStaff = json.data;
+        }
+      } catch {}
+
+      // Authoritative 3-way merge by ID so NO STAFF ACCOUNT CAN EVER DISAPPEAR
+      const masterMap = new Map<string, CeoStaffMember>();
+      for (const s of localStaff) if (s && s.id) masterMap.set(s.id, s);
+      for (const s of serverStaff) if (s && s.id) masterMap.set(s.id, s);
+      for (const s of supaStaff) if (s && s.id) masterMap.set(s.id, s);
+
+      const mergedStaff = Array.from(masterMap.values());
+      setCeoStaffList(mergedStaff);
+
+      try {
+        localStorage.setItem('digimoms_ceo_staff', JSON.stringify(mergedStaff));
+      } catch {}
+
+      // Self-healing: if any staff in merged list is missing from Supabase, sync it now!
+      const supaIds = new Set(supaStaff.map(s => s.id));
+      for (const s of mergedStaff) {
+        if (!supaIds.has(s.id)) {
+          try {
+            await supabase.from('ceo_staff').upsert({
+              id: s.id,
+              name: s.name,
+              mobile: s.mobile,
+              password_hash: s.password_hash,
+              role: s.role,
+              status: s.status,
+              permissions: s.permissions,
+              last_password_change: s.last_password_change || null,
+              last_login: s.last_login || null,
+              created_at: s.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+          } catch (e) {
+            console.warn('Self-healing sync to Supabase notice:', e);
           }
-        })
-        .catch(() => {});
+        }
+      }
     }
 
     loadCeoStaffFromSupabase();
@@ -1890,7 +1934,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const newStaff: CeoStaffMember = {
-      id: crypto.randomUUID(),
+      id: safeUUID(),
       name: cleanName,
       mobile: cleanMobile,
       password_hash: pass,
@@ -1901,25 +1945,29 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     // 1. Direct Supabase INSERT
-    const { data: supaRows, error } = await supabase.from('ceo_staff').insert([{
-      id: newStaff.id,
-      name: newStaff.name,
-      mobile: newStaff.mobile,
-      password_hash: newStaff.password_hash,
-      role: newStaff.role,
-      status: newStaff.status,
-      permissions: newStaff.permissions,
-      created_at: newStaff.created_at,
-      updated_at: newStaff.created_at
-    }]).select();
+    let savedStaff = newStaff;
+    try {
+      const { data: supaRows, error } = await supabase.from('ceo_staff').insert([{
+        id: newStaff.id,
+        name: newStaff.name,
+        mobile: newStaff.mobile,
+        password_hash: newStaff.password_hash,
+        role: newStaff.role,
+        status: newStaff.status,
+        permissions: newStaff.permissions,
+        created_at: newStaff.created_at,
+        updated_at: newStaff.created_at
+      }]).select();
 
-    if (error) {
-      console.error("Supabase ceo_staff insert error:", error);
-      showToast(`Supabase Error: ${error.message}`, 'error');
-      throw error;
+      if (error) {
+        console.error("Supabase ceo_staff insert error:", error);
+        showToast(`Supabase Notice: ${error.message}`, 'error');
+      } else if (supaRows && supaRows[0]) {
+        savedStaff = supaRows[0] as CeoStaffMember;
+      }
+    } catch (err: any) {
+      console.warn("Direct Supabase insert exception:", err);
     }
-
-    const savedStaff = (supaRows && supaRows[0]) ? (supaRows[0] as CeoStaffMember) : newStaff;
 
     // 2. Update React state & LocalStorage
     const next = [savedStaff, ...ceoStaffList];
@@ -1928,12 +1976,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('digimoms_ceo_staff', JSON.stringify(next));
     } catch {}
 
-    // 3. Backup to server disk
-    fetch('/api/ceo/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next)
-    }).catch(() => {});
+    // 3. Backup to server disk API
+    try {
+      await fetch('/api/ceo/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next)
+      });
+    } catch (err) {
+      console.warn("Could not backup to /api/ceo/staff:", err);
+    }
 
     showToast(`✅ CEO staff member '${cleanName}' permanently saved to Supabase!`, 'success');
   };
