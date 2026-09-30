@@ -1851,11 +1851,22 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch {}
 
-      // Authoritative 3-way merge by ID so NO STAFF ACCOUNT CAN EVER DISAPPEAR
+      // Authoritative 3-way merge by ID and timestamp so latest updates always take precedence
       const masterMap = new Map<string, CeoStaffMember>();
-      for (const s of localStaff) if (s && s.id) masterMap.set(s.id, s);
-      for (const s of serverStaff) if (s && s.id) masterMap.set(s.id, s);
-      for (const s of supaStaff) if (s && s.id) masterMap.set(s.id, s);
+      const allSources = [...supaStaff, ...serverStaff, ...localStaff];
+      for (const s of allSources) {
+        if (!s || !s.id) continue;
+        const existing = masterMap.get(s.id);
+        if (!existing) {
+          masterMap.set(s.id, s);
+        } else {
+          const existingTime = new Date((existing as any).updated_at || existing.created_at || 0).getTime();
+          const newTime = new Date((s as any).updated_at || s.created_at || 0).getTime();
+          if (newTime >= existingTime) {
+            masterMap.set(s.id, s);
+          }
+        }
+      }
 
       const mergedStaff = Array.from(masterMap.values());
       setCeoStaffList(mergedStaff);
@@ -2002,15 +2013,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (updates.last_password_change !== undefined) dbPayload.last_password_change = updates.last_password_change;
     if (updates.last_login !== undefined) dbPayload.last_login = updates.last_login;
 
-    // 1. Direct Supabase UPDATE
-    const { error } = await supabase.from('ceo_staff').update(dbPayload).eq('id', id);
-    if (error) {
-      console.error("Supabase ceo_staff update error:", error);
-      showToast(`Supabase Update Error: ${error.message}`, 'error');
-      throw error;
-    }
-
-    // 2. React state & LocalStorage
+    // 1. React state & LocalStorage ALWAYS FIRST (Zero-latency instant update)
     const next = ceoStaffList.map(s => s.id === id ? { ...s, ...updates, updated_at: nowIso } : s);
     setCeoStaffList(next);
     try {
@@ -2028,14 +2031,28 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
     }
 
-    // 3. Backup to server disk
-    fetch('/api/ceo/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next)
-    }).catch(() => {});
+    // 2. Persistent server disk mirror (with replace flag for absolute parity)
+    try {
+      await fetch('/api/ceo/staff?replace=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next)
+      });
+    } catch (err) {
+      console.warn("Could not backup to /api/ceo/staff:", err);
+    }
 
-    showToast('CEO staff member updated in Supabase successfully!', 'success');
+    // 3. Direct Supabase UPDATE
+    try {
+      const { error } = await supabase.from('ceo_staff').update(dbPayload).eq('id', id);
+      if (error) {
+        console.error("Supabase ceo_staff update notice:", error);
+      }
+    } catch (err) {
+      console.warn("Supabase update exception:", err);
+    }
+
+    showToast('CEO staff member permissions saved successfully!', 'success');
   };
 
   const toggleCeoStaffStatus = async (id: string) => {

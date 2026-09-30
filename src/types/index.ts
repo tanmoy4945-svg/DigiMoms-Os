@@ -141,52 +141,67 @@ export interface Staff {
 }
 
 export interface CeoStaffPermissions {
-  // 1. Restaurant Management & Full Setup
-  can_view_restaurants?: boolean;
-  can_edit_restaurants?: boolean;
-  can_setup_restaurants?: boolean; // Full Restaurant Setup: Website, Menu, Tables, QRs, Staff Onboarding
-  can_delete_restaurants?: boolean; // Delete, Archive, Reset Restaurant Data
-  can_manage_free_plans?: boolean; // Grant Free Access / Promotional Trial Extension
+  // 1. Manage Tenants & Restaurants
+  can_view_restaurants?: boolean;     // View restaurant directory, tenant list & metrics
+  can_add_restaurants?: boolean;      // Add new restaurant tenant & owner credentials (CREATE)
+  can_edit_restaurants?: boolean;     // Edit restaurant profile, phone, address, fee, suspend/resume (EDIT)
+  can_setup_restaurants?: boolean;    // Full setup: tables, menu categories, dishes, QR codes, website & staff (SETUP)
+  can_manage_free_plans?: boolean;    // Grant promotional free days, trial extensions, monthly renewals (RENEW)
+  can_delete_restaurants?: boolean;   // Archive, permanently delete, or reset tenant data (DELETE)
 
-  // 2. Subscriptions & Plans
-  can_view_subscriptions?: boolean;
-  can_edit_subscriptions?: boolean;
+  // 2. Subscriptions & Renewal Plans
+  can_view_subscriptions?: boolean;   // View subscription plans, expiry alerts & history (VIEW)
+  can_edit_subscriptions?: boolean;   // Renew monthly plans, upgrade/downgrade subscription tiers (EDIT)
+  can_delete_subscriptions?: boolean; // Cancel or terminate active subscriptions (DELETE)
 
-  // 3. Restaurant Agreements & Legal
-  can_view_agreements?: boolean;
-  can_edit_agreements?: boolean;
+  // 3. Restaurant Agreements & Legal Contracts
+  can_view_agreements?: boolean;      // View signed agreements, contract terms & status (VIEW)
+  can_create_agreements?: boolean;    // Generate new official legal agreement for a restaurant (CREATE)
+  can_edit_agreements?: boolean;      // Edit agreement clauses, custom terms & sign agreements (EDIT)
+  can_delete_agreements?: boolean;    // Revoke or delete legal agreement documents (DELETE)
 
-  // 4. Payment Gateways & Settings
-  can_view_payments?: boolean;
-  can_edit_payments?: boolean;
+  // 4. Subscription Gateway & Payments
+  can_view_payments?: boolean;        // View subscription payments, revenue metrics & logs (VIEW)
+  can_edit_payments?: boolean;        // Configure Razorpay/PhonePe API keys, secrets, live mode (EDIT)
+  can_delete_payments?: boolean;      // Clear test transactions or transaction history (DELETE)
 
   // 5. CEO Team & Staff Management
-  can_view_team?: boolean;
-  can_manage_team?: boolean;
+  can_view_team?: boolean;            // View CEO staff directory, roles, phone & activity (VIEW)
+  can_add_team?: boolean;             // Add new CEO staff member accounts (CREATE)
+  can_edit_team?: boolean;            // Edit staff permissions, role, change staff passwords, toggle status (EDIT)
+  can_delete_team?: boolean;          // Permanently delete staff member accounts (DELETE)
+  can_manage_team?: boolean;          // Backwards-compatible alias for full team management
 
   // 6. Reports & Financial Analytics
-  can_view_reports?: boolean;
-  can_edit_reports?: boolean;
+  can_view_reports?: boolean;         // View SaaS income charts, restaurant turnover & analytics (VIEW)
+  can_edit_reports?: boolean;         // Filter periods, re-calculate analytics & export to CSV/Excel/PDF (EDIT / EXPORT)
+  can_delete_reports?: boolean;       // Clear or reset analytics caches (DELETE)
 
   // 7. Supabase SQL Console & Database
-  can_view_sql?: boolean;
-  can_edit_sql?: boolean;
+  can_view_sql?: boolean;             // View SQL schema, tables, columns & migration records (VIEW)
+  can_edit_sql?: boolean;             // Run SQL queries, execute migrations & alter tables (EDIT)
+  can_delete_sql?: boolean;           // Drop tables, truncate data, destructive SQL operations (DELETE)
 
   // 8. Storage & System Assets
-  can_view_storage?: boolean;
-  can_edit_storage?: boolean;
+  can_view_storage?: boolean;         // View storage buckets, media assets & storage usage (VIEW)
+  can_edit_storage?: boolean;         // Upload system media, configure buckets & edit settings (EDIT)
+  can_delete_storage?: boolean;       // Purge cache, delete files & empty media buckets (DELETE)
 
-  // 9. System Backup & Restore
-  can_view_backup?: boolean;
-  can_edit_backup?: boolean;
+  // 9. System Snapshot & Backup
+  can_view_backup?: boolean;          // View system backup history & snapshots (VIEW)
+  can_create_backup?: boolean;        // Trigger instant full system backup & download JSON (CREATE)
+  can_edit_backup?: boolean;          // Restore from snapshot, upload backup file (EDIT)
+  can_delete_backup?: boolean;        // Delete old backup snapshots (DELETE)
 
   // 10. Customer Feedback & Reviews
-  can_view_feedback?: boolean;
-  can_edit_feedback?: boolean;
+  can_view_feedback?: boolean;        // View customer reviews, star ratings & complaints (VIEW)
+  can_edit_feedback?: boolean;        // Respond to customer reviews & mark as resolved (EDIT)
+  can_delete_feedback?: boolean;      // Delete spam reviews & remove customer complaints (DELETE)
 
   // 11. System Audit Trail Logs
-  can_view_logs?: boolean;
-  can_edit_logs?: boolean;
+  can_view_logs?: boolean;            // View real-time security events & audit trail (VIEW)
+  can_edit_logs?: boolean;            // Filter logs, search logs & export audit trail (EDIT)
+  can_delete_logs?: boolean;          // Clear or purge security audit trail logs (DELETE)
 }
 
 export interface CeoStaffMember {

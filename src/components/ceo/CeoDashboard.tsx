@@ -4,7 +4,7 @@ import { SmartImage } from '../common/SmartImage';
 import {
   Building2, Plus, Search, ShieldCheck, DollarSign, Calendar,
   AlertTriangle, RefreshCw, Archive, RotateCcw, Power, Eye, LogOut,
-  Database, Star, FileText, Phone, CreditCard, Edit3, Settings, Sparkles, CheckCircle2, Trash2, Loader2, Globe, Gift, History, Users
+  Database, Star, FileText, Phone, CreditCard, Edit3, Settings, Sparkles, CheckCircle2, Trash2, Loader2, Globe, Gift, History, Users, Lock
 } from 'lucide-react';
 import { SqlSchemaViewer } from './SqlSchemaViewer';
 import { CeoPaymentSettings } from './CeoPaymentSettings';
@@ -110,38 +110,68 @@ export const CeoDashboard: React.FC = () => {
   } = useSaaS();
 
   const isMasterCeo = !currentCeoStaff;
+
+  // 1. Manage Tenants & Restaurants
   const canViewRest = isMasterCeo || currentCeoStaff?.permissions?.can_view_restaurants !== false;
-  const canEditRest = isMasterCeo || currentCeoStaff?.permissions?.can_edit_restaurants === true || currentCeoStaff?.permissions?.can_setup_restaurants === true;
+  const canAddRest = isMasterCeo || currentCeoStaff?.permissions?.can_add_restaurants === true;
+  const canEditRest = isMasterCeo || currentCeoStaff?.permissions?.can_edit_restaurants === true;
   const canSetupRest = isMasterCeo || currentCeoStaff?.permissions?.can_setup_restaurants === true || currentCeoStaff?.permissions?.can_edit_restaurants === true;
   const canDeleteRest = isMasterCeo || currentCeoStaff?.permissions?.can_delete_restaurants === true;
   const canManageFreePlans = isMasterCeo || currentCeoStaff?.permissions?.can_manage_free_plans === true || currentCeoStaff?.permissions?.can_edit_subscriptions === true;
 
+  // 2. Subscriptions & Renewal Plans
   const canViewSubs = isMasterCeo || currentCeoStaff?.permissions?.can_view_subscriptions !== false || currentCeoStaff?.permissions?.can_view_agreements !== false;
   const canEditSubs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_subscriptions === true || currentCeoStaff?.permissions?.can_edit_agreements === true;
+  const canDeleteSubs = isMasterCeo || currentCeoStaff?.permissions?.can_delete_subscriptions === true;
 
+  // 3. Legal Agreements & Contracts
+  const canViewAgreements = isMasterCeo || currentCeoStaff?.permissions?.can_view_agreements !== false;
+  const canCreateAgreements = isMasterCeo || currentCeoStaff?.permissions?.can_create_agreements === true;
+  const canEditAgreements = isMasterCeo || currentCeoStaff?.permissions?.can_edit_agreements === true;
+  const canDeleteAgreements = isMasterCeo || currentCeoStaff?.permissions?.can_delete_agreements === true;
+
+  // 4. Payment Gateways & Settings
   const canViewPay = isMasterCeo || currentCeoStaff?.permissions?.can_view_payments !== false;
   const canEditPay = isMasterCeo || currentCeoStaff?.permissions?.can_edit_payments === true;
+  const canDeletePay = isMasterCeo || currentCeoStaff?.permissions?.can_delete_payments === true;
 
-  const canViewTeam = isMasterCeo || currentCeoStaff?.permissions?.can_view_team === true || currentCeoStaff?.permissions?.can_manage_team === true;
-  const canManageTeam = isMasterCeo || currentCeoStaff?.permissions?.can_manage_team === true;
+  // 5. CEO Team & Staff Management
+  const canViewTeam = isMasterCeo || currentCeoStaff?.permissions?.can_view_team === true || currentCeoStaff?.permissions?.can_add_team === true || currentCeoStaff?.permissions?.can_edit_team === true || currentCeoStaff?.permissions?.can_manage_team === true;
+  const canAddTeam = isMasterCeo || currentCeoStaff?.permissions?.can_add_team === true || currentCeoStaff?.permissions?.can_manage_team === true;
+  const canEditTeam = isMasterCeo || currentCeoStaff?.permissions?.can_edit_team === true || currentCeoStaff?.permissions?.can_manage_team === true;
+  const canDeleteTeam = isMasterCeo || currentCeoStaff?.permissions?.can_delete_team === true || currentCeoStaff?.permissions?.can_manage_team === true;
+  const canManageTeam = isMasterCeo || canEditTeam || canAddTeam;
 
+  // 6. Reports & Financial Analytics
   const canViewRep = isMasterCeo || currentCeoStaff?.permissions?.can_view_reports !== false;
   const canEditRep = isMasterCeo || currentCeoStaff?.permissions?.can_edit_reports === true;
+  const canDeleteRep = isMasterCeo || currentCeoStaff?.permissions?.can_delete_reports === true;
 
+  // 7. Supabase SQL Migrations & Database
   const canViewSql = isMasterCeo || currentCeoStaff?.permissions?.can_view_sql === true;
   const canEditSql = isMasterCeo || currentCeoStaff?.permissions?.can_edit_sql === true;
+  const canDeleteSql = isMasterCeo || currentCeoStaff?.permissions?.can_delete_sql === true;
 
+  // 8. System Storage & Media Assets
   const canViewStorage = isMasterCeo || currentCeoStaff?.permissions?.can_view_storage !== false;
   const canEditStorage = isMasterCeo || currentCeoStaff?.permissions?.can_edit_storage === true;
+  const canDeleteStorage = isMasterCeo || currentCeoStaff?.permissions?.can_delete_storage === true;
 
+  // 9. System Snapshot & Backup
   const canViewBackup = isMasterCeo || currentCeoStaff?.permissions?.can_view_backup === true;
+  const canCreateBackup = isMasterCeo || currentCeoStaff?.permissions?.can_create_backup === true;
   const canEditBackup = isMasterCeo || currentCeoStaff?.permissions?.can_edit_backup === true;
+  const canDeleteBackup = isMasterCeo || currentCeoStaff?.permissions?.can_delete_backup === true;
 
+  // 10. Global Customer Feedback
   const canViewFeedback = isMasterCeo || currentCeoStaff?.permissions?.can_view_feedback !== false;
   const canEditFeedback = isMasterCeo || currentCeoStaff?.permissions?.can_edit_feedback === true;
+  const canDeleteFeedback = isMasterCeo || currentCeoStaff?.permissions?.can_delete_feedback === true;
 
+  // 11. System Audit Trail Logs
   const canViewLogs = isMasterCeo || currentCeoStaff?.permissions?.can_view_logs !== false;
   const canEditLogs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_logs === true;
+  const canDeleteLogs = isMasterCeo || currentCeoStaff?.permissions?.can_delete_logs === true;
 
   const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
     if (currentCeoStaff) {
@@ -393,6 +423,10 @@ export const CeoDashboard: React.FC = () => {
 
   const handleCreateRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canAddRest) {
+      showToast('Access Denied: You do not have permission to add new restaurants. Please contact Master CEO.', 'error');
+      return;
+    }
     setCreateRestError(null);
     if (!newRest.name || !newRest.owner_mobile) return;
 
@@ -541,7 +575,7 @@ export const CeoDashboard: React.FC = () => {
             <CreditCard className="w-4 h-4 text-emerald-400" /> Razorpay Account ({(ceoRazorpayConfig?.mode || 'demo').toUpperCase()})
           </button>
 
-          {canEditRest ? (
+          {canAddRest ? (
             <button
               onClick={() => setShowAddModal(true)}
               className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all cursor-pointer"
@@ -550,11 +584,11 @@ export const CeoDashboard: React.FC = () => {
             </button>
           ) : (
             <button
-              onClick={() => showToast('Access Denied: You have View-Only permissions for restaurants.', 'error')}
+              onClick={() => showToast('Access Denied: You do not have permission to add new restaurants. Contact Master CEO to grant "Add New Restaurant" permission.', 'error')}
               className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-500 font-bold text-xs border border-slate-800 flex items-center gap-2 cursor-not-allowed opacity-60"
-              title="View-Only Permission"
+              title="Add Restaurant Locked (Requires Add New Restaurant permission)"
             >
-              <Plus className="w-4 h-4" /> Add Restaurant (Locked)
+              <Lock className="w-4 h-4 text-slate-500" /> Add Restaurant (Locked)
             </button>
           )}
 
@@ -737,7 +771,13 @@ export const CeoDashboard: React.FC = () => {
       </div>
 
       {/* TAB: CEO TEAM & STAFF MANAGEMENT */}
-      {activeTab === 'team' && canViewTeam && <CeoStaffManagement canManage={canManageTeam} />}
+      {activeTab === 'team' && canViewTeam && (
+        <CeoStaffManagement
+          canAdd={canAddTeam}
+          canEdit={canEditTeam}
+          canDelete={canDeleteTeam}
+        />
+      )}
 
       {/* TAB 1: RESTAURANT TENANT MANAGEMENT */}
       {activeTab === 'restaurants' && (

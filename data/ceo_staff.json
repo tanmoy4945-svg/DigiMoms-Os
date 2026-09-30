@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "id": "368e8718-fa4e-49e2-bcaa-50423cc7dbad",
+    "name": "Nimai",
+    "mobile": "1234567890",
+    "password_hash": "Tanmoy",
+    "role": "manager",
+    "status": "active",
+    "permissions": {
+      "can_view_sql": false,
+      "can_view_logs": true,
+      "can_view_backup": false,
+      "can_view_reports": true,
+      "can_view_storage": false,
+      "can_edit_payments": false,
+      "can_view_feedback": true,
+      "can_view_payments": false,
+      "can_add_restaurants": false,
+      "can_edit_restaurants": false,
+      "can_view_restaurants": true,
+      "can_edit_subscriptions": false,
+      "can_view_subscriptions": true
+    },
+    "last_password_change": null,
+    "last_login": "2026-09-29T05:58:25.357+00:00",
+    "created_at": "2026-09-29T05:57:36.245+00:00",
+    "updated_at": "2026-09-30T13:24:00+00:00"
+  }
+]
