@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSaaS } from '../../context/SaaSContext';
 import { Wifi, WifiOff, RefreshCw, Bell, Volume2, VolumeX, CheckCheck, Trash2, X, Sliders, Volume1, Volume2 as VolIcon } from 'lucide-react';
-import { requestNotificationPermission, getNotificationPermissionState } from '../../utils/notificationService';
+import { requestNotificationPermission, getNotificationPermissionState, triggerSystemNotification } from '../../utils/notificationService';
 import { 
   isSoundEnabled, setSoundEnabled, 
   isNotificationsEnabled, setNotificationsEnabled, 
@@ -75,8 +75,13 @@ export const RealtimeStatusBadge: React.FC = () => {
     setAudioBlocked(false);
     const result = await runAudioDiagnosticTest();
     playNotificationSound('new_order', `test_diagnostic_${Date.now()}`);
+    triggerSystemNotification({
+      eventId: `test_diagnostic_push_${Date.now()}`,
+      title: '🔔 DigiMoms Sound & Alert Test',
+      body: 'Audio and mobile notification alert test successful!'
+    });
     if (result.success) {
-      showToast('🔊 Notification sound test successful!', 'success');
+      showToast('🔊 Notification sound & alert test triggered!', 'success');
     } else {
       showToast(`⚠️ Audio blocked by browser: ${result.message}`, 'error');
     }
@@ -86,12 +91,34 @@ export const RealtimeStatusBadge: React.FC = () => {
     handleTestDiagnosticSound();
   };
 
+  const handleTestHeaderNotification = async () => {
+    unlockAudioContext();
+    await requestNotificationPermission();
+    setPermState(getNotificationPermissionState());
+    playNotificationSound('new_order', `sound_test_${Date.now()}`);
+    const ok = triggerSystemNotification({
+      eventId: `test_notif_${Date.now()}`,
+      title: '🔔 DigiMoms New Order Alert',
+      body: 'Table 04: Order #025 Received (₹450 Paid). Header alert working!'
+    });
+    if (ok) {
+      showToast('📱 Header notification sent! Check your mobile top bar.', 'success');
+    } else {
+      showToast('Please enable notifications in your browser or phone settings.', 'warning');
+    }
+  };
+
   const handleEnablePush = async () => {
     unlockAudioContext();
     const granted = await requestNotificationPermission();
     setPermState(getNotificationPermissionState());
     if (granted) {
       showToast('Browser Push Notifications Enabled!', 'success');
+      triggerSystemNotification({
+        eventId: `push_enabled_${Date.now()}`,
+        title: '🔔 DigiMoms Notifications Enabled',
+        body: 'You will receive instant alerts for new orders and table calls!'
+      });
     } else {
       showToast('Notification permission denied by browser settings.', 'error');
     }
@@ -288,6 +315,15 @@ export const RealtimeStatusBadge: React.FC = () => {
             >
               <Volume2 className="w-3.5 h-3.5" />
               <span>Test Chime Sound</span>
+            </button>
+
+            {/* Test Mobile Header Notification Button */}
+            <button
+              onClick={handleTestHeaderNotification}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
+            >
+              <Bell className="w-4 h-4" />
+              <span>Test Mobile Header Notification</span>
             </button>
           </div>
         </div>

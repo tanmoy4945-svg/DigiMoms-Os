@@ -92,22 +92,51 @@ export function triggerSystemNotification(opts: TriggerNotificationOptions): boo
 
   try {
     const title = opts.title || 'DigiMoms OS Alert';
-    const notificationOpts = {
+    const notificationOpts: NotificationOptions = {
       body: opts.body,
-      icon: opts.icon || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=100',
+      icon: opts.icon || '/icon-192.png',
+      badge: '/icon-192.png',
       tag: opts.eventId,
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [300, 150, 300] as any,
       data: { url: opts.url || '/owner-dashboard', restaurantId: opts.restaurantId }
-    };
+    } as any;
 
-    if (swRegistration && swRegistration.showNotification) {
-      swRegistration.showNotification(title, notificationOpts);
+    if ('serviceWorker' in navigator) {
+      if (swRegistration && swRegistration.showNotification) {
+        swRegistration.showNotification(title, notificationOpts).catch(err => {
+          console.warn('[NotificationService] showNotification error:', err);
+        });
+      } else {
+        navigator.serviceWorker.ready.then((reg) => {
+          swRegistration = reg;
+          reg.showNotification(title, notificationOpts).catch(err => {
+            console.warn('[NotificationService] ready.showNotification error:', err);
+          });
+        }).catch(err => {
+          console.warn('[NotificationService] serviceWorker.ready error:', err);
+          try {
+            const n = new Notification(title, notificationOpts);
+            n.onclick = () => {
+              window.focus();
+              if (opts.url) window.location.href = opts.url;
+              n.close();
+            };
+          } catch (e) {}
+        });
+      }
     } else {
-      const n = new Notification(title, notificationOpts);
-      n.onclick = () => {
-        window.focus();
-        if (opts.url) window.location.href = opts.url;
-        n.close();
-      };
+      try {
+        const n = new Notification(title, notificationOpts);
+        n.onclick = () => {
+          window.focus();
+          if (opts.url) window.location.href = opts.url;
+          n.close();
+        };
+      } catch (e) {
+        console.warn('[NotificationService] Fallback notification failed:', e);
+      }
     }
     return true;
   } catch (err) {

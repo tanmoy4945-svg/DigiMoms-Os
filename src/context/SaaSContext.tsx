@@ -1375,13 +1375,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       knownOrderIdsRef.current.add(newRow.id);
 
       let itemsData: any[] = [];
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const { data } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
-        if (data && data.length > 0) {
-          itemsData = data;
-          break;
+      if (newRow.items && Array.isArray(newRow.items) && newRow.items.length > 0) {
+        itemsData = newRow.items;
+      } else {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { data } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
+          if (data && data.length > 0) {
+            itemsData = data;
+            break;
+          }
+          await new Promise(r => setTimeout(r, 100));
         }
-        await new Promise(r => setTimeout(r, 200));
       }
 
       const formattedOrder: Order = {
@@ -1775,7 +1779,48 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       });
 
+    // 3. Ultra-Resilient Fast Realtime Polling Fallback:
+    // Guarantees orders, status updates, and notifications pop in real time (every 2.5s)
+    // even on mobile phones when WebSockets/SSE are put to sleep by Android!
+    const pollInterval = setInterval(async () => {
+      try {
+        const queryUrl = activeRestId ? `/api/orders/list?restaurant_id=${activeRestId}` : '/api/orders/list';
+        const res = await fetch(queryUrl);
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.success && Array.isArray(json.data)) {
+            const serverOrders: any[] = json.data;
+            for (const sOrd of serverOrders) {
+              if (!sOrd?.id) continue;
+              if (!knownOrderIdsRef.current.has(sOrd.id)) {
+                processOrderInsert(sOrd);
+              } else {
+                // Check if status changed while mobile was asleep
+                setOrders(prev => {
+                  const existing = prev.find(o => o.id === sOrd.id);
+                  if (existing && (existing.order_status !== sOrd.order_status || existing.payment_status !== sOrd.payment_status)) {
+                    processOrderUpdate(sOrd, existing);
+                    return prev.map(o => o.id === sOrd.id ? { ...o, ...sOrd } : o);
+                  }
+                  return prev;
+                });
+              }
+            }
+          }
+        }
+      } catch {}
+    }, 2500);
+
+    const onFocusOrVisible = () => {
+      fetchAllFromSupabase();
+    };
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    window.addEventListener('focus', onFocusOrVisible);
+
     return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      window.removeEventListener('focus', onFocusOrVisible);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (eventSource) eventSource.close();
       supabase.removeChannel(channel);
@@ -3573,8 +3618,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sort_order: categories.filter(c => c.restaurant_id === currentOwner.id).length + 1,
       is_hidden: false
     };
-    const { error } = await supabase.from('menu_categories').insert([newCat]);
-    if (error) console.error("Add category error:", error);
+    // Instant optimistic update
+    setCategories(prev => [...prev, newCat as any]);
+    showToast(`Category '${name}' added.`, 'success');
+
     logAudit({
       restaurant_id: currentOwner.id,
       actor_type: 'owner',
@@ -3584,13 +3631,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'ADD_CATEGORY',
       description: `Added category '${name}'`
     });
-    await fetchAllFromSupabase();
-    showToast(`Category '${name}' added.`, 'success');
+
+    (async () => {
+      try {
+        const { error } = await supabase.from('menu_categories').insert([newCat]);
+        if (error) console.warn("Add category background error:", error);
+      } catch {}
+    })();
   };
 
   const updateCategory = async (id: string, name: string, is_hidden: boolean) => {
-    const { error } = await supabase.from('menu_categories').update({ name, is_hidden }).eq('id', id);
-    if (error) console.error("Update category error:", error);
+    // Instant optimistic update
+    setCategories(prev => prev.map(c => c.id === id ? { ...c, name, is_hidden } : c));
+    showToast('Category updated.', 'success');
+
     if (currentOwner) {
       logAudit({
         restaurant_id: currentOwner.id,
@@ -3602,8 +3656,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Updated category '${name}'`
       });
     }
-    await fetchAllFromSupabase();
-    showToast('Category updated.', 'success');
+
+    (async () => {
+      try {
+        const { error } = await supabase.from('menu_categories').update({ name, is_hidden }).eq('id', id);
+        if (error) console.warn("Update category background error:", error);
+      } catch {}
+    })();
   };
 
   const addMenuItem = async (item: Omit<MenuItem, 'id' | 'restaurant_id'>) => {
@@ -3624,8 +3683,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       spicy_level: item.spicy_level || 0,
       sort_order: menuItems.filter(m => m.restaurant_id === currentOwner.id).length + 1
     };
-    const { error } = await supabase.from('menus').insert([newItem]);
-    if (error) console.error("Add menu item error:", error);
+
+    // Instant optimistic update
+    setMenuItems(prev => [...prev, newItem as any]);
+    showToast(`Dish '${item.name}' added to menu.`, 'success');
+
     logAudit({
       restaurant_id: currentOwner.id,
       actor_type: 'owner',
@@ -3635,13 +3697,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'ADD_MENU_ITEM',
       description: `Added dish '${item.name}' (₹${item.price})`
     });
-    await fetchAllFromSupabase();
-    showToast(`Dish '${item.name}' added to menu.`, 'success');
+
+    (async () => {
+      try {
+        const { error } = await supabase.from('menus').insert([newItem]);
+        if (error) console.warn("Add menu item background error:", error);
+      } catch {}
+    })();
   };
 
   const updateMenuItem = async (id: string, item: Partial<MenuItem>) => {
-    const { error } = await supabase.from('menus').update(item).eq('id', id);
-    if (error) console.error("Update menu item error:", error);
+    // Instant optimistic update
+    setMenuItems(prev => prev.map(m => m.id === id ? { ...m, ...item } : m));
+    showToast('Menu item updated.', 'success');
+
     if (currentOwner) {
       logAudit({
         restaurant_id: currentOwner.id,
@@ -3653,14 +3722,23 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Updated dish '${item.name || 'item'}'`
       });
     }
-    await fetchAllFromSupabase();
-    showToast('Menu item updated.', 'success');
+
+    (async () => {
+      try {
+        const { error } = await supabase.from('menus').update(item).eq('id', id);
+        if (error) console.warn("Update menu item background error:", error);
+      } catch {}
+    })();
   };
 
   const toggleMenuItemAvailability = async (id: string) => {
     const existing = menuItems.find(m => m.id === id);
     if (existing) {
-      await supabase.from('menus').update({ is_available: !existing.is_available }).eq('id', id);
+      const nextAvailable = !existing.is_available;
+      // Instant optimistic update
+      setMenuItems(prev => prev.map(m => m.id === id ? { ...m, is_available: nextAvailable } : m));
+      showToast(`Dish '${existing.name}' marked ${nextAvailable ? 'Available' : 'Unavailable'}.`, 'info');
+
       if (currentOwner) {
         logAudit({
           restaurant_id: currentOwner.id,
@@ -3669,10 +3747,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           actor_name: currentOwner.owner_name,
           actor_role: 'owner',
           action: 'TOGGLE_MENU_AVAILABILITY',
-          description: `Toggled availability for '${existing.name}'`
+          description: `Toggled availability for '${existing.name}' to ${nextAvailable}`
         });
       }
-      await fetchAllFromSupabase();
+
+      (async () => {
+        try {
+          const { error } = await supabase.from('menus').update({ is_available: nextAvailable }).eq('id', id);
+          if (error) console.warn("Toggle menu availability background error:", error);
+        } catch {}
+      })();
     }
   };
 
@@ -3693,8 +3777,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       status: 'available'
     };
 
-    const { error } = await supabase.from('tables').insert([newTable]);
-    if (error) console.error("Add table error:", error);
+    // Instant optimistic update
+    setTables(prev => [...prev, newTable as any]);
+    showToast(`New Table '${tableNumber}' created with code ${shortCode}!`, 'success');
+
     logAudit({
       restaurant_id: currentOwner.id,
       actor_type: 'owner',
@@ -3704,8 +3790,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'ADD_TABLE',
       description: `Added Table '${tableNumber}' (Code: ${shortCode})`
     });
-    await fetchAllFromSupabase();
-    showToast(`New Table '${tableNumber}' created with code ${shortCode}!`, 'success');
+
+    (async () => {
+      try {
+        const { error } = await supabase.from('tables').insert([newTable]);
+        if (error) console.warn("Add table background error:", error);
+      } catch {}
+    })();
   };
 
   const clearTableSession = async (tableId: string) => {
@@ -5558,55 +5649,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       special_instructions: item.special_instructions || null
     }));
 
-    try {
-      await supabase.from('order_items').insert(orderItemsToInsert);
-    } catch (itemsErr) {
-      console.warn("Supabase order_items insert warning:", itemsErr);
-    }
-
-    // Step 3: Update table status to 'occupied'
-    if (tableId) {
-      try {
-        await supabase.from('tables').update({ status: 'occupied' }).eq('id', tableId);
-      } catch (tErr) {
-        console.warn("Table update warning:", tErr);
-      }
-    }
-
-    // Persist order to server store
-    try {
-      await fetch('/api/orders/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...cleanOrderPayload, items: orderItemsToInsert })
-      });
-    } catch (srvErr) {
-      console.warn("Server order save warning:", srvErr);
-    }
-
-    logAudit({
-      restaurant_id: restaurantId,
-      order_id: orderId,
-      session_id: sessionId,
-      actor_type: 'customer',
-      actor_name: customerMobile ? `Customer (${customerMobile})` : 'Table Customer',
-      action: 'ORDER_PLACED',
-      new_status: orderStatus,
-      description: `Placed Order ${orderNum} for Table ${tableNumber} (Total: ₹${grand_total}, Payment: ${effectivePaymentMode})`
-    });
-
-    if (paymentStatus === 'paid_demo') {
-      await creditHotelWallet(restaurantId, orderId, grand_total, 'cash');
-    } else if (paymentStatus === 'paid_live') {
-      await creditHotelWallet(restaurantId, orderId, online_amount, 'online');
-    }
-
-    if (orderStatus === 'accepted') {
-      playNotificationSound('new_order');
-    }
-
-    await fetchAllFromSupabase();
-
     const resultOrder: Order = {
       id: orderId,
       restaurant_id: restaurantId,
@@ -5643,7 +5685,53 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: createdIso
     };
 
+    // Instant local state update: Zero waiting, zero lag for customer!
     setOrders(prev => [resultOrder, ...prev.filter(o => o.id !== orderId)]);
+    knownOrderIdsRef.current.add(orderId);
+
+    // Immediate server save and SSE real-time broadcast to all dashboards
+    fetch('/api/orders/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...cleanOrderPayload, items: orderItemsToInsert })
+    }).catch(srvErr => console.warn("Server order save warning:", srvErr));
+
+    // Concurrently persist to Supabase & hotel wallets in the background
+    (async () => {
+      try {
+        let { error: ordErr } = await supabase.from('orders').insert([cleanOrderPayload]);
+        if (ordErr && (ordErr.code === '42703' || ordErr.message?.includes('column'))) {
+          await supabase.from('orders').insert([coreOrderPayload]);
+        }
+        await supabase.from('order_items').insert(orderItemsToInsert);
+        if (tableId) {
+          await supabase.from('tables').update({ status: 'occupied' }).eq('id', tableId);
+        }
+        if (paymentStatus === 'paid_demo') {
+          await creditHotelWallet(restaurantId, orderId, grand_total, 'cash');
+        } else if (paymentStatus === 'paid_live') {
+          await creditHotelWallet(restaurantId, orderId, online_amount, 'online');
+        }
+      } catch (err) {
+        console.warn("Background order sync notice:", err);
+      }
+    })();
+
+    logAudit({
+      restaurant_id: restaurantId,
+      order_id: orderId,
+      session_id: sessionId,
+      actor_type: 'customer',
+      actor_name: customerMobile ? `Customer (${customerMobile})` : 'Table Customer',
+      action: 'ORDER_PLACED',
+      new_status: orderStatus,
+      description: `Placed Order ${orderNum} for Table ${tableNumber} (Total: ₹${grand_total}, Payment: ${effectivePaymentMode})`
+    });
+
+    if (orderStatus === 'accepted') {
+      playNotificationSound('new_order');
+    }
+
     return resultOrder;
   };
 

@@ -13,7 +13,7 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'DigiMoms Restaurant Notification',
     body: 'New update from your restaurant dashboard.',
-    icon: '/favicon.ico',
+    icon: '/icon-192.png',
     url: '/owner-dashboard'
   };
 
@@ -28,8 +28,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: data.icon || '/favicon.ico',
-    badge: data.icon || '/favicon.ico',
+    icon: data.icon || '/icon-192.png',
+    badge: data.icon || '/icon-192.png',
     vibrate: [200, 100, 200, 100, 200],
     data: {
       url: data.url || '/owner-dashboard',
