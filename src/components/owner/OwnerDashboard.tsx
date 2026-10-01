@@ -98,9 +98,9 @@ export const OwnerDashboard: React.FC = () => {
     );
   }
 
-  const restOrders = orders.filter(o => o.restaurant_id === currentOwner.id);
-  const restTables = tables.filter(t => t.restaurant_id === currentOwner.id);
-  const restCalls = callRequests.filter(c => c.restaurant_id === currentOwner.id && c.status === 'pending');
+  const restOrders = React.useMemo(() => orders.filter(o => o.restaurant_id === currentOwner.id), [orders, currentOwner.id]);
+  const restTables = React.useMemo(() => tables.filter(t => t.restaurant_id === currentOwner.id), [tables, currentOwner.id]);
+  const restCalls = React.useMemo(() => callRequests.filter(c => c.restaurant_id === currentOwner.id && c.status === 'pending'), [callRequests, currentOwner.id]);
 
   // Helper to accurately get effective cash due
   const getEffectiveCashDue = (o: Order): number => {
@@ -113,57 +113,64 @@ export const OwnerDashboard: React.FC = () => {
     return Math.max(0, Number(o.grand_total || 0) - Number(o.online_amount || 0) - Number(o.cash_amount || 0));
   };
 
-  // Filter confirmed & active orders (excluding cancelled and unverified online checkout attempts)
-  const confirmedRestOrders = restOrders.filter(o => {
-    if (o.order_status === 'cancelled') return false;
-    // Online order must NOT appear in Owner Live Orders before successful gateway + server-side payment verification
-    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-      return false;
-    }
-    // Partial order must have its online advance verified before appearing in live orders
-    if (o.payment_mode === 'partial' && !['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) && (o.online_amount || 0) <= 0) {
-      return false;
-    }
-    return true;
-  });
+  // Filter confirmed & active orders (excluding cancelled, completed and unverified online checkout attempts)
+  const confirmedRestOrders = React.useMemo(() => {
+    return restOrders.filter(o => {
+      // HIDE COMPLETED/CANCELLED FROM LIVE STREAM TO PREVENT LAG
+      if (o.order_status === 'cancelled' || o.order_status === 'completed') return false;
+      
+      // Online order must NOT appear in Owner Live Orders before successful gateway + server-side payment verification
+      if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+        return false;
+      }
+      // Partial order must have its online advance verified before appearing in live orders
+      if (o.payment_mode === 'partial' && !['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) && (o.online_amount || 0) <= 0) {
+        return false;
+      }
+      return true;
+    });
+  }, [restOrders]);
 
   // Total Realized Revenue: Increases ONLY when customer pays online (auto) or cash is confirmed by staff/owner
-  const todaySales = restOrders.reduce((sum, o) => {
-    if (o.order_status === 'cancelled') return sum;
-    if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-      return sum + Number(o.online_amount || o.grand_total);
-    }
-    if (o.payment_mode === 'demo') {
-      return sum + Number(o.online_amount || o.grand_total);
-    }
-    if (o.payment_mode === 'partial') {
-      let paidAmt = 0;
-      if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
-        paidAmt += Number(o.online_amount || 0);
+  const todaySales = React.useMemo(() => {
+    return restOrders.reduce((sum, o) => {
+      if (o.order_status === 'cancelled') return sum;
+      if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+        return sum + Number(o.online_amount || o.grand_total);
       }
-      if (['paid', 'paid_cash'].includes(o.payment_status)) {
-        paidAmt += Number(o.cash_amount || (o.grand_total - (o.online_amount || 0)));
-      } else if ((o.cash_amount || 0) > 0) {
-        paidAmt += Number(o.cash_amount || 0);
+      if (o.payment_mode === 'demo') {
+        return sum + Number(o.online_amount || o.grand_total);
       }
-      return sum + Math.min(o.grand_total, paidAmt);
-    }
-    if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-      return sum + Number(o.online_amount || o.grand_total);
-    }
-    // Cash payment
-    if (['paid', 'paid_cash', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
-      return sum + Number(o.cash_amount || o.grand_total);
-    }
-    return sum + Number(o.cash_amount || 0);
-  }, 0);
+      if (o.payment_mode === 'partial') {
+        let paidAmt = 0;
+        if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
+          paidAmt += Number(o.online_amount || 0);
+        }
+        if (['paid', 'paid_cash'].includes(o.payment_status)) {
+          paidAmt += Number(o.cash_amount || (o.grand_total - (o.online_amount || 0)));
+        } else if ((o.cash_amount || 0) > 0) {
+          paidAmt += Number(o.cash_amount || 0);
+        }
+        return sum + Math.min(o.grand_total, paidAmt);
+      }
+      if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+        return sum + Number(o.online_amount || o.grand_total);
+      }
+      // Cash payment
+      if (['paid', 'paid_cash', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
+        return sum + Number(o.cash_amount || o.grand_total);
+      }
+      return sum + Number(o.cash_amount || 0);
+    }, 0);
+  }, [restOrders]);
 
-  const pendingOrders = confirmedRestOrders.filter(o => {
+  const pendingOrders = React.useMemo(() => confirmedRestOrders.filter(o => {
     if (['paid', 'paid_live', 'paid_cash', 'paid_demo', 'paid_online'].includes(o.payment_status)) return false;
     return getEffectiveCashDue(o) > 0 || o.payment_status === 'payment_verification_pending';
-  });
-  const cookingOrders = confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted');
-  const occupiedTables = restTables.filter(t => t.status === 'occupied').length;
+  }), [confirmedRestOrders]);
+
+  const cookingOrders = React.useMemo(() => confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted'), [confirmedRestOrders]);
+  const occupiedTables = React.useMemo(() => restTables.filter(t => t.status === 'occupied').length, [restTables]);
 
   const subDetails = getRestaurantSubscriptionDetails(currentOwner);
   const {
