@@ -21,6 +21,7 @@ import { WaiterTerminal } from './components/staff/WaiterTerminal';
 import { KitchenTerminal } from './components/staff/KitchenTerminal';
 
 import { CustomerQrApp } from './components/customer/CustomerQrApp';
+import { MobileAppPortal } from './components/common/MobileAppPortal';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -75,6 +76,35 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
 const AppContent: React.FC = () => {
   const { activeView } = useSaaS();
+
+  const [preferWebsiteView, setPreferWebsiteView] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return sessionStorage.getItem('digimoms_prefer_web') === 'true';
+  });
+
+  const isAppStandalone = typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true ||
+    new URLSearchParams(window.location.search).get('source') === 'pwa' ||
+    new URLSearchParams(window.location.search).get('mode') === 'app'
+  );
+
+  // If opened via installed App (PWA/APK) without active login session, present pure Mobile App Portal!
+  if (isAppStandalone && !preferWebsiteView && (activeView === 'landing' || activeView === 'public-home')) {
+    return (
+      <main className="min-h-screen bg-slate-950 flex justify-center">
+        <div className="w-full max-w-md min-h-screen bg-slate-950 flex flex-col">
+          <NotificationToast />
+          <MobileAppPortal
+            onOpenPublicWebsite={() => {
+              setPreferWebsiteView(true);
+              sessionStorage.setItem('digimoms_prefer_web', 'true');
+            }}
+          />
+        </div>
+      </main>
+    );
+  }
 
   // Special views: Customer QR app is mobile-first (centered phone frame on desktop, full-width on mobile)
   if (activeView === 'customer-qr') {

@@ -211,6 +211,7 @@ interface SaaSContextType {
   submitCustomerFeedback: (feedback: Omit<CustomerFeedback, 'id' | 'created_at'>) => Promise<void>;
   getActiveTableSession: (restaurantId: string, tableId: string) => Promise<TableSession | null>;
   getOrCreateTableSession: (restaurantId: string, tableId: string, tableNumber: string, mobile?: string) => Promise<TableSession>;
+  deleteOrdersByMonth: (restaurantId: string, monthKey: string) => Promise<{ success: boolean; count: number; error?: string }>;
 
   // Public Website & Portfolio Management
   websiteSettings: RestaurantWebsiteSettings[];
@@ -5422,6 +5423,63 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const deleteOrdersByMonth = async (
+    restaurantId: string,
+    monthKey: string
+  ): Promise<{ success: boolean; count: number; error?: string }> => {
+    try {
+      // Find orders for this restaurant where created_at starts with 'YYYY-MM'
+      const targetOrders = orders.filter(
+        o => o.restaurant_id === restaurantId && o.created_at && o.created_at.startsWith(monthKey)
+      );
+
+      if (targetOrders.length === 0) {
+        return { success: true, count: 0 };
+      }
+
+      const orderIds = targetOrders.map(o => o.id);
+
+      // 1. Optimistic removal from local state for instant 0ms UI update
+      setOrders(prev => prev.filter(o => !orderIds.includes(o.id)));
+
+      // 2. Delete order items first (foreign key integrity)
+      try {
+        await supabase
+          .from('order_items')
+          .delete()
+          .in('order_id', orderIds);
+      } catch (e) {
+        console.warn('[Storage Cleanup] order_items delete notice:', e);
+      }
+
+      // 3. Delete master orders from database
+      const { error: ordErr } = await supabase
+        .from('orders')
+        .delete()
+        .in('id', orderIds);
+
+      if (ordErr) {
+        console.error('[Storage Cleanup] orders delete error:', ordErr);
+        fetchAllFromSupabase();
+        return { success: false, count: 0, error: ordErr.message };
+      }
+
+      // 4. Log audit event
+      logAudit({
+        restaurant_id: restaurantId,
+        actor_type: 'owner',
+        actor_name: currentOwner ? currentOwner.owner_name : 'Owner',
+        action: 'DELETE_MONTHLY_ORDERS_STORAGE_CLEANUP',
+        description: `Owner purged ${orderIds.length} orders from ${monthKey} to free database storage.`
+      });
+
+      return { success: true, count: orderIds.length };
+    } catch (err: any) {
+      console.error('[Storage Cleanup] Exception:', err);
+      return { success: false, count: 0, error: err.message || 'Failed to delete orders' };
+    }
+  };
+
   // --- CUSTOMER QR ACTIONS ---
   const getActiveTableSession = async (restaurantId: string, tableId: string): Promise<TableSession | null> => {
     // 1. Check in-memory active session
@@ -6059,7 +6117,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder, recordOfflinePayment,
       verifyUpiPayment, rejectUpiPayment, submitUpiPaymentConfirmation,
       acceptOrder, startCookingOrder, markOrderReady, serveOrder, completeOrder, placeOrder,
-      sendCallWaiterRequest, submitCustomerFeedback, getActiveTableSession, getOrCreateTableSession,
+      sendCallWaiterRequest, submitCustomerFeedback, getActiveTableSession, getOrCreateTableSession, deleteOrdersByMonth,
       websiteSettings, restaurantServices, restaurantPricing, restaurantLegalPages, restaurantSocialLinks,
       getWebsiteSettings, updateWebsiteSettings, getServices, addService, updateService, deleteService,
       getPricing, addPricingItem, updatePricingItem, deletePricingItem, getLegalPages, updateLegalPages,

@@ -133,6 +133,108 @@ export function setSoundVolume(vol: number): void {
   localStorage.setItem('digimoms_sound_volume', clamped.toString());
 }
 
+// --- ANDROID DOZE-MODE PREVENTER & BACKGROUND KEEP-ALIVE ---
+let backgroundKeepAliveTimer: any = null;
+let silentAudioEl: HTMLAudioElement | null = null;
+let wakeLockSentinel: any = null;
+
+/**
+ * Creates a silent HTML5 audio element loop that marks the app as an active
+ * media process on Android, preventing Android from killing network sockets
+ * after 1 minute of screen lock (Doze Mode).
+ */
+export function startBackgroundAudioKeepAlive(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  unlockAudioContext();
+
+  try {
+    // 1. If screen wake lock is available, request it
+    if ('wakeLock' in navigator && !wakeLockSentinel) {
+      (navigator as any).wakeLock.request('screen').then((lock: any) => {
+        wakeLockSentinel = lock;
+        lock.addEventListener('release', () => {
+          wakeLockSentinel = null;
+        });
+      }).catch(() => {});
+    }
+
+    // 2. HTML5 Silent Audio Loop (data URI of a 1-second silent WAV)
+    if (!silentAudioEl) {
+      const silentWavBase64 = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      silentAudioEl = new Audio(silentWavBase64);
+      silentAudioEl.loop = true;
+      silentAudioEl.volume = 0.001;
+    }
+
+    silentAudioEl.play().catch(() => {});
+
+    // 2.5 MediaSession declaration for Android background persistence (keeps process alive in Doze mode)
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = 'playing';
+        if (typeof MediaMetadata !== 'undefined') {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'DigiMoms Live Restaurant Alerts',
+            artist: 'Background Order & Call Monitor',
+            album: 'Smart Restaurant OS'
+          });
+        }
+      } catch {}
+    }
+
+    // 3. Periodic micro-oscillator heartbeat every 20 seconds
+    if (!backgroundKeepAliveTimer) {
+      backgroundKeepAliveTimer = setInterval(() => {
+        try {
+          const ctx = getAudioContext();
+          if (ctx && ctx.state === 'running') {
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.setValueAtTime(20, now);
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.05);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.05);
+          }
+        } catch {}
+      }, 20000);
+    }
+
+    localStorage.setItem('digimoms_bg_keepalive', 'true');
+    return true;
+  } catch (err) {
+    console.warn('[Sound] Background keep-alive error:', err);
+    return false;
+  }
+}
+
+export function stopBackgroundAudioKeepAlive(): void {
+  if (backgroundKeepAliveTimer) {
+    clearInterval(backgroundKeepAliveTimer);
+    backgroundKeepAliveTimer = null;
+  }
+  if (silentAudioEl) {
+    silentAudioEl.pause();
+    silentAudioEl = null;
+  }
+  if (wakeLockSentinel) {
+    wakeLockSentinel.release().catch(() => {});
+    wakeLockSentinel = null;
+  }
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('digimoms_bg_keepalive', 'false');
+  }
+}
+
+export function isBackgroundKeepAliveActive(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem('digimoms_bg_keepalive') === 'true' || !!backgroundKeepAliveTimer;
+}
+
 export type SoundType = 
   | 'new_order'
   | 'order_accepted'
