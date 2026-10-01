@@ -5,7 +5,7 @@ import {
   Building2, Utensils, QrCode, Users, CreditCard, BarChart3,
   Star, Settings, LogOut, CheckCircle2, Clock, PhoneCall, ShoppingBag, Bell, AlertTriangle, ShieldCheck, Sparkles,
   FileText, Printer, Download, Globe, Banknote, Lock, History, AlertCircle, RefreshCw,
-  KeyRound, Eye, EyeOff, MessageCircle, Phone, Mail, Info, Calendar, Gift, Receipt
+  KeyRound, Eye, EyeOff, MessageCircle, Phone, Mail, Info, Calendar, Gift, Receipt, HelpCircle
 } from 'lucide-react';
 import { MenuManagement } from './MenuManagement';
 import { TableManagement } from './TableManagement';
@@ -25,6 +25,8 @@ import { PhonePeCheckoutModal } from '../common/PhonePeCheckoutModal';
 import { RazorpayCheckoutModal } from '../common/RazorpayCheckoutModal';
 import { generateInvoicePdf, generateSubscriptionInvoicePdf } from '../../utils/pdfGenerator';
 import { getRestaurantSubscriptionDetails } from '../../utils/subscriptionUtils';
+import { requestNotificationPermission, triggerSystemNotification } from '../../utils/notificationService';
+import { playNotificationSound, unlockAudioContext, startBackgroundAudioKeepAlive } from '../../utils/sound';
 import { Order } from '../../types';
 
 export const OwnerDashboard: React.FC = () => {
@@ -90,9 +92,9 @@ export const OwnerDashboard: React.FC = () => {
     );
   }
 
-  const restOrders = orders.filter(o => o.restaurant_id === currentOwner.id);
-  const restTables = tables.filter(t => t.restaurant_id === currentOwner.id);
-  const restCalls = callRequests.filter(c => c.restaurant_id === currentOwner.id && c.status === 'pending');
+  const restOrders = React.useMemo(() => orders.filter(o => o.restaurant_id === currentOwner.id), [orders, currentOwner.id]);
+  const restTables = React.useMemo(() => tables.filter(t => t.restaurant_id === currentOwner.id), [tables, currentOwner.id]);
+  const restCalls = React.useMemo(() => callRequests.filter(c => c.restaurant_id === currentOwner.id && c.status === 'pending'), [callRequests, currentOwner.id]);
 
   // Helper to accurately get effective cash due
   const getEffectiveCashDue = (o: Order): number => {
@@ -105,57 +107,64 @@ export const OwnerDashboard: React.FC = () => {
     return Math.max(0, Number(o.grand_total || 0) - Number(o.online_amount || 0) - Number(o.cash_amount || 0));
   };
 
-  // Filter confirmed & active orders (excluding cancelled and unverified online checkout attempts)
-  const confirmedRestOrders = restOrders.filter(o => {
-    if (o.order_status === 'cancelled') return false;
-    // Online order must NOT appear in Owner Live Orders before successful gateway + server-side payment verification
-    if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-      return false;
-    }
-    // Partial order must have its online advance verified before appearing in live orders
-    if (o.payment_mode === 'partial' && !['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) && (o.online_amount || 0) <= 0) {
-      return false;
-    }
-    return true;
-  });
+  // Filter confirmed & active orders (excluding cancelled, completed and unverified online checkout attempts)
+  const confirmedRestOrders = React.useMemo(() => {
+    return restOrders.filter(o => {
+      // HIDE COMPLETED/CANCELLED FROM LIVE STREAM TO PREVENT LAG
+      if (o.order_status === 'cancelled' || o.order_status === 'completed') return false;
+      
+      // Online order must NOT appear in Owner Live Orders before successful gateway + server-side payment verification
+      if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+        return false;
+      }
+      // Partial order must have its online advance verified before appearing in live orders
+      if (o.payment_mode === 'partial' && !['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) && (o.online_amount || 0) <= 0) {
+        return false;
+      }
+      return true;
+    });
+  }, [restOrders]);
 
   // Total Realized Revenue: Increases ONLY when customer pays online (auto) or cash is confirmed by staff/owner
-  const todaySales = restOrders.reduce((sum, o) => {
-    if (o.order_status === 'cancelled') return sum;
-    if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-      return sum + Number(o.online_amount || o.grand_total);
-    }
-    if (o.payment_mode === 'demo') {
-      return sum + Number(o.online_amount || o.grand_total);
-    }
-    if (o.payment_mode === 'partial') {
-      let paidAmt = 0;
-      if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
-        paidAmt += Number(o.online_amount || 0);
+  const todaySales = React.useMemo(() => {
+    return restOrders.reduce((sum, o) => {
+      if (o.order_status === 'cancelled') return sum;
+      if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+        return sum + Number(o.online_amount || o.grand_total);
       }
-      if (['paid', 'paid_cash'].includes(o.payment_status)) {
-        paidAmt += Number(o.cash_amount || (o.grand_total - (o.online_amount || 0)));
-      } else if ((o.cash_amount || 0) > 0) {
-        paidAmt += Number(o.cash_amount || 0);
+      if (o.payment_mode === 'demo') {
+        return sum + Number(o.online_amount || o.grand_total);
       }
-      return sum + Math.min(o.grand_total, paidAmt);
-    }
-    if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-      return sum + Number(o.online_amount || o.grand_total);
-    }
-    // Cash payment
-    if (['paid', 'paid_cash', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
-      return sum + Number(o.cash_amount || o.grand_total);
-    }
-    return sum + Number(o.cash_amount || 0);
-  }, 0);
+      if (o.payment_mode === 'partial') {
+        let paidAmt = 0;
+        if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
+          paidAmt += Number(o.online_amount || 0);
+        }
+        if (['paid', 'paid_cash'].includes(o.payment_status)) {
+          paidAmt += Number(o.cash_amount || (o.grand_total - (o.online_amount || 0)));
+        } else if ((o.cash_amount || 0) > 0) {
+          paidAmt += Number(o.cash_amount || 0);
+        }
+        return sum + Math.min(o.grand_total, paidAmt);
+      }
+      if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
+        return sum + Number(o.online_amount || o.grand_total);
+      }
+      // Cash payment
+      if (['paid', 'paid_cash', 'paid_live', 'paid_demo'].includes(o.payment_status)) {
+        return sum + Number(o.cash_amount || o.grand_total);
+      }
+      return sum + Number(o.cash_amount || 0);
+    }, 0);
+  }, [restOrders]);
 
-  const pendingOrders = confirmedRestOrders.filter(o => {
+  const pendingOrders = React.useMemo(() => confirmedRestOrders.filter(o => {
     if (['paid', 'paid_live', 'paid_cash', 'paid_demo', 'paid_online'].includes(o.payment_status)) return false;
     return getEffectiveCashDue(o) > 0 || o.payment_status === 'payment_verification_pending';
-  });
-  const cookingOrders = confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted');
-  const occupiedTables = restTables.filter(t => t.status === 'occupied').length;
+  }), [confirmedRestOrders]);
+
+  const cookingOrders = React.useMemo(() => confirmedRestOrders.filter(o => o.order_status === 'cooking' || o.order_status === 'accepted'), [confirmedRestOrders]);
+  const occupiedTables = React.useMemo(() => restTables.filter(t => t.status === 'occupied').length, [restTables]);
 
   const subDetails = getRestaurantSubscriptionDetails(currentOwner);
   const {
@@ -410,7 +419,7 @@ export const OwnerDashboard: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 lg:px-8 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 pb-28 md:pb-8 space-y-6">
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 p-6 rounded-3xl border border-slate-800">
         <div className="flex items-center gap-4">
@@ -595,6 +604,52 @@ export const OwnerDashboard: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Mobile Header & Sound Alert Action Banner */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/70 to-indigo-950/70 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center justify-center shrink-0">
+                <Bell className="w-5 h-5 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-bold text-white text-xs sm:text-sm">🔔 Phone Header Notifications & Audio Chime</h4>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  }`}>
+                    {typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' ? 'Active' : 'Permission Required'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Get instant mobile top bar alerts, vibration & bell chimes when customers place orders or call waiters.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
+              <button
+                onClick={async () => {
+                  unlockAudioContext();
+                  const granted = await requestNotificationPermission();
+                  if (granted) {
+                    showToast('Notification permission granted!', 'success');
+                  }
+                  playNotificationSound('new_order', `test_manual_${Date.now()}`);
+                  triggerSystemNotification({
+                    eventId: `test_owner_${Date.now()}`,
+                    title: '🔔 DigiMoms OS — Header Alert Test',
+                    body: 'Header notification is active! Your phone will alert you for all orders.'
+                  });
+                  showToast('📱 Test alert sent to phone notification bar & audio played!', 'success');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0"
+              >
+                <Bell className="w-3.5 h-3.5" /> Test Phone Alert
+              </button>
+            </div>
+          </div>
 
           {/* Tabs Bar */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800 custom-scrollbar">
@@ -1756,6 +1811,59 @@ export const OwnerDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Mobile Bottom App Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-3 py-2 flex items-center justify-around shadow-2xl safe-area-pb">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'overview' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Building2 className="w-5 h-5" />
+          <span className="text-[10px]">Overview</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('menu')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'menu' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Utensils className="w-5 h-5" />
+          <span className="text-[10px]">Menu</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('tables')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'tables' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <QrCode className="w-5 h-5" />
+          <span className="text-[10px]">Tables</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('staff')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'staff' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px]">Staff</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('reports')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'reports' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BarChart3 className="w-5 h-5" />
+          <span className="text-[10px]">Reports</span>
+        </button>
+      </div>
     </div>
   );
 };

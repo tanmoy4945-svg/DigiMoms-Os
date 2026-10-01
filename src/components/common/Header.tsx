@@ -41,7 +41,7 @@ export const Header: React.FC = () => {
         </div>
 
         {/* Global Quick Navigation Tabs */}
-        <div className="flex flex-wrap items-center justify-center gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 text-xs">
+        <div className="flex items-center justify-start md:justify-center gap-1.5 overflow-x-auto max-w-full py-1 px-1.5 bg-slate-900/90 rounded-2xl border border-slate-800 text-xs no-scrollbar">
           <button
             onClick={() => {
               setActiveView('landing');
