@@ -25,6 +25,8 @@ import { PhonePeCheckoutModal } from '../common/PhonePeCheckoutModal';
 import { RazorpayCheckoutModal } from '../common/RazorpayCheckoutModal';
 import { generateInvoicePdf, generateSubscriptionInvoicePdf } from '../../utils/pdfGenerator';
 import { getRestaurantSubscriptionDetails } from '../../utils/subscriptionUtils';
+import { requestNotificationPermission, triggerSystemNotification } from '../../utils/notificationService';
+import { playNotificationSound, unlockAudioContext } from '../../utils/sound';
 import { Order } from '../../types';
 
 export const OwnerDashboard: React.FC = () => {
@@ -410,7 +412,7 @@ export const OwnerDashboard: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 lg:px-8 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 pb-28 md:pb-8 space-y-6">
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 p-6 rounded-3xl border border-slate-800">
         <div className="flex items-center gap-4">
@@ -595,6 +597,52 @@ export const OwnerDashboard: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Mobile Header & Sound Alert Action Banner */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/70 to-indigo-950/70 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center justify-center shrink-0">
+                <Bell className="w-5 h-5 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-bold text-white text-xs sm:text-sm">🔔 Phone Header Notifications & Audio Chime</h4>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  }`}>
+                    {typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' ? 'Active' : 'Permission Required'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Get instant mobile top bar alerts, vibration & bell chimes when customers place orders or call waiters.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <button
+                onClick={async () => {
+                  unlockAudioContext();
+                  const granted = await requestNotificationPermission();
+                  if (granted) {
+                    showToast('Notification permission granted!', 'success');
+                  }
+                  playNotificationSound('new_order', `test_manual_${Date.now()}`);
+                  triggerSystemNotification({
+                    eventId: `test_owner_${Date.now()}`,
+                    title: '🔔 DigiMoms OS — Header Alert Test',
+                    body: 'Header notification is active! Your phone will alert you for all orders.'
+                  });
+                  showToast('📱 Test alert sent to phone notification bar & audio played!', 'success');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 shrink-0"
+              >
+                <Bell className="w-3.5 h-3.5" /> Test Phone Alert
+              </button>
+            </div>
+          </div>
 
           {/* Tabs Bar */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800 custom-scrollbar">
@@ -1756,6 +1804,59 @@ export const OwnerDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Mobile Bottom App Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-3 py-2 flex items-center justify-around shadow-2xl safe-area-pb">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'overview' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Building2 className="w-5 h-5" />
+          <span className="text-[10px]">Overview</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('menu')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'menu' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Utensils className="w-5 h-5" />
+          <span className="text-[10px]">Menu</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('tables')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'tables' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <QrCode className="w-5 h-5" />
+          <span className="text-[10px]">Tables</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('staff')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'staff' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px]">Staff</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('reports')}
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
+            activeTab === 'reports' ? 'text-emerald-400 bg-emerald-500/10 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BarChart3 className="w-5 h-5" />
+          <span className="text-[10px]">Reports</span>
+        </button>
+      </div>
     </div>
   );
 };

@@ -106,6 +106,24 @@ const AppContent: React.FC = () => {
     );
   }
 
+  if (activeView === 'owner-dashboard') {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 selection:bg-emerald-600 selection:text-white">
+        <NotificationToast />
+        <OwnerDashboard />
+      </main>
+    );
+  }
+
+  if (activeView === 'ceo-dashboard') {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 selection:bg-purple-600 selection:text-white">
+        <NotificationToast />
+        <CeoDashboard />
+      </main>
+    );
+  }
+
   if (activeView === 'restaurant-public' || activeView === 'public-restaurant') {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white">
@@ -127,11 +145,7 @@ const AppContent: React.FC = () => {
         {(activeView === 'contact' || activeView === 'public-contact') && <ContactPage />}
 
         {activeView === 'ceo-login' && <CeoLogin />}
-        {activeView === 'ceo-dashboard' && <CeoDashboard />}
-
         {activeView === 'owner-login' && <OwnerLogin />}
-        {activeView === 'owner-dashboard' && <OwnerDashboard />}
-
         {activeView === 'staff-login' && <StaffLogin />}
       </main>
 
