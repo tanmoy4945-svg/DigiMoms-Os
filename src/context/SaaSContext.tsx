@@ -553,10 +553,41 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [restaurantLegalPages, setRestaurantLegalPages] = useState<RestaurantLegalPages[]>([]);
   const [restaurantSocialLinks, setRestaurantSocialLinks] = useState<RestaurantSocialLinks[]>([]);
 
+  // Granular fetchers for specific data types (much faster than fetching everything)
+  const fetchOrders = async (restId: string) => {
+    const { data: ords } = await supabase.from('orders').select('*').eq('restaurant_id', restId).order('created_at', { ascending: false });
+    const { data: itms } = await supabase.from('order_items').select('*').in('order_id', ords?.map(o => o.id) || []);
+    
+    if (ords) {
+      const mapped = ords.map(o => ({
+        ...o,
+        subtotal: Number(o.subtotal || 0),
+        tax: Number(o.tax || 0),
+        discount: Number(o.discount || 0),
+        grand_total: Number(o.grand_total || 0),
+        online_amount: Number(o.online_amount || 0),
+        cash_amount: Number(o.cash_amount || 0),
+        cash_due: Number(o.cash_due || 0),
+        items: (itms || []).filter(i => i.order_id === o.id).map(i => ({
+          id: i.id,
+          order_id: i.order_id,
+          menu_id: i.menu_id,
+          menu_name: i.menu_name,
+          quantity: Number(i.quantity),
+          price: Number(i.price),
+          special_instructions: i.special_instructions
+        }))
+      }));
+      setOrders(mapped);
+    }
+  };
+
   // Function to load all fresh data from Supabase
   const fetchAllFromSupabase = async () => {
     try {
-      // Also fetch persistent server configurations (retained across all devices, sessions, and accounts)
+      const activeRestId = currentOwner?.id || currentStaff?.restaurant_id;
+
+      // Also fetch persistent server configurations
       let serverCeoCfg: any = null;
       let serverRestConfigs: Record<string, any> = {};
       try {
@@ -574,39 +605,72 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn("Could not fetch server configs:", err);
       }
 
-      const [
-        { data: restData, error: restErr },
-        { data: staffData },
-        { data: tableData },
-        { data: sessionData },
-        { data: catData },
-        { data: menuData },
-        { data: orderData },
-        { data: orderItemsData },
-        { data: feedbackData },
-        { data: callData },
-        { data: auditData },
-        { data: txData },
-        { data: subHistData },
-        { data: ceoSettingsData }
-      ] = await Promise.all([
+      // OPTIMIZED: If we have an active restaurant, only fetch data related to it.
+      // This prevents fetching thousands of orders from other restaurants.
+      const queries: Promise<any>[] = [
         supabase.from('restaurants').select('*').order('created_at', { ascending: false }),
         supabase.from('staff').select('*').order('created_at', { ascending: false }),
-        supabase.from('tables').select('*').order('table_number', { ascending: true }),
-        supabase.from('table_sessions').select('*'),
         supabase.from('menu_categories').select('*').order('sort_order', { ascending: true }),
         supabase.from('menus').select('*').order('sort_order', { ascending: true }),
-        supabase.from('orders').select('*').order('created_at', { ascending: false }),
-        supabase.from('order_items').select('*'),
-        supabase.from('customer_feedback').select('*').order('created_at', { ascending: false }),
-        supabase.from('call_waiter').select('*').order('created_at', { ascending: false }),
-        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }),
-        supabase.from('payment_transactions').select('*').order('created_at', { ascending: false }),
-        supabase.from('subscription_history').select('*').order('created_at', { ascending: false }),
         supabase.from('ceo_settings').select('*').eq('id', 'default').maybeSingle()
-      ]);
+      ];
 
-      if (restErr) console.warn("Supabase rest fetch warning:", restErr);
+      if (activeRestId) {
+        // Only fetch orders and items from the last 30 days for performance
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const dateStr = thirtyDaysAgo.toISOString();
+
+        queries.push(
+          supabase.from('tables').select('*').eq('restaurant_id', activeRestId).order('table_number', { ascending: true }),
+          supabase.from('table_sessions').select('*').eq('restaurant_id', activeRestId),
+          supabase.from('orders').select('*').eq('restaurant_id', activeRestId).gte('created_at', dateStr).order('created_at', { ascending: false }).limit(500),
+          // Fetch items separately (avoid slow inner join)
+          supabase.from('order_items').select('*').limit(2000), 
+          supabase.from('customer_feedback').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100),
+          supabase.from('call_waiter').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100),
+          supabase.from('audit_logs').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100),
+          supabase.from('payment_transactions').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100),
+          supabase.from('subscription_history').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false })
+        );
+      } else {
+        // Limited fetch for CEO or unauthenticated users
+        queries.push(
+          supabase.from('tables').select('*').order('table_number', { ascending: true }),
+          supabase.from('table_sessions').select('*'),
+          supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(100),
+          supabase.from('order_items').select('*').limit(500),
+          supabase.from('customer_feedback').select('*').order('created_at', { ascending: false }).limit(50),
+          supabase.from('call_waiter').select('*').order('created_at', { ascending: false }).limit(50),
+          supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
+          supabase.from('payment_transactions').select('*').order('created_at', { ascending: false }).limit(100),
+          supabase.from('subscription_history').select('*').order('created_at', { ascending: false }).limit(100)
+        );
+      }
+
+      const results = await Promise.all(queries);
+      
+      const restData = results[0]?.data;
+      const staffData = results[1]?.data;
+      const catData = results[2]?.data;
+      const menuData = results[3]?.data;
+      const ceoSettingsData = results[4]?.data;
+
+      // These are conditional results
+      const tableData = results[5]?.data;
+      const sessionData = results[6]?.data;
+      const orderData = results[7]?.data;
+      const orderItemsData = results[8]?.data;
+      const feedbackData = results[9]?.data;
+      const callData = results[10]?.data;
+      const auditData = results[11]?.data;
+      const txData = results[12]?.data;
+      const subHistData = results[13]?.data;
+
+      const restErr = results[0]?.error;
+
+      // Logging for diagnostic performance tracking
+      console.log(`[SaaSContext] Data sync complete: ${orderData?.length || 0} orders, ${orderItemsData?.length || 0} items fetched.`);
 
       const MASTER_CEO_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
       let supaCeoConfig: Partial<CeoPaymentConfig> | null = null;
@@ -1372,21 +1436,29 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const handleFocusOrOnline = () => {
       console.log('[SaaSContext] Window focused or online: resynchronizing Supabase state...');
-      fetchAllFromSupabase();
+      // Use a background fetch to not block the UI
+      fetchAllFromSupabase().catch(e => console.error("Sync error:", e));
+    };
+
+    const handleOffline = () => {
+      setRealtimeStatus('disconnected');
     };
 
     window.addEventListener('focus', handleFocusOrOnline);
     window.addEventListener('online', handleFocusOrOnline);
+    window.addEventListener('offline', handleOffline);
 
     return () => {
       window.removeEventListener('focus', handleFocusOrOnline);
       window.removeEventListener('online', handleFocusOrOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
   // Realtime Subscription & Initial Fetch
   useEffect(() => {
-    fetchAllFromSupabase();
+    // Initial fetch in background
+    fetchAllFromSupabase().catch(e => console.error("Initial fetch error:", e));
 
     const activeRestId = currentOwner?.id || currentStaff?.restaurant_id;
     const channelName = activeRestId ? `restaurant-orders-${activeRestId}` : 'all-restaurant-orders';
@@ -1408,14 +1480,23 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (newRow.items && Array.isArray(newRow.items) && newRow.items.length > 0) {
         itemsData = newRow.items;
       } else {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const { data } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
+        // Fast background fetch for items if missing from broadcast payload
+        supabase.from('order_items').select('*').eq('order_id', newRow.id).then(({ data }) => {
           if (data && data.length > 0) {
-            itemsData = data;
-            break;
+            setOrders(prev => prev.map(o => o.id === newRow.id ? {
+              ...o,
+              items: data.map(i => ({
+                id: i.id,
+                order_id: i.order_id,
+                menu_id: i.menu_id,
+                menu_name: i.menu_name,
+                quantity: Number(i.quantity),
+                price: Number(i.price),
+                special_instructions: i.special_instructions
+              }))
+            } : o));
           }
-          await new Promise(r => setTimeout(r, 100));
-        }
+        });
       }
 
       const formattedOrder: Order = {
@@ -1796,12 +1877,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 3. High-Speed Direct Supabase Fallback Poller (Native to Vercel, Zero 404s, Zero lag):
     // Queries only top items for the active restaurant in 20ms
     // Guarantees orders arrive within 2s even if mobile OS throttles WebSockets in background!
+    let isPolling = false;
     const pollInterval = setInterval(async () => {
-      if (!activeRestId) return;
+      if (!activeRestId || isPolling) return;
+      if (!navigator.onLine) {
+        setRealtimeStatus('disconnected');
+        return;
+      }
+
+      isPolling = true;
       try {
         const [ordRes, callRes] = await Promise.all([
-          supabase.from('orders').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(10),
-          supabase.from('call_waiter').select('*').eq('restaurant_id', activeRestId).eq('status', 'pending').limit(5)
+          supabase.from('orders').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(20),
+          supabase.from('call_waiter').select('*').eq('restaurant_id', activeRestId).eq('status', 'pending').limit(10)
         ]);
 
         if (ordRes.data && Array.isArray(ordRes.data)) {
@@ -1830,8 +1918,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         }
-      } catch {}
-    }, 2000);
+        
+        // If poller succeeds, and status was disconnected, we can set to connected if socket is okay
+        // but we'll let the socket subscription handle the 'connected' state specifically.
+      } catch (err) {
+        console.error("[Realtime Poller] Error:", err);
+      } finally {
+        isPolling = false;
+      }
+    }, 3000); // Polling every 3 seconds to balance speed and battery life
 
     const onFocusOrVisible = () => {
       fetchAllFromSupabase();
@@ -2716,7 +2811,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRestaurantServices(prev => [...prev.filter(s => s.restaurant_id !== id), ...defaultServices]);
 
     // 6. Refresh CEO dashboard state directly from Supabase
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     addActivity(created.id, 'CEO', 'Super Admin', 'CREATE_RESTAURANT', `Created restaurant ${created.name} (${created.slug})`);
     showToast(`Restaurant '${created.name}' created and verified in database!`, 'success');
     return created;
@@ -2904,13 +2999,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveViewRaw('staff-login');
       showToast('⚠️ রেস্তোরাঁ স্থগিত হওয়ায় স্টাফ সেশন বন্ধ করা হয়েছে।', 'error');
     }
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Restaurant suspended.', 'info');
   };
 
   const resumeRestaurant = async (id: string) => {
     await supabase.from('restaurants').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', id);
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Restaurant resumed and active.', 'success');
   };
 
@@ -3008,7 +3103,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     await addSubscriptionHistoryRecord(historyRecord);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Granted ${days}-day trial to '${rest.name}'!`, 'success');
   };
 
@@ -3023,7 +3118,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: nowIso
     })).eq('id', id);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Trial ended for '${rest.name}'.`, 'info');
   };
 
@@ -3040,7 +3135,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     })).eq('id', id);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Trial extended by ${days} days.`, 'success');
   };
 
@@ -3079,7 +3174,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     await addSubscriptionHistoryRecord(historyRecord);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Granted ${days}-day Free Offer to '${rest.name}'!`, 'success');
   };
 
@@ -3094,7 +3189,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: nowIso
     })).eq('id', id);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Free Offer ended for '${rest.name}'.`, 'info');
   };
 
@@ -3111,7 +3206,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     })).eq('id', id);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Free Offer extended by ${days} days for '${rest.name}'.`, 'success');
   };
 
@@ -3151,7 +3246,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     await addSubscriptionHistoryRecord(historyRecord);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Granted +${extraDays} free days to '${rest.name}'! Expiry: ${new Date(newExpiry).toLocaleDateString()}`, 'success');
   };
 
@@ -3204,7 +3299,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `Granted ${days} free days to '${rest.name}'. Reason: ${reason}`
     });
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`🎉 Granted ${days} Free Days to '${rest.name}'! (${reason})`, 'success');
   };
 
@@ -3311,13 +3406,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     await addSubscriptionHistoryRecord(historyRecord);
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`🎉 Monthly Subscription Paid (₹${feeAmount}) & Extended by ${months} Calendar Month!`, 'success');
   };
 
   const archiveRestaurant = async (id: string) => {
     await supabase.from('restaurants').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('id', id);
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Restaurant archived.', 'info');
   };
 
@@ -3368,7 +3463,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw err;
     }
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Restaurant permanently deleted from database. Mobile number and slug are available for reuse.', 'success');
   };
 
@@ -3445,7 +3540,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `CEO permanently deleted ${ordersToDelete.length} orders older than ${duration}. Revenue totals preserved in archive.`
     });
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     return ordersToDelete.length;
   };
 
@@ -3470,7 +3565,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn("Factory reset error:", e);
     }
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Factory reset executed! Orders and call logs cleared for this restaurant.', 'success');
     return true;
   };
@@ -3835,7 +3930,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'CLEAR_TABLE',
       description: `Cleared table session`
     });
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Table cleared and marked available!', 'success');
   };
 
@@ -3861,7 +3956,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'ADD_STAFF',
       description: `Created staff account for ${name} (${role})`
     });
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`Staff member ${name} (${role}) created successfully!`, 'success');
   };
 
@@ -3881,7 +3976,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           description: `Toggled status for staff '${existing.name}' to ${nextStatus}`
         });
       }
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     }
   };
 
@@ -3910,7 +4005,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setStaffList(prev => prev.filter(s => s.id !== staffId));
     showToast(`Staff member '${existing.name}' deleted permanently.`, 'success');
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
   };
 
   const updateStaffPassword = async (staffId: string, newPassword: string) => {
@@ -3955,7 +4050,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast('🔒 Staff credentials were changed. This terminal has been logged out.', 'info');
     }
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
   };
 
   // --- STAFF ACTIONS ---
@@ -4168,7 +4263,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `UPI Scan & Pay payment ₹${grandTotal} verified by ${actor} (${type}). Ref: ${existingOrd.upi_ref_number || 'Direct Scan'}. Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
     });
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     playNotificationSound('new_order');
     showToast(`✅ UPI payment of ₹${grandTotal} verified for Table ${existingOrd.table_number}! Order sent to kitchen.`, 'success');
   };
@@ -4206,7 +4301,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         new_status: 'pending',
         description: `UPI payment declined by ${actor} for Order ${existingOrd.order_number} Table ${existingOrd.table_number}. Requesting cash.`
       });
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       showToast(`UPI verification rejected for Table ${existingOrd.table_number}. Staff should collect cash.`, 'info');
     }
   };
@@ -4251,7 +4346,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         target_roles: ['owner', 'waiter', 'kitchen']
       });
       playNotificationSound('new_order');
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       showToast(`Payment submitted! Staff is verifying your transaction.`, 'info');
       return true;
     }
@@ -4458,7 +4553,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `Cash payment ₹${cashAmountCollected} confirmed by ${actorName} (${actorType}). Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
     });
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     playNotificationSound('new_order');
     showToast(`Cash payment of ₹${cashAmountCollected} confirmed by ${actorName}! Order marked PAID and COMPLETED.`, 'success');
   };
@@ -4597,7 +4692,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `Recorded offline payment of ₹${totalNewAmount} [${breakdownText}] by ${actor} (${type}). Remaining due: ₹${newCashDue}. Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
     });
 
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     playNotificationSound('new_order');
     if (newPaymentStatus === 'paid_cash' || newPaymentStatus === 'paid') {
       showToast(`✅ Payment of ₹${totalNewAmount} recorded by ${actor}! Order ${existingOrd.order_number} is fully PAID.`, 'success');
@@ -4801,7 +4896,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via Razorpay!`, 'success');
       return true;
@@ -5010,7 +5105,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via PayU!`, 'success');
       return true;
@@ -5217,7 +5312,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via PhonePe!`, 'success');
       return true;
@@ -5262,7 +5357,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }).eq('id', orderId);
 
     if (!error) {
-      await fetchAllFromSupabase();
+      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       showToast(`Payment method updated to ${newMode.toUpperCase()}`, 'info');
     }
   };
@@ -5915,7 +6010,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn("Feedback Supabase insert catch:", e);
     }
-    await fetchAllFromSupabase();
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast('Thank you for your valuable feedback and rating!', 'success');
   };
 

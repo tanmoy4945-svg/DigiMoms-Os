@@ -124,6 +124,21 @@ export const RealtimeStatusBadge: React.FC = () => {
     }
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    unlockAudioContext();
+    try {
+      await fetchAllFromSupabase();
+      showToast('Database Resynced Successfully!', 'success');
+    } catch (e) {
+      showToast('Sync failed. Please check connection.', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <div className="relative flex flex-wrap items-center gap-2">
       {/* Realtime Connection Status Pill */}
@@ -160,6 +175,17 @@ export const RealtimeStatusBadge: React.FC = () => {
           </>
         )}
       </div>
+      
+      {/* Manual Full Refresh Button */}
+      <button
+        onClick={handleManualSync}
+        disabled={isSyncing}
+        className="px-3 py-1 rounded-full bg-slate-900/80 text-slate-300 border border-slate-700 text-[10px] font-black hover:bg-slate-800 hover:text-white transition-all flex items-center gap-1.5 shadow-sm group disabled:opacity-50"
+        title="Force manual database refresh"
+      >
+        <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : 'group-hover:rotate-180 transition-all duration-700'}`} />
+        <span>{isSyncing ? 'SYNCING...' : 'SYNC NOW'}</span>
+      </button>
 
       {/* Enable Sound Banner/Button if audio is blocked by browser autoplay */}
       {audioBlocked && (
