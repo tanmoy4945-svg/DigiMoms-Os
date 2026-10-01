@@ -625,17 +625,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ];
 
       if (activeRestId) {
-        // Only fetch orders and items from the last 30 days for performance
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const dateStr = thirtyDaysAgo.toISOString();
+        // Only fetch orders and items from the last 180 days for performance
+        const dateLimit = new Date();
+        dateLimit.setDate(dateLimit.getDate() - 180);
+        const dateStr = dateLimit.toISOString();
 
         const { data: ords } = await supabase.from('orders')
           .select('*')
           .eq('restaurant_id', activeRestId)
           .gte('created_at', dateStr)
           .order('created_at', { ascending: false })
-          .limit(500);
+          .limit(1000);
 
         queries.push(
           supabase.from('tables').select('*').eq('restaurant_id', activeRestId).order('table_number', { ascending: true }).then(r => r),
@@ -646,7 +646,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           supabase.from('call_waiter').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
           supabase.from('audit_logs').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
           supabase.from('payment_transactions').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('subscription_history').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).then(r => r)
+          supabase.from('subscription_history').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).then(r => r),
+          safeFetchJson<any>(`/api/restaurants/${activeRestId}/config`).then(r => r) // Fetch masked config for active restaurant
         );
       } else {
         // Limited fetch for CEO or unauthenticated users
@@ -681,6 +682,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const auditData = results[11]?.data;
       const txData = results[12]?.data;
       const subHistData = results[13]?.data;
+      const activeRestConfig = activeRestId ? (results[14] as any)?.data : null;
 
       const restErr = results[0]?.error;
 
@@ -731,7 +733,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             // Primary source of truth: dbExt (from Supabase DB), complemented by server disk configs and local storage
-            const serverRest = serverRestConfigs[r.id] || {};
+            const serverRest = (activeRestId === r.id && activeRestConfig) ? activeRestConfig : (serverRestConfigs[r.id] || {});
             const localRest = localOverrides[r.id] || {};
             const ov: Record<string, any> = { ...serverRest, ...localRest, ...dbExt };
 
@@ -1496,6 +1498,31 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     registerServiceWorker();
 
+    // 1. Authoritative Session Restoration from LocalStorage (Primary) & SessionStorage (Fallback)
+    const restoreSession = () => {
+      try {
+        const ownerJson = localStorage.getItem('digimoms_current_owner') || sessionStorage.getItem('digimoms_current_owner');
+        if (ownerJson) {
+          const owner = JSON.parse(ownerJson);
+          if (owner && owner.id) {
+            setCurrentOwner(owner);
+          }
+        }
+
+        const staffJson = localStorage.getItem('digimoms_current_staff') || sessionStorage.getItem('digimoms_current_staff');
+        if (staffJson) {
+          const staff = JSON.parse(staffJson);
+          if (staff && staff.id) {
+            setCurrentStaff(staff);
+          }
+        }
+      } catch (e) {
+        console.warn("Session restoration error:", e);
+      }
+    };
+
+    restoreSession();
+
     const handleFocusOrOnline = () => {
       console.log('[SaaSContext] Window focused or online: resynchronizing Supabase state...');
       // Use a background fetch to not block the UI
@@ -1684,7 +1711,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!activeRestId || newRow.restaurant_id === activeRestId) {
           playNotificationSound('new_order');
           triggerRealtimeEventNotification({
-            eventId: `ord_online_verified_${newRow.id}_${Date.now()}`,
+            eventId: `ord_online_verified_${newRow.id}`,
             type: 'new_order',
             title: '💳 Online Payment Received (Order Confirmed)',
             body: `Table ${newRow.table_number || ''} (Order #${newRow.order_number || ''}): ₹${newRow.grand_total || newRow.online_amount} Paid via Online Payment!`,
@@ -1934,7 +1961,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setTableSessions(prev => [newRow as TableSession, ...prev.filter(s => s.id !== newRow.id)]);
           if (newRow.status === 'active' && (!effectiveRestId || newRow.restaurant_id === effectiveRestId)) {
             triggerRealtimeEventNotification({
-              eventId: `sess_join_${newRow.id}_${newRow.updated_at || newRow.created_at}`,
+              eventId: `sess_join_${newRow.id}`,
               type: 'customer_joined',
               title: '🪑 Customer Seated at Table',
               body: `Customer opened session at Table ${newRow.table_number || ''}`,
@@ -4009,8 +4036,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const clearTableSession = async (tableId: string) => {
-    await supabase.from('table_sessions').update({ status: 'closed', ended_at: new Date().toISOString() }).eq('table_id', tableId).eq('status', 'active');
-    await supabase.from('tables').update({ status: 'available' }).eq('id', tableId);
+    // Optimistic UI: Update tables and sessions immediately
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available' } : t));
+    setTableSessions(prev => prev.map(s => (s.table_id === tableId && s.status === 'active') ? { ...s, status: 'closed', ended_at: new Date().toISOString() } : s));
+    
+    // Background DB update
+    supabase.from('table_sessions').update({ status: 'closed', ended_at: new Date().toISOString() }).eq('table_id', tableId).eq('status', 'active').then(() => {});
+    supabase.from('tables').update({ status: 'available' }).eq('id', tableId).then(() => {});
+    
     const actor = currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Staff');
     const actorRole = currentStaff ? currentStaff.role : 'owner';
     const actorType = currentStaff ? 'staff' : 'owner';
@@ -4295,6 +4328,21 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: confirmedAtIso
     };
 
+    // OPTIMISTIC UI: Update local state immediately
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...fullUpdatePayload, items: o.items } : o));
+    showToast(`UPI Payment for Order #${existingOrd.order_number} Verified!`, 'success');
+
+    // Broadcast immediately
+    broadcastRealtimeEvent('order_status_event', { 
+      orderId, 
+      order_status: fullUpdatePayload.order_status,
+      payment_status: 'paid_live',
+      grand_total: grandTotal,
+      order_number: existingOrd.order_number,
+      table_number: existingOrd.table_number,
+      restaurant_id: existingOrd.restaurant_id
+    });
+
     let { error: updateErr } = await supabase
       .from('orders')
       .update(fullUpdatePayload)
@@ -4373,6 +4421,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const type = actorType || (currentStaff ? 'staff' : 'owner');
     const confirmedAtIso = new Date().toISOString();
 
+    // OPTIMISTIC UI
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, payment_status: 'pending', updated_at: confirmedAtIso } : o));
+    showToast(`UPI verification rejected for Table ${existingOrd.table_number}.`, 'info');
+
     const { error } = await supabase
       .from('orders')
       .update({
@@ -4395,7 +4447,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `UPI payment declined by ${actor} for Order ${existingOrd.order_number} Table ${existingOrd.table_number}. Requesting cash.`
       });
       fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
-      showToast(`UPI verification rejected for Table ${existingOrd.table_number}. Staff should collect cash.`, 'info');
     }
   };
 
@@ -4430,6 +4481,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!error) {
       triggerRealtimeEventNotification({
+        eventId: `upi_pend_${existingOrd.id}`,
         type: 'new_order',
         title: `🔔 UPI Payment Pending Verification`,
         body: `Table ${existingOrd.table_number} (${existingOrd.order_number}) submitted UPI payment ₹${existingOrd.grand_total}. Ref: ${upiRef || 'Direct Scan'}. Please verify!`,
@@ -4558,6 +4610,26 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: confirmedAtIso
     };
 
+    // OPTIMISTIC UI: Update local state immediately for 0ms lag
+    setOrders(prev => prev.map(o => o.id === orderId ? { 
+      ...o, 
+      ...fullUpdatePayload,
+      items: o.items // Preserve items array
+    } : o));
+
+    showToast(`Cash payment of ₹${cashAmountCollected} confirmed by ${actorName}!`, 'success');
+
+    // Broadcast immediately so other screens update too
+    broadcastRealtimeEvent('order_status_event', { 
+      orderId, 
+      order_status: newOrderStatus,
+      payment_status: newPaymentStatus,
+      grand_total: existingOrd.grand_total,
+      order_number: existingOrd.order_number,
+      table_number: existingOrd.table_number,
+      restaurant_id: existingOrd.restaurant_id
+    });
+
     let { error: updateErr } = await supabase
       .from('orders')
       .update(fullUpdatePayload)
@@ -4648,19 +4720,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
-    
-    broadcastRealtimeEvent('order_status_event', { 
-      orderId, 
-      order_status: newOrderStatus,
-      payment_status: verifiedStatus,
-      grand_total: existingOrd.grand_total,
-      order_number: existingOrd.order_number,
-      table_number: existingOrd.table_number,
-      restaurant_id: existingOrd.restaurant_id
-    });
-
     playNotificationSound('new_order');
-    showToast(`Cash payment of ₹${cashAmountCollected} confirmed by ${actorName}! Order marked PAID and COMPLETED.`, 'success');
   };
 
   const recordOfflinePayment = async (
@@ -4992,7 +5052,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       triggerRealtimeEventNotification({
-        eventId: `online_pay_rzp_${orderId}_${Date.now()}`,
+        eventId: `online_pay_rzp_${orderId}`,
         type: 'online_paid',
         title: '💳 Online Payment Received (Paid Live)',
         body: `Table ${existingOrd.table_number}: Order #${existingOrd.order_number} paid ₹${onlineAmountToPay} via Razorpay`,
@@ -5201,7 +5261,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       triggerRealtimeEventNotification({
-        eventId: `online_pay_payu_${orderId}_${Date.now()}`,
+        eventId: `online_pay_payu_${orderId}`,
         type: 'online_paid',
         title: '💳 Online Payment Received (Paid Live)',
         body: `Table ${existingOrd.table_number}: Order #${existingOrd.order_number} paid ₹${onlineAmountToPay} via PayU`,
@@ -5408,7 +5468,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       triggerRealtimeEventNotification({
-        eventId: `online_pay_phonepe_${orderId}_${Date.now()}`,
+        eventId: `online_pay_phonepe_${orderId}`,
         type: 'online_paid',
         title: '💳 Online Payment Received (Paid Live)',
         body: `Table ${existingOrd.table_number}: Order #${existingOrd.order_number} paid ₹${onlineAmountToPay} via PhonePe`,
