@@ -98,47 +98,35 @@ export function triggerSystemNotification(opts: TriggerNotificationOptions): boo
       badge: '/icon-192.png',
       tag: opts.eventId,
       renotify: true,
+      requireInteraction: true,
       vibrate: [300, 150, 300] as any,
       data: { url: opts.url || '/owner-dashboard', restaurantId: opts.restaurantId }
     } as any;
 
-    // 1. Post message to active Service Worker controller (most direct & reliable on mobile)
-    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-      try {
-        navigator.serviceWorker.controller.postMessage({
-          type: 'SHOW_NOTIFICATION',
-          title,
-          options: notificationOpts
-        });
-      } catch (postErr) {
-        console.warn('[NotificationService] postMessage failed:', postErr);
-      }
-    }
-
-    // 2. Direct Service Worker registration call
     if ('serviceWorker' in navigator) {
       if (swRegistration && swRegistration.showNotification) {
-        swRegistration.showNotification(title, notificationOpts).catch(() => {});
+        swRegistration.showNotification(title, notificationOpts).catch(err => {
+          console.warn('[NotificationService] showNotification error:', err);
+        });
       } else {
-        navigator.serviceWorker.getRegistration().then((reg) => {
-          if (reg && reg.showNotification) {
-            swRegistration = reg;
-            reg.showNotification(title, notificationOpts).catch(() => {});
-          } else {
-            return navigator.serviceWorker.ready.then((readyReg) => {
-              swRegistration = readyReg;
-              readyReg.showNotification(title, notificationOpts).catch(() => {});
-            });
-          }
-        }).catch((swErr) => {
-          console.warn('[NotificationService] SW registration show error:', swErr);
+        navigator.serviceWorker.ready.then((reg) => {
+          swRegistration = reg;
+          reg.showNotification(title, notificationOpts).catch(err => {
+            console.warn('[NotificationService] ready.showNotification error:', err);
+          });
+        }).catch(err => {
+          console.warn('[NotificationService] serviceWorker.ready error:', err);
           try {
-            new Notification(title, notificationOpts);
+            const n = new Notification(title, notificationOpts);
+            n.onclick = () => {
+              window.focus();
+              if (opts.url) window.location.href = opts.url;
+              n.close();
+            };
           } catch (e) {}
         });
       }
     } else {
-      // 3. Fallback to classic desktop Notification API
       try {
         const n = new Notification(title, notificationOpts);
         n.onclick = () => {

@@ -56,13 +56,11 @@ interface SaaSContextType {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
   reconnectRealtime: () => void;
-  fetchAllFromSupabase: (force?: boolean) => Promise<void>;
 
   // Realtime Notifications & Sound
   notifications: AppNotification[];
   unreadNotificationCount: number;
   markNotificationAsRead: (id: string) => void;
-  removeNotification: (id: string) => void;
   clearAllNotifications: () => void;
   soundEnabled: boolean;
   setSoundEnabledState: (enabled: boolean) => void;
@@ -213,7 +211,6 @@ interface SaaSContextType {
   submitCustomerFeedback: (feedback: Omit<CustomerFeedback, 'id' | 'created_at'>) => Promise<void>;
   getActiveTableSession: (restaurantId: string, tableId: string) => Promise<TableSession | null>;
   getOrCreateTableSession: (restaurantId: string, tableId: string, tableNumber: string, mobile?: string) => Promise<TableSession>;
-  deleteOrdersByMonth: (restaurantId: string, monthKey: string) => Promise<{ success: boolean; count: number; error?: string }>;
 
   // Public Website & Portfolio Management
   websiteSettings: RestaurantWebsiteSettings[];
@@ -315,19 +312,6 @@ const parseRouteFromPath = (
     const params = new URLSearchParams(window.location.search);
     if (params.get('sim_domain') || params.get('custom_domain')) {
       return { view: 'public-restaurant', shortCode: '', slug: '' };
-    }
-  }
-
-  // App root route '/': If logged-in owner or staff opens installed app, jump straight into their dashboard/terminal!
-  if (cleanPath === '/' || cleanPath === '') {
-    if (owner) {
-      return { view: 'owner-dashboard', shortCode: '', slug: '' };
-    }
-    if (staff) {
-      return { view: staff.role === 'kitchen' ? 'kitchen-terminal' : 'waiter-terminal', shortCode: '', slug: '' };
-    }
-    if (isCeoAuth) {
-      return { view: 'ceo-dashboard', shortCode: '', slug: '' };
     }
   }
 
@@ -555,48 +539,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [restaurantLegalPages, setRestaurantLegalPages] = useState<RestaurantLegalPages[]>([]);
   const [restaurantSocialLinks, setRestaurantSocialLinks] = useState<RestaurantSocialLinks[]>([]);
 
-  // Granular fetchers for specific data types (much faster than fetching everything)
-  const fetchOrders = async (restId: string) => {
-    const { data: ords } = await supabase.from('orders').select('*').eq('restaurant_id', restId).order('created_at', { ascending: false });
-    const { data: itms } = await supabase.from('order_items').select('*').in('order_id', ords?.map(o => o.id) || []);
-    
-    if (ords) {
-      const mapped = ords.map(o => ({
-        ...o,
-        subtotal: Number(o.subtotal || 0),
-        tax: Number(o.tax || 0),
-        discount: Number(o.discount || 0),
-        grand_total: Number(o.grand_total || 0),
-        online_amount: Number(o.online_amount || 0),
-        cash_amount: Number(o.cash_amount || 0),
-        cash_due: Number(o.cash_due || 0),
-        items: (itms || []).filter(i => i.order_id === o.id).map(i => ({
-          id: i.id,
-          order_id: i.order_id,
-          menu_id: i.menu_id,
-          menu_name: i.menu_name,
-          quantity: Number(i.quantity),
-          price: Number(i.price),
-          special_instructions: i.special_instructions
-        }))
-      }));
-      setOrders(mapped);
-    }
-  };
-
   // Function to load all fresh data from Supabase
-  const fetchAllFromSupabase = async (force = false) => {
-    const now = Date.now();
-    if (!force && now - lastFetchTimeRef.current < 20000) {
-      console.log('[SaaSContext] Throttling sync (last fetch < 20s ago)');
-      return;
-    }
-    lastFetchTimeRef.current = now;
-    
+  const fetchAllFromSupabase = async () => {
     try {
-      const activeRestId = currentOwner?.id || currentStaff?.restaurant_id;
-
-      // Also fetch persistent server configurations
+      // Also fetch persistent server configurations (retained across all devices, sessions, and accounts)
       let serverCeoCfg: any = null;
       let serverRestConfigs: Record<string, any> = {};
       try {
@@ -614,78 +560,39 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn("Could not fetch server configs:", err);
       }
 
-      // OPTIMIZED: If we have an active restaurant, only fetch data related to it.
-      // This prevents fetching thousands of orders from other restaurants.
-      const queries: any[] = [
-        supabase.from('restaurants').select('*').order('created_at', { ascending: false }).then(r => r),
-        supabase.from('staff').select('*').order('created_at', { ascending: false }).then(r => r),
-        supabase.from('menu_categories').select('*').order('sort_order', { ascending: true }).then(r => r),
-        supabase.from('menus').select('*').order('sort_order', { ascending: true }).then(r => r),
-        supabase.from('ceo_settings').select('*').eq('id', 'default').maybeSingle().then(r => r)
-      ];
+      const [
+        { data: restData, error: restErr },
+        { data: staffData },
+        { data: tableData },
+        { data: sessionData },
+        { data: catData },
+        { data: menuData },
+        { data: orderData },
+        { data: orderItemsData },
+        { data: feedbackData },
+        { data: callData },
+        { data: auditData },
+        { data: txData },
+        { data: subHistData },
+        { data: ceoSettingsData }
+      ] = await Promise.all([
+        supabase.from('restaurants').select('*').order('created_at', { ascending: false }),
+        supabase.from('staff').select('*').order('created_at', { ascending: false }),
+        supabase.from('tables').select('*').order('table_number', { ascending: true }),
+        supabase.from('table_sessions').select('*'),
+        supabase.from('menu_categories').select('*').order('sort_order', { ascending: true }),
+        supabase.from('menus').select('*').order('sort_order', { ascending: true }),
+        supabase.from('orders').select('*').order('created_at', { ascending: false }),
+        supabase.from('order_items').select('*'),
+        supabase.from('customer_feedback').select('*').order('created_at', { ascending: false }),
+        supabase.from('call_waiter').select('*').order('created_at', { ascending: false }),
+        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }),
+        supabase.from('payment_transactions').select('*').order('created_at', { ascending: false }),
+        supabase.from('subscription_history').select('*').order('created_at', { ascending: false }),
+        supabase.from('ceo_settings').select('*').eq('id', 'default').maybeSingle()
+      ]);
 
-      if (activeRestId) {
-        // Only fetch orders and items from the last 30 days for performance
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const dateStr = thirtyDaysAgo.toISOString();
-
-        const { data: ords } = await supabase.from('orders')
-          .select('*')
-          .eq('restaurant_id', activeRestId)
-          .gte('created_at', dateStr)
-          .order('created_at', { ascending: false })
-          .limit(500);
-
-        queries.push(
-          supabase.from('tables').select('*').eq('restaurant_id', activeRestId).order('table_number', { ascending: true }).then(r => r),
-          supabase.from('table_sessions').select('*').eq('restaurant_id', activeRestId).then(r => r),
-          Promise.resolve({ data: ords }), // Reuse the orders we just fetched
-          supabase.from('order_items').select('*').in('order_id', ords?.map(o => o.id) || []).then(r => r),
-          supabase.from('customer_feedback').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('call_waiter').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('audit_logs').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('payment_transactions').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('subscription_history').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).then(r => r)
-        );
-      } else {
-        // Limited fetch for CEO or unauthenticated users
-        queries.push(
-          supabase.from('tables').select('*').order('table_number', { ascending: true }).then(r => r),
-          supabase.from('table_sessions').select('*').then(r => r),
-          supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('order_items').select('*').limit(500).then(r => r),
-          supabase.from('customer_feedback').select('*').order('created_at', { ascending: false }).limit(50).then(r => r),
-          supabase.from('call_waiter').select('*').order('created_at', { ascending: false }).limit(50).then(r => r),
-          supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('payment_transactions').select('*').order('created_at', { ascending: false }).limit(100).then(r => r),
-          supabase.from('subscription_history').select('*').order('created_at', { ascending: false }).limit(100).then(r => r)
-        );
-      }
-
-      const results = await Promise.all(queries);
-      
-      const restData = results[0]?.data;
-      const staffData = results[1]?.data;
-      const catData = results[2]?.data;
-      const menuData = results[3]?.data;
-      const ceoSettingsData = results[4]?.data;
-
-      // These are conditional results
-      const tableData = results[5]?.data;
-      const sessionData = results[6]?.data;
-      const orderData = results[7]?.data;
-      const orderItemsData = results[8]?.data;
-      const feedbackData = results[9]?.data;
-      const callData = results[10]?.data;
-      const auditData = results[11]?.data;
-      const txData = results[12]?.data;
-      const subHistData = results[13]?.data;
-
-      const restErr = results[0]?.error;
-
-      // Logging for diagnostic performance tracking
-      console.log(`[SaaSContext] Data sync complete: ${orderData?.length || 0} orders, ${orderItemsData?.length || 0} items fetched.`);
+      if (restErr) console.warn("Supabase rest fetch warning:", restErr);
 
       const MASTER_CEO_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
       let supaCeoConfig: Partial<CeoPaymentConfig> | null = null;
@@ -1211,23 +1118,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }))
           };
         });
-        // Deduplicate orders by ID and respect local locks to prevent status reverts during sync
+        // Deduplicate orders by ID to prevent duplicate order display
         const uniqueOrders = Array.from(new Map(mappedOrders.map(o => [o.id, o])).values());
-        
-        setOrders(prev => {
-          const lockedIds = orderLocksRef.current;
-          const orderMap = new Map<string, Order>(prev.map(o => [o.id, o]));
-          
-          uniqueOrders.forEach(newOrd => {
-            if (lockedIds.has(newOrd.id)) return; // Skip updating locked orders
-            orderMap.set(newOrd.id, newOrd);
-          });
-          
-          return Array.from(orderMap.values())
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-            .slice(0, 600);
-        });
-        
+        setOrders(uniqueOrders);
         uniqueOrders.forEach(o => knownOrderIdsRef.current.add(o.id));
       }
 
@@ -1344,24 +1237,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-  const removeNotification = (id: string) => {
-    dismissedEventIdsRef.current.add(id);
-    try {
-      localStorage.setItem('digimoms_dismissed_events', JSON.stringify(Array.from(dismissedEventIdsRef.current).slice(-1000)));
-    } catch {}
-    setNotifications(prev => {
-      const updated = prev.filter(n => n.id !== id);
-      try { localStorage.setItem('digimoms_notifications', JSON.stringify(updated.slice(0, 100))); } catch {}
-      return updated;
-    });
-  };
-
   const clearAllNotifications = () => {
-    // Add all current notification IDs to dismissed ref to prevent reappearance
-    notifications.forEach(n => dismissedEventIdsRef.current.add(n.id));
-    try {
-      localStorage.setItem('digimoms_dismissed_events', JSON.stringify(Array.from(dismissedEventIdsRef.current).slice(-1000)));
-    } catch {}
     setNotifications([]);
     try { localStorage.removeItem('digimoms_notifications'); } catch {}
   };
@@ -1393,7 +1269,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }) => {
     const eventId = opts.eventId || `evt_${opts.type}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    if (knownEventIdsRef.current.has(eventId) || dismissedEventIdsRef.current.has(eventId)) {
+    if (knownEventIdsRef.current.has(eventId)) {
       return;
     }
     knownEventIdsRef.current.add(eventId);
@@ -1449,24 +1325,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
 
-  const lastFetchTimeRef = React.useRef<number>(0);
   const knownOrderIdsRef = React.useRef<Set<string>>(new Set());
   const knownCallIdsRef = React.useRef<Set<string>>(new Set());
-  const orderLocksRef = React.useRef<Set<string>>(new Set());
-  const dismissedEventIdsRef = React.useRef<Set<string>>((() => {
-    try {
-      const saved = localStorage.getItem('digimoms_dismissed_events');
-      return new Set(saved ? JSON.parse(saved) : []);
-    } catch { return new Set(); }
-  })());
-
-  const lockOrder = (orderId: string) => {
-    orderLocksRef.current.add(orderId);
-    setTimeout(() => {
-      orderLocksRef.current.delete(orderId);
-    }, 15000); // 15 second lock to guarantee DB propagation and edge cache sync
-  };
-
   const [realtimeStatus, setRealtimeStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
   const [reconnectCounter, setReconnectCounter] = useState<number>(0);
 
@@ -1476,51 +1336,27 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetchAllFromSupabase();
   };
 
-  const broadcastChannelRef = React.useRef<any>(null);
-
-  const broadcastRealtimeEvent = (eventType: string, payload: any) => {
-    try {
-      if (broadcastChannelRef.current) {
-        broadcastChannelRef.current.send({
-          type: 'broadcast',
-          event: eventType,
-          payload: { ...payload, timestamp: Date.now() }
-        });
-      }
-    } catch (e) {
-      console.warn('[Realtime] broadcast send notice:', e);
-    }
-  };
-
   // Register Service Worker for Background Notifications on Mount
   useEffect(() => {
     registerServiceWorker();
 
     const handleFocusOrOnline = () => {
       console.log('[SaaSContext] Window focused or online: resynchronizing Supabase state...');
-      // Use a background fetch to not block the UI
-      fetchAllFromSupabase().catch(e => console.error("Sync error:", e));
-    };
-
-    const handleOffline = () => {
-      setRealtimeStatus('disconnected');
+      fetchAllFromSupabase();
     };
 
     window.addEventListener('focus', handleFocusOrOnline);
     window.addEventListener('online', handleFocusOrOnline);
-    window.addEventListener('offline', handleOffline);
 
     return () => {
       window.removeEventListener('focus', handleFocusOrOnline);
       window.removeEventListener('online', handleFocusOrOnline);
-      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
   // Realtime Subscription & Initial Fetch
   useEffect(() => {
-    // Initial fetch in background
-    fetchAllFromSupabase().catch(e => console.error("Initial fetch error:", e));
+    fetchAllFromSupabase();
 
     const activeRestId = currentOwner?.id || currentStaff?.restaurant_id;
     const channelName = activeRestId ? `restaurant-orders-${activeRestId}` : 'all-restaurant-orders';
@@ -1542,23 +1378,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (newRow.items && Array.isArray(newRow.items) && newRow.items.length > 0) {
         itemsData = newRow.items;
       } else {
-        // Fast background fetch for items if missing from broadcast payload
-        supabase.from('order_items').select('*').eq('order_id', newRow.id).then(({ data }) => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { data } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
           if (data && data.length > 0) {
-            setOrders(prev => prev.map(o => o.id === newRow.id ? {
-              ...o,
-              items: data.map(i => ({
-                id: i.id,
-                order_id: i.order_id,
-                menu_id: i.menu_id,
-                menu_name: i.menu_name,
-                quantity: Number(i.quantity),
-                price: Number(i.price),
-                special_instructions: i.special_instructions
-              }))
-            } : o));
+            itemsData = data;
+            break;
           }
-        });
+          await new Promise(r => setTimeout(r, 100));
+        }
       }
 
       const formattedOrder: Order = {
@@ -1616,25 +1443,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       let wasNewlyVerified = false;
-      let itemsToUpdate: any[] | null = null;
-
-      // If items are missing from SSE payload, fetch them safely
-      if (!newRow.items || newRow.items.length === 0) {
-        try {
-          const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
-          if (itms && itms.length > 0) {
-            itemsToUpdate = itms.map((i: any) => ({
-              id: i.id,
-              order_id: i.order_id,
-              menu_id: i.menu_id,
-              menu_name: i.menu_name,
-              quantity: Number(i.quantity),
-              price: Number(i.price),
-              special_instructions: i.special_instructions
-            }));
-          }
-        } catch (e) {}
-      }
 
       setOrders(prev => {
         const existingIdx = prev.findIndex(o => o.id === newRow.id);
@@ -1651,18 +1459,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             online_amount: newRow.online_amount !== undefined ? Number(newRow.online_amount) : Number(newRow.grand_total || 0),
             cash_amount: Number(newRow.cash_amount || 0),
             cash_due: 0,
-            items: itemsToUpdate || newRow.items || []
+            items: newRow.items || []
           };
           return [formattedOrder, ...prev];
         }
 
         const existingOrd = prev[existingIdx];
-        
-        // RESPECT LOCK: If order is locked locally, do not overwrite status/payment with potentially older data from DB
-        if (orderLocksRef.current.has(newRow.id)) {
-          return prev;
-        }
-
         const wasUnverified = existingOrd.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(existingOrd.payment_status);
         if (wasUnverified && isPaidOnline) {
           wasNewlyVerified = true;
@@ -1678,7 +1480,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const updatedOrder: Order = {
           ...existingOrd,
           ...newRow,
-          items: itemsToUpdate || (newRow.items && newRow.items.length > 0) ? (itemsToUpdate || newRow.items) : existingOrd.items,
+          items: (newRow.items && newRow.items.length > 0) ? newRow.items : existingOrd.items,
           subtotal: Number(newRow.subtotal ?? existingOrd.subtotal),
           tax: Number(newRow.tax ?? existingOrd.tax),
           discount: Number(newRow.discount ?? existingOrd.discount),
@@ -1692,6 +1494,27 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         next[existingIdx] = updatedOrder;
         return next;
       });
+
+      // If items are missing from SSE payload, fetch them safely
+      if (!newRow.items || newRow.items.length === 0) {
+        try {
+          const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', newRow.id);
+          if (itms && itms.length > 0) {
+            setOrders(prev => prev.map(o => o.id === newRow.id ? {
+              ...o,
+              items: itms.map((i: any) => ({
+                id: i.id,
+                order_id: i.order_id,
+                menu_id: i.menu_id,
+                menu_name: i.menu_name,
+                quantity: Number(i.quantity),
+                price: Number(i.price),
+                special_instructions: i.special_instructions
+              }))
+            } : o));
+          }
+        } catch (e) {}
+      }
 
       if (wasNewlyVerified && isPaidOnline) {
         if (!activeRestId || newRow.restaurant_id === activeRestId) {
@@ -1829,15 +1652,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCallRequests(prev => prev.map(c => c.id === newRow.id ? { ...c, ...newRow, accepted_by_name: newRow.accepted_by || c.accepted_by_name } : c));
     };
 
-    const ordersFilter: any = activeRestId 
+    const ordersFilter = activeRestId 
       ? { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestId}` }
       : { event: '*', schema: 'public', table: 'orders' };
 
-    const callsFilter: any = activeRestId 
+    const callsFilter = activeRestId 
       ? { event: '*', schema: 'public', table: 'call_waiter', filter: `restaurant_id=eq.${activeRestId}` }
       : { event: '*', schema: 'public', table: 'call_waiter' };
 
-    const sessionsFilter: any = activeRestId 
+    const sessionsFilter = activeRestId 
       ? { event: '*', schema: 'public', table: 'table_sessions', filter: `restaurant_id=eq.${activeRestId}` }
       : { event: '*', schema: 'public', table: 'table_sessions' };
 
@@ -1846,60 +1669,78 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setRealtimeStatus('connecting');
 
-    // 2. Connect to Supabase Postgres Realtime replication & Broadcast channel
-    const channel = supabase
-      .channel(channelName, {
-        config: {
-          broadcast: { self: false }
-        }
-      })
-      .on('broadcast', { event: 'order_event' }, ({ payload }: any) => {
-        if (payload?.order) {
-          if (!orderLocksRef.current.has(payload.order.id)) {
-            processOrderInsert(payload.order);
-          }
-        }
-      })
-      .on('broadcast', { event: 'call_event' }, ({ payload }: any) => {
-        if (payload?.call) {
-          processCallInsert(payload.call);
-        }
-      })
-      .on('broadcast', { event: 'order_status_event' }, ({ payload }: any) => {
-        if (payload?.orderId && payload?.order_status) {
-          if (orderLocksRef.current.has(payload.orderId)) return;
-          
-          setOrders(prev => prev.map(o => o.id === payload.orderId ? { ...o, order_status: payload.order_status } : o));
-          if (payload.order_status === 'cooking') playNotificationSound('cooking');
-          else if (payload.order_status === 'ready') playNotificationSound('kitchen_ready');
-          else if (payload.order_status === 'accepted') playNotificationSound('order_accepted');
-          else if (payload.order_status === 'completed') playNotificationSound('order_completed');
-        }
-      })
-      .on('broadcast', { event: 'call_status_event' }, ({ payload }: any) => {
-        if (payload?.callId && payload?.status) {
-          setCallRequests(prev => prev.map(c => c.id === payload.callId ? { ...c, status: payload.status, accepted_by: payload.accepted_by, accepted_by_name: payload.accepted_by } : c));
-        }
-      })
-      .on('postgres_changes', ordersFilter, (payload: any) => {
-        const { eventType, new: newRow, old: oldRow } = payload;
-        if (newRow?.id && orderLocksRef.current.has(newRow.id)) return;
+    // 1. Connect to Backend Server-Sent Events (SSE) Stream for 0-1s instant delivery
+    const sseUrl = activeRestId 
+      ? `/api/realtime/events?restaurant_id=${activeRestId}`
+      : `/api/realtime/events`;
 
+    try {
+      eventSource = new EventSource(sseUrl);
+      eventSource.onopen = () => {
+        console.log(`[SSE REALTIME] Connected to event stream: ${sseUrl}`);
+        setRealtimeStatus('connected');
+      };
+      eventSource.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          const orderPayload = parsed.order || parsed.data;
+          if (parsed.type === 'NEW_ORDER' && orderPayload) {
+            processOrderInsert(orderPayload);
+          } else if (parsed.type === 'ORDER_UPDATED' && orderPayload) {
+            processOrderUpdate(orderPayload, null);
+          } else if (parsed.type === 'CALL_WAITER' && (parsed.call_request || parsed.data)) {
+            processCallInsert(parsed.call_request || parsed.data);
+          } else if (parsed.type === 'CALL_WAITER_UPDATED' && (parsed.call_request || parsed.data)) {
+            processCallUpdate(parsed.call_request || parsed.data);
+          } else if (parsed.type === 'SESSION_UPDATE' && parsed.data) {
+            const newRow = parsed.data;
+            if (newRow?.id) {
+              setTableSessions(prev => [newRow as TableSession, ...prev.filter(s => s.id !== newRow.id)]);
+            }
+          }
+          fetchAllFromSupabase();
+        } catch (e) {
+          // heartbeat or unparseable
+        }
+      };
+      eventSource.onerror = (err) => {
+        console.warn('[SSE REALTIME] Connection status notice:', err);
+      };
+    } catch (sseErr) {
+      console.warn('[SSE REALTIME] Initialization notice:', sseErr);
+    }
+
+    // 2. Connect to Supabase Postgres Realtime replication channel
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload: any) => {
+        const { eventType, new: newRow, old: oldRow } = payload;
+        const effectiveRestId = currentOwner?.id || currentStaff?.restaurant_id;
+        const targetRestId = newRow?.restaurant_id || oldRow?.restaurant_id;
+        if (effectiveRestId && targetRestId && targetRestId !== effectiveRestId) {
+          return;
+        }
         if (eventType === 'INSERT' && newRow?.id) {
           processOrderInsert(newRow);
         } else if (eventType === 'UPDATE' && newRow?.id) {
           processOrderUpdate(newRow, oldRow);
         }
+        fetchAllFromSupabase();
       })
-      .on('postgres_changes', callsFilter, (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'call_waiter' }, (payload: any) => {
         const { eventType, new: newRow } = payload;
+        const effectiveRestId = currentOwner?.id || currentStaff?.restaurant_id;
+        if (effectiveRestId && newRow?.restaurant_id && newRow.restaurant_id !== effectiveRestId) {
+          return;
+        }
         if (eventType === 'INSERT' && newRow?.id) {
           processCallInsert(newRow);
         } else if (eventType === 'UPDATE' && newRow?.id) {
           processCallUpdate(newRow);
         }
+        fetchAllFromSupabase();
       })
-      .on('postgres_changes', sessionsFilter, (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_sessions' }, (payload: any) => {
         const { new: newRow } = payload;
         const effectiveRestId = currentOwner?.id || currentStaff?.restaurant_id;
         if (effectiveRestId && newRow?.restaurant_id && newRow.restaurant_id !== effectiveRestId) {
@@ -1918,14 +1759,18 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
         }
+        fetchAllFromSupabase();
       })
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
           console.log(`SUPABASE REALTIME SUBSCRIBED: channel=${channelName}, restaurant_id=${activeRestId || 'global'}`);
           setRealtimeStatus('connected');
+          // Recover any missed orders while offline/reconnecting
+          fetchAllFromSupabase();
         } else if (status === 'CHANNEL_ERROR' || status === 'CLOSED' || status === 'TIMED_OUT') {
           console.warn(`REALTIME SUBSCRIPTION STATUS: channel=${channelName}, status=${status}`, err || '');
           setRealtimeStatus('disconnected');
+          // Auto-reconnect after 3 seconds
           if (!reconnectTimeout) {
             reconnectTimeout = setTimeout(() => {
               setReconnectCounter(prev => prev + 1);
@@ -1934,69 +1779,37 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       });
 
-    broadcastChannelRef.current = channel;
-
-    // 3. High-Speed Direct Supabase Fallback Poller (Native to Vercel, Zero 404s, Zero lag):
-    // Queries only top items for the active restaurant in 20ms
-    // Guarantees orders arrive within 2s even if mobile OS throttles WebSockets in background!
-    let isPolling = false;
+    // 3. Ultra-Resilient Fast Realtime Polling Fallback:
+    // Guarantees orders, status updates, and notifications pop in real time (every 2.5s)
+    // even on mobile phones when WebSockets/SSE are put to sleep by Android!
     const pollInterval = setInterval(async () => {
-      if (!activeRestId || isPolling) return;
-      // STOP POLLING IF TAB IS HIDDEN TO SAVE CPU/BATTERY (REDUCE LAPTOP HANGING)
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      
-      if (!navigator.onLine) {
-        setRealtimeStatus('disconnected');
-        return;
-      }
-
-      isPolling = true;
       try {
-        const [ordRes, callRes] = await Promise.all([
-          supabase.from('orders').select('*').eq('restaurant_id', activeRestId).order('created_at', { ascending: false }).limit(20),
-          supabase.from('call_waiter').select('*').eq('restaurant_id', activeRestId).eq('status', 'pending').limit(10)
-        ]);
-
-        if (ordRes.data && Array.isArray(ordRes.data)) {
-          const lockedIds = orderLocksRef.current;
-          for (const sOrd of ordRes.data) {
-            if (!sOrd?.id || lockedIds.has(sOrd.id)) continue;
-            if (!knownOrderIdsRef.current.has(sOrd.id)) {
-              processOrderInsert(sOrd);
-            } else {
-              // Standalone check to avoid nested setOrders if possible, 
-              // but we need to compare with current state which is only in setOrders
-              setOrders(prev => {
-                const existing = prev.find(o => o.id === sOrd.id);
-                if (existing && !lockedIds.has(sOrd.id) && (existing.order_status !== sOrd.order_status || existing.payment_status !== sOrd.payment_status)) {
-                  // Trigger notification handler without async state update if possible, 
-                  // but processOrderUpdate is needed for business logic
-                  setTimeout(() => processOrderUpdate(sOrd, existing), 0);
-                  return prev.map(o => o.id === sOrd.id ? { ...o, ...sOrd } : o);
-                }
-                return prev;
-              });
+        const queryUrl = activeRestId ? `/api/orders/list?restaurant_id=${activeRestId}` : '/api/orders/list';
+        const res = await fetch(queryUrl);
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.success && Array.isArray(json.data)) {
+            const serverOrders: any[] = json.data;
+            for (const sOrd of serverOrders) {
+              if (!sOrd?.id) continue;
+              if (!knownOrderIdsRef.current.has(sOrd.id)) {
+                processOrderInsert(sOrd);
+              } else {
+                // Check if status changed while mobile was asleep
+                setOrders(prev => {
+                  const existing = prev.find(o => o.id === sOrd.id);
+                  if (existing && (existing.order_status !== sOrd.order_status || existing.payment_status !== sOrd.payment_status)) {
+                    processOrderUpdate(sOrd, existing);
+                    return prev.map(o => o.id === sOrd.id ? { ...o, ...sOrd } : o);
+                  }
+                  return prev;
+                });
+              }
             }
           }
         }
-
-        if (callRes.data && Array.isArray(callRes.data)) {
-          for (const sCall of callRes.data) {
-            if (!sCall?.id) continue;
-            if (!knownCallIdsRef.current.has(sCall.id)) {
-              processCallInsert(sCall);
-            }
-          }
-        }
-        
-        // If poller succeeds, and status was disconnected, we can set to connected if socket is okay
-        // but we'll let the socket subscription handle the 'connected' state specifically.
-      } catch (err) {
-        console.error("[Realtime Poller] Error:", err);
-      } finally {
-        isPolling = false;
-      }
-    }, 3000); // Polling every 3 seconds to balance speed and battery life
+      } catch {}
+    }, 2500);
 
     const onFocusOrVisible = () => {
       fetchAllFromSupabase();
@@ -2005,11 +1818,11 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.addEventListener('focus', onFocusOrVisible);
 
     return () => {
-      broadcastChannelRef.current = null;
       clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
       window.removeEventListener('focus', onFocusOrVisible);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (eventSource) eventSource.close();
       supabase.removeChannel(channel);
     };
   }, [currentOwner?.id, currentStaff?.restaurant_id, reconnectCounter]);
@@ -2881,7 +2694,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRestaurantServices(prev => [...prev.filter(s => s.restaurant_id !== id), ...defaultServices]);
 
     // 6. Refresh CEO dashboard state directly from Supabase
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     addActivity(created.id, 'CEO', 'Super Admin', 'CREATE_RESTAURANT', `Created restaurant ${created.name} (${created.slug})`);
     showToast(`Restaurant '${created.name}' created and verified in database!`, 'success');
     return created;
@@ -3069,13 +2882,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveViewRaw('staff-login');
       showToast('⚠️ রেস্তোরাঁ স্থগিত হওয়ায় স্টাফ সেশন বন্ধ করা হয়েছে।', 'error');
     }
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Restaurant suspended.', 'info');
   };
 
   const resumeRestaurant = async (id: string) => {
     await supabase.from('restaurants').update({ status: 'active', updated_at: new Date().toISOString() }).eq('id', id);
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Restaurant resumed and active.', 'success');
   };
 
@@ -3173,7 +2986,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     await addSubscriptionHistoryRecord(historyRecord);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Granted ${days}-day trial to '${rest.name}'!`, 'success');
   };
 
@@ -3188,7 +3001,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: nowIso
     })).eq('id', id);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Trial ended for '${rest.name}'.`, 'info');
   };
 
@@ -3205,7 +3018,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     })).eq('id', id);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Trial extended by ${days} days.`, 'success');
   };
 
@@ -3244,7 +3057,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     await addSubscriptionHistoryRecord(historyRecord);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Granted ${days}-day Free Offer to '${rest.name}'!`, 'success');
   };
 
@@ -3259,7 +3072,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: nowIso
     })).eq('id', id);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Free Offer ended for '${rest.name}'.`, 'info');
   };
 
@@ -3276,7 +3089,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     })).eq('id', id);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Free Offer extended by ${days} days for '${rest.name}'.`, 'success');
   };
 
@@ -3316,7 +3129,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     await addSubscriptionHistoryRecord(historyRecord);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Granted +${extraDays} free days to '${rest.name}'! Expiry: ${new Date(newExpiry).toLocaleDateString()}`, 'success');
   };
 
@@ -3369,7 +3182,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `Granted ${days} free days to '${rest.name}'. Reason: ${reason}`
     });
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`🎉 Granted ${days} Free Days to '${rest.name}'! (${reason})`, 'success');
   };
 
@@ -3476,13 +3289,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     await addSubscriptionHistoryRecord(historyRecord);
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`🎉 Monthly Subscription Paid (₹${feeAmount}) & Extended by ${months} Calendar Month!`, 'success');
   };
 
   const archiveRestaurant = async (id: string) => {
     await supabase.from('restaurants').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('id', id);
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Restaurant archived.', 'info');
   };
 
@@ -3533,7 +3346,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw err;
     }
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Restaurant permanently deleted from database. Mobile number and slug are available for reuse.', 'success');
   };
 
@@ -3610,7 +3423,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `CEO permanently deleted ${ordersToDelete.length} orders older than ${duration}. Revenue totals preserved in archive.`
     });
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     return ordersToDelete.length;
   };
 
@@ -3635,7 +3448,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn("Factory reset error:", e);
     }
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Factory reset executed! Orders and call logs cleared for this restaurant.', 'success');
     return true;
   };
@@ -4000,7 +3813,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'CLEAR_TABLE',
       description: `Cleared table session`
     });
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Table cleared and marked available!', 'success');
   };
 
@@ -4026,7 +3839,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'ADD_STAFF',
       description: `Created staff account for ${name} (${role})`
     });
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast(`Staff member ${name} (${role}) created successfully!`, 'success');
   };
 
@@ -4046,7 +3859,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           description: `Toggled status for staff '${existing.name}' to ${nextStatus}`
         });
       }
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
     }
   };
 
@@ -4075,7 +3888,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setStaffList(prev => prev.filter(s => s.id !== staffId));
     showToast(`Staff member '${existing.name}' deleted permanently.`, 'success');
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
   };
 
   const updateStaffPassword = async (staffId: string, newPassword: string) => {
@@ -4120,7 +3933,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast('🔒 Staff credentials were changed. This terminal has been logged out.', 'info');
     }
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
   };
 
   // --- STAFF ACTIONS ---
@@ -4180,54 +3993,42 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const acceptCallRequest = async (requestId: string, staffName: string) => {
-    // 1. Instant local update (0ms delay)
-    setCallRequests(prev => prev.map(c => c.id === requestId ? { ...c, status: 'accepted', accepted_by: staffName, accepted_by_name: staffName } : c));
-    showToast(`Assigned to ${staffName}! Request marked accepted.`, 'success');
-
-    // 2. Instant edge broadcast
-    broadcastRealtimeEvent('call_status_event', { callId: requestId, status: 'accepted', accepted_by: staffName });
-
-    // 3. Atomic update to ensure single staff accept in background
-    supabase
+    // Atomic update to ensure single staff accept
+    const { data, error } = await supabase
       .from('call_waiter')
       .update({ status: 'accepted', accepted_by: staffName })
       .eq('id', requestId)
       .eq('status', 'pending')
-      .select()
-      .then(({ data, error }) => {
-        if (error || !data || data.length === 0) {
-          showToast('This request was already accepted by another staff member.', 'error');
-          fetchAllFromSupabase();
-          return;
-        }
-        const callReq = data[0];
-        logAudit({
-          restaurant_id: callReq.restaurant_id,
-          session_id: callReq.session_id,
-          actor_type: currentStaff ? 'staff' : (currentOwner ? 'owner' : 'staff'),
-          actor_name: staffName,
-          action: 'CALL_WAITER_ACCEPTED',
-          description: `Accepted waiter call for Table ${callReq.table_number}`
-        });
-      });
+      .select();
+
+    if (error || !data || data.length === 0) {
+      showToast('This request was already accepted by another staff member.', 'error');
+      await fetchAllFromSupabase();
+      return;
+    }
+
+    const callReq = data[0];
+    logAudit({
+      restaurant_id: callReq.restaurant_id,
+      session_id: callReq.session_id,
+      actor_type: currentStaff ? 'staff' : (currentOwner ? 'owner' : 'staff'),
+      actor_name: staffName,
+      action: 'CALL_WAITER_ACCEPTED',
+      description: `Accepted waiter call for Table ${callReq.table_number}`
+    });
+
+    await fetchAllFromSupabase();
+    showToast(`Assigned to ${staffName}! Request marked accepted.`, 'success');
   };
 
   const completeCallRequest = async (requestId: string) => {
-    // 1. Instant local update (0ms delay)
-    setCallRequests(prev => prev.map(c => c.id === requestId ? { ...c, status: 'completed' } : c));
+    const { error } = await supabase.from('call_waiter').update({ status: 'completed' }).eq('id', requestId);
+    if (error) console.error("completeCallRequest error:", error);
+    await fetchAllFromSupabase();
     showToast('Call request marked completed.', 'success');
-
-    // 2. Instant edge broadcast
-    broadcastRealtimeEvent('call_status_event', { callId: requestId, status: 'completed' });
-
-    // 3. Background persist
-    supabase.from('call_waiter').update({ status: 'completed' }).eq('id', requestId).then(({ error }) => {
-      if (error) console.error("completeCallRequest error:", error);
-    });
   };
 
   const verifyCashOrder = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
-    lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
     if (!existingOrd) return;
 
@@ -4334,7 +4135,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `UPI Scan & Pay payment ₹${grandTotal} verified by ${actor} (${type}). Ref: ${existingOrd.upi_ref_number || 'Direct Scan'}. Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
     });
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     playNotificationSound('new_order');
     showToast(`✅ UPI payment of ₹${grandTotal} verified for Table ${existingOrd.table_number}! Order sent to kitchen.`, 'success');
   };
@@ -4372,7 +4173,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         new_status: 'pending',
         description: `UPI payment declined by ${actor} for Order ${existingOrd.order_number} Table ${existingOrd.table_number}. Requesting cash.`
       });
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
       showToast(`UPI verification rejected for Table ${existingOrd.table_number}. Staff should collect cash.`, 'info');
     }
   };
@@ -4417,7 +4218,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         target_roles: ['owner', 'waiter', 'kitchen']
       });
       playNotificationSound('new_order');
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
       showToast(`Payment submitted! Staff is verifying your transaction.`, 'info');
       return true;
     }
@@ -4624,7 +4425,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `Cash payment ₹${cashAmountCollected} confirmed by ${actorName} (${actorType}). Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
     });
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     playNotificationSound('new_order');
     showToast(`Cash payment of ₹${cashAmountCollected} confirmed by ${actorName}! Order marked PAID and COMPLETED.`, 'success');
   };
@@ -4763,7 +4564,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       description: `Recorded offline payment of ₹${totalNewAmount} [${breakdownText}] by ${actor} (${type}). Remaining due: ₹${newCashDue}. Order ${existingOrd.order_number} Table ${existingOrd.table_number}.`
     });
 
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     playNotificationSound('new_order');
     if (newPaymentStatus === 'paid_cash' || newPaymentStatus === 'paid') {
       showToast(`✅ Payment of ₹${totalNewAmount} recorded by ${actor}! Order ${existingOrd.order_number} is fully PAID.`, 'success');
@@ -4967,7 +4768,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via Razorpay!`, 'success');
       return true;
@@ -5176,7 +4977,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via PayU!`, 'success');
       return true;
@@ -5383,7 +5184,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via PhonePe!`, 'success');
       return true;
@@ -5428,28 +5229,18 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }).eq('id', orderId);
 
     if (!error) {
-      fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+      await fetchAllFromSupabase();
       showToast(`Payment method updated to ${newMode.toUpperCase()}`, 'info');
     }
   };
 
   const acceptOrder = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
-    lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
     const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Staff'));
     const type = actorType || (currentStaff ? 'staff' : 'owner');
 
-    // 1. Instant local update (0ms delay)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, order_status: 'accepted' } : o));
-    showToast(`Order ${existingOrd?.order_number || ''} accepted!`, 'success');
-
-    // 2. Instant edge broadcast to all screens
-    broadcastRealtimeEvent('order_status_event', { orderId, order_status: 'accepted' });
-
-    // 3. Background persist
-    supabase.from('orders').update({ order_status: 'accepted' }).eq('id', orderId).then(({ error }) => {
-      if (error) console.error("acceptOrder error:", error);
-    });
+    const { error } = await supabase.from('orders').update({ order_status: 'accepted' }).eq('id', orderId);
+    if (error) console.error("acceptOrder error:", error);
 
     if (existingOrd) {
       logAudit({
@@ -5463,25 +5254,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Order ${existingOrd.order_number} accepted by ${actor}`
       });
     }
+    await fetchAllFromSupabase();
+    showToast(`Order ${existingOrd?.order_number || ''} accepted!`, 'success');
   };
 
   const startCookingOrder = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
-    lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
     const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Kitchen Staff'));
     const type = actorType || (currentStaff ? 'staff' : 'owner');
 
-    // 1. Instant local update (0ms delay)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, order_status: 'cooking' } : o));
-    showToast('Order marked Cooking in Progress.', 'info');
-
-    // 2. Instant edge broadcast to all screens
-    broadcastRealtimeEvent('order_status_event', { orderId, order_status: 'cooking' });
-
-    // 3. Background persist
-    supabase.from('orders').update({ order_status: 'cooking' }).eq('id', orderId).then(({ error }) => {
-      if (error) console.error("startCookingOrder error:", error);
-    });
+    const { error } = await supabase.from('orders').update({ order_status: 'cooking' }).eq('id', orderId);
+    if (error) console.error("startCookingOrder error:", error);
 
     if (existingOrd) {
       logAudit({
@@ -5495,26 +5278,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Started cooking Order ${existingOrd.order_number} by ${actor}`
       });
     }
+    await fetchAllFromSupabase();
+    showToast('Order marked Cooking in Progress.', 'info');
   };
 
   const markOrderReady = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
-    lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
     const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Kitchen Staff'));
     const type = actorType || (currentStaff ? 'staff' : 'owner');
 
-    // 1. Instant local update (0ms delay)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, order_status: 'ready' } : o));
-    playNotificationSound('kitchen_ready');
-    showToast('Order Ready to Serve! Waiters notified.', 'success');
-
-    // 2. Instant edge broadcast to all screens
-    broadcastRealtimeEvent('order_status_event', { orderId, order_status: 'ready' });
-
-    // 3. Background persist
-    supabase.from('orders').update({ order_status: 'ready' }).eq('id', orderId).then(({ error }) => {
-      if (error) console.error("markOrderReady error:", error);
-    });
+    const { error } = await supabase.from('orders').update({ order_status: 'ready' }).eq('id', orderId);
+    if (error) console.error("markOrderReady error:", error);
 
     if (existingOrd) {
       logAudit({
@@ -5528,25 +5302,18 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Order ${existingOrd.order_number} marked ready to serve by ${actor}`
       });
     }
+    await fetchAllFromSupabase();
+    playNotificationSound('kitchen_ready');
+    showToast('Order Ready to Serve! Waiters notified.', 'success');
   };
 
   const serveOrder = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
-    lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
     const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Waiter'));
     const type = actorType || (currentStaff ? 'staff' : 'owner');
 
-    // 1. Instant local update (0ms delay)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, order_status: 'served' } : o));
-    showToast('Order Served at table.', 'success');
-
-    // 2. Instant edge broadcast to all screens
-    broadcastRealtimeEvent('order_status_event', { orderId, order_status: 'served' });
-
-    // 3. Background persist
-    supabase.from('orders').update({ order_status: 'served' }).eq('id', orderId).then(({ error }) => {
-      if (error) console.error("serveOrder error:", error);
-    });
+    const { error } = await supabase.from('orders').update({ order_status: 'served' }).eq('id', orderId);
+    if (error) console.error("serveOrder error:", error);
 
     if (existingOrd) {
       logAudit({
@@ -5560,25 +5327,17 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Order ${existingOrd.order_number} served to Table ${existingOrd.table_number} by ${actor}`
       });
     }
+    await fetchAllFromSupabase();
+    showToast('Order Served at table.', 'success');
   };
 
   const completeOrder = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
-    lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
     const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Manager'));
     const type = actorType || (currentStaff ? 'staff' : 'owner');
 
-    // 1. Instant local update (0ms delay)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, order_status: 'completed' } : o));
-    showToast(`Order ${existingOrd?.order_number || ''} completed!`, 'success');
-
-    // 2. Instant edge broadcast to all screens
-    broadcastRealtimeEvent('order_status_event', { orderId, order_status: 'completed' });
-
-    // 3. Background persist
-    supabase.from('orders').update({ order_status: 'completed' }).eq('id', orderId).then(({ error }) => {
-      if (error) console.error("completeOrder error:", error);
-    });
+    const { error } = await supabase.from('orders').update({ order_status: 'completed' }).eq('id', orderId);
+    if (error) console.error("completeOrder error:", error);
 
     if (existingOrd) {
       logAudit({
@@ -5592,63 +5351,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: `Order ${existingOrd.order_number} marked completed by ${actor}`
       });
     }
-  };
-
-  const deleteOrdersByMonth = async (
-    restaurantId: string,
-    monthKey: string
-  ): Promise<{ success: boolean; count: number; error?: string }> => {
-    try {
-      // Find orders for this restaurant where created_at starts with 'YYYY-MM'
-      const targetOrders = orders.filter(
-        o => o.restaurant_id === restaurantId && o.created_at && o.created_at.startsWith(monthKey)
-      );
-
-      if (targetOrders.length === 0) {
-        return { success: true, count: 0 };
-      }
-
-      const orderIds = targetOrders.map(o => o.id);
-
-      // 1. Optimistic removal from local state for instant 0ms UI update
-      setOrders(prev => prev.filter(o => !orderIds.includes(o.id)));
-
-      // 2. Delete order items first (foreign key integrity)
-      try {
-        await supabase
-          .from('order_items')
-          .delete()
-          .in('order_id', orderIds);
-      } catch (e) {
-        console.warn('[Storage Cleanup] order_items delete notice:', e);
-      }
-
-      // 3. Delete master orders from database
-      const { error: ordErr } = await supabase
-        .from('orders')
-        .delete()
-        .in('id', orderIds);
-
-      if (ordErr) {
-        console.error('[Storage Cleanup] orders delete error:', ordErr);
-        fetchAllFromSupabase();
-        return { success: false, count: 0, error: ordErr.message };
-      }
-
-      // 4. Log audit event
-      logAudit({
-        restaurant_id: restaurantId,
-        actor_type: 'owner',
-        actor_name: currentOwner ? currentOwner.owner_name : 'Owner',
-        action: 'DELETE_MONTHLY_ORDERS_STORAGE_CLEANUP',
-        description: `Owner purged ${orderIds.length} orders from ${monthKey} to free database storage.`
-      });
-
-      return { success: true, count: orderIds.length };
-    } catch (err: any) {
-      console.error('[Storage Cleanup] Exception:', err);
-      return { success: false, count: 0, error: err.message || 'Failed to delete orders' };
-    }
+    await fetchAllFromSupabase();
+    showToast(`Order ${existingOrd?.order_number || ''} completed!`, 'success');
   };
 
   // --- CUSTOMER QR ACTIONS ---
@@ -5922,7 +5626,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: createdIso
     };
 
-    // Prepare order items payload
+    // Step 1: Real Supabase INSERT into public.orders
+    let { error: ordErr } = await supabase.from('orders').insert([cleanOrderPayload]);
+    if (ordErr && (ordErr.code === '42703' || ordErr.message?.includes('column'))) {
+      console.warn("Retrying orders insert with core schema fields due to missing table columns...");
+      const retry = await supabase.from('orders').insert([coreOrderPayload]);
+      ordErr = retry.error;
+    }
+
+    if (ordErr) {
+      console.warn("Supabase orders insert warning:", ordErr);
+    }
+
+    // Step 2: Real Supabase INSERT into public.order_items
     const orderItemsToInsert = items.map(item => ({
       id: crypto.randomUUID(),
       order_id: orderId,
@@ -5972,9 +5688,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Instant local state update: Zero waiting, zero lag for customer!
     setOrders(prev => [resultOrder, ...prev.filter(o => o.id !== orderId)]);
     knownOrderIdsRef.current.add(orderId);
-
-    // Instant Supabase Edge broadcast to all owner/staff terminals
-    broadcastRealtimeEvent('order_event', { order: resultOrder });
 
     // Immediate server save and SSE real-time broadcast to all dashboards
     fetch('/api/orders/save', {
@@ -6034,22 +5747,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       session_id: sessionId || null,
       table_number: tableNumber,
       request_type: requestType,
-      status: 'pending' as const,
-      created_at: new Date().toISOString()
+      status: 'pending'
     };
-    // 1. Instant local update (0ms delay for customer)
-    setCallRequests(prev => [req as any, ...prev.filter(c => c.id !== req.id)]);
-    knownCallIdsRef.current.add(req.id);
+    const { error } = await supabase.from('call_waiter').insert([req]);
+    if (error) console.error("Send call waiter error:", error);
     playNotificationSound('call_waiter');
+    await fetchAllFromSupabase();
     showToast('Waiter call notification sent to staff!', 'success');
-
-    // 2. Instant edge broadcast to all waiter & owner terminals (10ms)
-    broadcastRealtimeEvent('call_event', { call: req });
-
-    // 3. Background persist to Supabase
-    supabase.from('call_waiter').insert([req]).then(({ error }) => {
-      if (error) console.error("Send call waiter error:", error);
-    });
   };
 
   const submitCustomerFeedback = async (feedback: Omit<CustomerFeedback, 'id' | 'created_at'>) => {
@@ -6086,7 +5790,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn("Feedback Supabase insert catch:", e);
     }
-    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    await fetchAllFromSupabase();
     showToast('Thank you for your valuable feedback and rating!', 'success');
   };
 
@@ -6264,8 +5968,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeShortCode, setActiveShortCode,
       language, setLanguage,
       toast, showToast,
-      realtimeStatus, reconnectRealtime, fetchAllFromSupabase,
-      notifications, unreadNotificationCount, markNotificationAsRead, removeNotification, clearAllNotifications,
+      realtimeStatus, reconnectRealtime,
+      notifications, unreadNotificationCount, markNotificationAsRead, clearAllNotifications,
       soundEnabled, setSoundEnabledState: setSoundEnabledCustom,
       notificationsEnabled, setNotificationsEnabledState: setNotificationsEnabledCustom,
       soundVolume, setSoundVolumeState: setSoundVolumeCustom,
@@ -6288,7 +5992,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder, recordOfflinePayment,
       verifyUpiPayment, rejectUpiPayment, submitUpiPaymentConfirmation,
       acceptOrder, startCookingOrder, markOrderReady, serveOrder, completeOrder, placeOrder,
-      sendCallWaiterRequest, submitCustomerFeedback, getActiveTableSession, getOrCreateTableSession, deleteOrdersByMonth,
+      sendCallWaiterRequest, submitCustomerFeedback, getActiveTableSession, getOrCreateTableSession,
       websiteSettings, restaurantServices, restaurantPricing, restaurantLegalPages, restaurantSocialLinks,
       getWebsiteSettings, updateWebsiteSettings, getServices, addService, updateService, deleteService,
       getPricing, addPricingItem, updatePricingItem, deletePricingItem, getLegalPages, updateLegalPages,

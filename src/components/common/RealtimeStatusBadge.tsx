@@ -12,8 +12,8 @@ import {
 
 export const RealtimeStatusBadge: React.FC = () => {
   const { 
-    realtimeStatus, reconnectRealtime, showToast, fetchAllFromSupabase,
-    notifications, unreadNotificationCount, markNotificationAsRead, removeNotification, clearAllNotifications 
+    realtimeStatus, reconnectRealtime, showToast, 
+    notifications, unreadNotificationCount, markNotificationAsRead, clearAllNotifications 
   } = useSaaS();
 
   const [soundOn, setSoundOn] = useState<boolean>(isSoundEnabled());
@@ -124,21 +124,6 @@ export const RealtimeStatusBadge: React.FC = () => {
     }
   };
 
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  const handleManualSync = async () => {
-    setIsSyncing(true);
-    unlockAudioContext();
-    try {
-      await fetchAllFromSupabase(true);
-      showToast('Database Resynced Successfully!', 'success');
-    } catch (e) {
-      showToast('Sync failed. Please check connection.', 'error');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   return (
     <div className="relative flex flex-wrap items-center gap-2">
       {/* Realtime Connection Status Pill */}
@@ -175,17 +160,6 @@ export const RealtimeStatusBadge: React.FC = () => {
           </>
         )}
       </div>
-      
-      {/* Manual Full Refresh Button */}
-      <button
-        onClick={handleManualSync}
-        disabled={isSyncing}
-        className="px-3 py-1 rounded-full bg-slate-900/80 text-slate-300 border border-slate-700 text-[10px] font-black hover:bg-slate-800 hover:text-white transition-all flex items-center gap-1.5 shadow-sm group disabled:opacity-50"
-        title="Force manual database refresh"
-      >
-        <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : 'group-hover:rotate-180 transition-all duration-700'}`} />
-        <span>{isSyncing ? 'SYNCING...' : 'SYNC NOW'}</span>
-      </button>
 
       {/* Enable Sound Banner/Button if audio is blocked by browser autoplay */}
       {audioBlocked && (
@@ -394,22 +368,12 @@ export const RealtimeStatusBadge: React.FC = () => {
                 <div
                   key={n.id}
                   onClick={() => markNotificationAsRead(n.id)}
-                  className={`p-3 rounded-xl border transition-all cursor-pointer relative group space-y-1 ${
+                  className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1 ${
                     n.read 
                       ? 'bg-slate-950/60 border-slate-800 text-slate-400' 
                       : 'bg-slate-800/80 border-purple-500/40 text-slate-100 shadow-md'
                   }`}
                 >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeNotification(n.id);
-                    }}
-                    className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-500 hover:text-rose-400 hover:border-rose-500/50 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 z-10 shadow-lg"
-                    title="Delete Notification"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white flex items-center gap-1">
                       {!n.read && <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse inline-block" />}

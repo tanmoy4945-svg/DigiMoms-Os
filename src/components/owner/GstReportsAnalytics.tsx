@@ -3,8 +3,7 @@ import { useSaaS } from '../../context/SaaSContext';
 import {
   Receipt, Download, Printer, FileSpreadsheet, ShieldCheck,
   Calendar, Search, Filter, AlertCircle, ArrowUpRight,
-  TrendingUp, CheckCircle2, ChevronRight, FileText, ExternalLink,
-  Trash2, AlertTriangle, X, Database
+  TrendingUp, CheckCircle2, ChevronRight, FileText, ExternalLink
 } from 'lucide-react';
 import { Order } from '../../types';
 import { BillModal } from '../common/BillModal';
@@ -15,22 +14,16 @@ interface GstReportsAnalyticsProps {
 }
 
 export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpenSettings }) => {
-  const { currentOwner, orders, showToast, deleteOrdersByMonth } = useSaaS();
+  const { currentOwner, orders, showToast } = useSaaS();
 
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'online' | 'cash'>('all');
 
-  // Generate current & previous month keys e.g. "2026-09" & "2026-08"
+  // Generate current month key e.g. "2026-09"
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey);
-  const [targetMonthToDelete, setTargetMonthToDelete] = useState<string>(prevMonthKey);
-  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
-  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   if (!currentOwner) return null;
 
@@ -39,56 +32,22 @@ export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpen
     return orders.filter(o => o.restaurant_id === currentOwner.id && o.order_status !== 'cancelled');
   }, [orders, currentOwner.id]);
 
-  // Current and Last Month separated orders for 2-month summary
-  const currentMonthOrders = useMemo(() => {
-    return restOrders.filter(o => {
-      const d = new Date(o.created_at);
-      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      return mKey === currentMonthKey;
-    });
-  }, [restOrders, currentMonthKey]);
-
-  const prevMonthOrders = useMemo(() => {
-    return restOrders.filter(o => {
-      const d = new Date(o.created_at);
-      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      return mKey === prevMonthKey;
-    });
-  }, [restOrders, prevMonthKey]);
-
-  const currentMonthSummary = useMemo(() => {
-    let gst = 0;
-    let taxable = 0;
-    currentMonthOrders.forEach(o => {
-      gst += Number(o.tax || 0);
-      taxable += Number(o.subtotal || 0);
-    });
-    return { count: currentMonthOrders.length, gst: Number(gst.toFixed(2)), taxable: Number(taxable.toFixed(2)) };
-  }, [currentMonthOrders]);
-
-  const prevMonthSummary = useMemo(() => {
-    let gst = 0;
-    let taxable = 0;
-    prevMonthOrders.forEach(o => {
-      gst += Number(o.tax || 0);
-      taxable += Number(o.subtotal || 0);
-    });
-    return { count: prevMonthOrders.length, gst: Number(gst.toFixed(2)), taxable: Number(taxable.toFixed(2)) };
-  }, [prevMonthOrders]);
-
-  // Orders to delete based on targetMonthToDelete
-  const targetOrdersToDelete = useMemo(() => {
-    return restOrders.filter(o => {
-      const d = new Date(o.created_at);
-      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      return mKey === targetMonthToDelete;
-    });
-  }, [restOrders, targetMonthToDelete]);
-
-  // Strictly limit GST reporting to the Last 2 Months only (Current Month & Last Month)
+  // Extract all unique months from orders
   const availableMonths = useMemo(() => {
-    return [currentMonthKey, prevMonthKey];
-  }, [currentMonthKey, prevMonthKey]);
+    const monthsSet = new Set<string>();
+    // Always include current month
+    monthsSet.add(currentMonthKey);
+
+    restOrders.forEach(o => {
+      if (o.created_at) {
+        const d = new Date(o.created_at);
+        const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        monthsSet.add(mKey);
+      }
+    });
+
+    return Array.from(monthsSet).sort().reverse();
+  }, [restOrders, currentMonthKey]);
 
   // Month label helper e.g. "September 2026"
   const formatMonthLabel = (mKey: string): string => {
@@ -293,22 +252,6 @@ export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpen
     showToast('Monthly GST Report PDF downloaded to your device!', 'success');
   };
 
-  // Purge selected month orders to free up database storage
-  const handleDeleteMonthOrders = async () => {
-    const monthKey = targetMonthToDelete || selectedMonth;
-    if (!currentOwner || monthKey === 'all') return;
-    setIsDeleting(true);
-    const res = await deleteOrdersByMonth(currentOwner.id, monthKey);
-    setIsDeleting(false);
-    setShowDeleteModal(false);
-    if (res.success) {
-      showToast(`🎉 Cleaned ${res.count} orders from ${formatMonthLabel(monthKey)}! Database storage freed.`, 'success');
-      setSelectedMonth(currentMonthKey);
-    } else {
-      showToast(`Error deleting orders: ${res.error || 'Failed'}`, 'error');
-    }
-  };
-
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Top Banner / Compliance Status */}
@@ -353,136 +296,6 @@ export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpen
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* 2-Month GST Ledger & Storage Optimization Banner */}
-      <div className="p-5 rounded-3xl bg-slate-900 border border-emerald-500/40 space-y-4 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-white text-sm sm:text-base flex items-center gap-2">
-                2-Month GST Ledger & Storage Optimization
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">
-                  Last 2 Months Hisab
-                </span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                গত ২ মাসের জিএসটি হিসাব মনিটর করুন। বিগত মাসের ডাটা ডাউনলোড করে ডাটাবেজ থেকে ডিলিট করতে পারেন যাতে স্টোরেজের চাপ কমে যায়।
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Month 1: Current Month */}
-          <div
-            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-              selectedMonth === currentMonthKey
-                ? 'bg-slate-950 border-emerald-500/60 shadow-md ring-1 ring-emerald-500/30'
-                : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
-            }`}
-            onClick={() => setSelectedMonth(currentMonthKey)}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5" /> মাস ১: {formatMonthLabel(currentMonthKey)} (Current Active)
-              </span>
-              <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-                চলতি মাস (Active)
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center mt-3 pt-2 border-t border-slate-800/80">
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium">Orders Count</div>
-                <div className="text-base font-extrabold text-white font-mono">{currentMonthSummary.count}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium">Taxable Sales</div>
-                <div className="text-base font-extrabold text-blue-400 font-mono">₹{currentMonthSummary.taxable}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium">Total GST (5%)</div>
-                <div className="text-base font-extrabold text-emerald-400 font-mono">₹{currentMonthSummary.gst}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Month 2: Previous Month (with 1-Click Delete Storage Option) */}
-          <div
-            className={`p-4 rounded-2xl border transition-all ${
-              selectedMonth === prevMonthKey
-                ? 'bg-slate-950 border-emerald-500/60 shadow-md ring-1 ring-emerald-500/30'
-                : 'bg-slate-950/60 border-slate-800'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span
-                className="text-xs font-bold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer"
-                onClick={() => setSelectedMonth(prevMonthKey)}
-              >
-                <Calendar className="w-3.5 h-3.5 text-blue-400" /> মাস ২: {formatMonthLabel(prevMonthKey)} (Last Month)
-              </span>
-              {prevMonthSummary.count > 0 ? (
-                <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
-                  Audit Ready
-                </span>
-              ) : (
-                <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Storage Cleaned
-                </span>
-              )}
-            </div>
-
-            <div
-              className="grid grid-cols-3 gap-2 text-center mt-3 pt-2 border-t border-slate-800/80 cursor-pointer"
-              onClick={() => setSelectedMonth(prevMonthKey)}
-            >
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium">Orders Count</div>
-                <div className="text-base font-extrabold text-white font-mono">{prevMonthSummary.count}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium">Taxable Sales</div>
-                <div className="text-base font-extrabold text-blue-400 font-mono">₹{prevMonthSummary.taxable}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium">Total GST (5%)</div>
-                <div className="text-base font-extrabold text-emerald-400 font-mono">₹{prevMonthSummary.gst}</div>
-              </div>
-            </div>
-
-            {/* Storage Clean & Delete Action for Last Month */}
-            <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-              <button
-                onClick={() => setSelectedMonth(prevMonthKey)}
-                className="text-[11px] font-bold text-slate-300 hover:text-white underline cursor-pointer"
-              >
-                View {formatMonthLabel(prevMonthKey)} Bills →
-              </button>
-
-              {prevMonthSummary.count > 0 ? (
-                <button
-                  onClick={() => {
-                    setTargetMonthToDelete(prevMonthKey);
-                    setShowDeleteModal(true);
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition-all cursor-pointer"
-                  title="Delete last month's orders to save cloud database storage"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Delete Last Month ({prevMonthSummary.count} Orders)
-                </button>
-              ) : (
-                <div className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Storage Free
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -535,18 +348,8 @@ export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpen
           </div>
         </div>
 
-        {/* Action Buttons: Export & Storage Cleanup */}
-        <div className="flex flex-wrap items-center gap-2">
-          {selectedMonth !== 'all' && (
-            <button
-              onClick={() => setShowDeleteModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 font-bold text-xs border border-rose-500/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="Delete this month's orders to save database storage"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" /> Free Up Storage
-            </button>
-          )}
-
+        {/* Action Buttons: Export & Print */}
+        <div className="flex items-center gap-2">
           <button
             onClick={handleDownloadPdf}
             className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
@@ -562,43 +365,6 @@ export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpen
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" /> Excel / CSV
           </button>
-        </div>
-      </div>
-
-      {/* Quick Last 2 Months Period Switcher */}
-      <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span className="font-bold text-slate-300">Quick 2-Month GST Periods:</span>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setSelectedMonth(currentMonthKey)}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedMonth === currentMonthKey
-                  ? 'bg-emerald-600 text-white shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:text-white'
-              }`}
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>Current Month ({formatMonthLabel(currentMonthKey)})</span>
-            </button>
-
-            <button
-              onClick={() => setSelectedMonth(prevMonthKey)}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedMonth === prevMonthKey
-                  ? 'bg-emerald-600 text-white shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:text-white'
-              }`}
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>Last Month ({formatMonthLabel(prevMonthKey)})</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="text-[11px] text-slate-400">
-          Showing <span className="font-bold text-white">{monthOrders.length}</span> orders for <strong className="text-emerald-400">{formatMonthLabel(selectedMonth)}</strong>
         </div>
       </div>
 
@@ -877,84 +643,6 @@ export const GstReportsAnalytics: React.FC<GstReportsAnalyticsProps> = ({ onOpen
           onClose={() => setSelectedBillOrder(null)}
           actorName={currentOwner.owner_name}
         />
-      )}
-
-      {/* Storage Cleanup Confirmation Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="max-w-md w-full bg-slate-900 border border-rose-500/40 rounded-3xl p-6 space-y-5 shadow-2xl relative">
-            <button
-              onClick={() => setShowDeleteModal(false)}
-              className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center justify-center shrink-0">
-                <Trash2 className="w-6 h-6 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Free Up Database Storage</h3>
-                <p className="text-xs text-rose-300 font-medium">Delete Orders from {formatMonthLabel(targetMonthToDelete || selectedMonth)}</p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/30 text-xs text-slate-300 space-y-2">
-              <div className="flex items-center gap-2 text-rose-400 font-bold">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>Permanent Database Deletion Notice</span>
-              </div>
-              <p className="leading-relaxed text-[11px] text-slate-300">
-                You are about to permanently delete <strong>{targetOrdersToDelete.length} orders</strong> from <strong>{formatMonthLabel(targetMonthToDelete || selectedMonth)}</strong> from your database.
-              </p>
-              <p className="text-[11px] text-amber-300">
-                💡 <strong>Important:</strong> We strongly recommend downloading your GST Excel / CSV report first so you retain permanent offline tax and audit records.
-              </p>
-            </div>
-
-            <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedMonth(targetMonthToDelete);
-                  handleExportCsv();
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                <span>Download Excel Backup First (Recommended)</span>
-              </button>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteModal(false)}
-                  disabled={isDeleting}
-                  className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleDeleteMonthOrders}
-                  disabled={isDeleting || targetOrdersToDelete.length === 0}
-                  className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {isDeleting ? (
-                    <span>Purging from DB...</span>
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4" />
-                      <span>Confirm & Free Storage</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

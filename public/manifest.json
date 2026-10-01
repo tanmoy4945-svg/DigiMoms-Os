@@ -3,7 +3,7 @@
   "name": "DigiMoms Smart Restaurant OS",
   "short_name": "DigiMoms",
   "description": "Smart Restaurant Management, Contactless QR Ordering, Waiter Terminal & Kitchen KDS",
-  "start_url": "/?source=pwa",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
