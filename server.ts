@@ -813,38 +813,33 @@ async function startServer() {
           timestamp: confirmedAtIso
         });
 
-        // 4. Authoritative Supabase Broadcast on WebSocket channels for instant owner notification
+        // 4. Supabase Direct Broadcast for Instant Realtime Notifications (No subscription delay)
         try {
           const channelsToNotify = [`restaurant-orders-${effectiveRestId}`, 'all-restaurant-orders'];
+          
+          // Using authoritative broadcast for faster UI response
           channelsToNotify.forEach(chName => {
-            const ch = serverSupabase.channel(chName);
-            ch.subscribe((subStatus) => {
-              if (subStatus === 'SUBSCRIBED') {
-                ch.send({
-                  type: 'broadcast',
-                  event: 'order_event',
-                  payload: { order: finalOrderObj }
-                });
-                ch.send({
-                  type: 'broadcast',
-                  event: 'order_status_event',
-                  payload: {
-                    orderId: finalOrderObj.id,
-                    order_status: finalOrderObj.order_status,
-                    payment_status: 'paid_live',
-                    order_number: finalOrderObj.order_number,
-                    table_number: finalOrderObj.table_number,
-                    restaurant_id: effectiveRestId,
-                    grand_total: finalOrderObj.grand_total,
-                    online_amount: finalOrderObj.online_amount,
-                    cash_due: 0
-                  }
-                });
-                setTimeout(() => {
-                  serverSupabase.removeChannel(ch).catch(() => {});
-                }, 2000);
+            serverSupabase.channel(chName).send({
+              type: 'broadcast',
+              event: 'order_event',
+              payload: { order: finalOrderObj }
+            }).catch(e => console.warn(`Broadcast fail to ${chName}:`, e));
+
+            serverSupabase.channel(chName).send({
+              type: 'broadcast',
+              event: 'order_status_event',
+              payload: {
+                orderId: finalOrderObj.id,
+                order_status: finalOrderObj.order_status,
+                payment_status: 'paid_live',
+                order_number: finalOrderObj.order_number,
+                table_number: finalOrderObj.table_number,
+                restaurant_id: effectiveRestId,
+                grand_total: finalOrderObj.grand_total,
+                online_amount: finalOrderObj.online_amount,
+                cash_due: 0
               }
-            });
+            }).catch(e => console.warn(`Status Broadcast fail to ${chName}:`, e));
           });
         } catch (bcastEx) {
           console.warn('[serverSupabase] Realtime broadcast notice:', bcastEx);

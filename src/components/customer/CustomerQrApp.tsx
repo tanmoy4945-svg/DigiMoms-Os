@@ -367,64 +367,22 @@ export const CustomerQrApp: React.FC = () => {
 
       const match = orders.find(o => o.id === orderIdParam || o.order_number === orderIdParam);
       if (match) {
-        const fullAmt = Number(match.grand_total || 0);
-        const updatePayload = {
-          payment_status: 'paid_live',
-          order_status: match.order_status === 'pending' ? 'accepted' : match.order_status,
-          online_amount: fullAmt,
-          cash_due: 0,
-          updated_at: new Date().toISOString()
-        };
-
-        (async () => {
-          try {
-            await supabase.from('orders').update(updatePayload).eq('id', match.id);
-          } catch (err) {
-            console.warn('Could not finalize live payment state on match:', err);
-          }
-        })();
-
-        match.payment_status = 'paid_live';
-        match.order_status = match.order_status === 'pending' ? 'accepted' : match.order_status;
-        match.online_amount = fullAmt;
-        match.cash_due = 0;
-
         setLastPlacedOrder(match);
         setCart([]);
         setIsCartOpen(false);
 
-        // Realtime broadcast to Owner & Staff screens
-        broadcastRealtimeEvent('order_event', { order: match });
-        broadcastRealtimeEvent('order_status_event', {
-          orderId: match.id,
-          order_status: match.order_status,
-          payment_status: 'paid_live',
-          order_number: match.order_number,
-          table_number: match.table_number,
-          restaurant_id: match.restaurant_id,
-          grand_total: match.grand_total,
-          online_amount: fullAmt,
-          cash_due: 0
-        });
-
-        showToast('🎉 অনলাইন পেমেন্ট সফল হয়েছে! আপনার অর্ডার গ্রহণ করা হয়েছে।', 'success');
+        // If not yet paid in local state, show a verifying message but don't force DB update
+        if (!['paid', 'paid_live', 'paid_demo'].includes(match.payment_status)) {
+          showToast('পেমেন্ট ভেরিফাই করা হচ্ছে... (Verifying payment status...)', 'info');
+        } else {
+          showToast('🎉 অনলাইন পেমেন্ট সফল হয়েছে! আপনার অর্ডার গ্রহণ করা হয়েছে।', 'success');
+        }
       } else {
         // Direct query to Supabase in case realtime state hasn't refreshed locally
         (async () => {
           try {
             const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderIdParam).maybeSingle();
             if (dbOrd) {
-              const fullAmt = Number(dbOrd.grand_total || 0);
-              const updatePayload = {
-                payment_status: 'paid_live',
-                order_status: dbOrd.order_status === 'pending' ? 'accepted' : dbOrd.order_status,
-                online_amount: fullAmt,
-                cash_due: 0,
-                updated_at: new Date().toISOString()
-              };
-              await supabase.from('orders').update(updatePayload).eq('id', dbOrd.id);
-              Object.assign(dbOrd, updatePayload);
-
               const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderIdParam);
               const fullOrd: Order = {
                 ...dbOrd,
@@ -432,9 +390,9 @@ export const CustomerQrApp: React.FC = () => {
                 tax: Number(dbOrd.tax || 0),
                 discount: Number(dbOrd.discount || 0),
                 grand_total: Number(dbOrd.grand_total || 0),
-                online_amount: fullAmt,
+                online_amount: Number(dbOrd.online_amount || 0),
                 cash_amount: Number(dbOrd.cash_amount || 0),
-                cash_due: 0,
+                cash_due: Number(dbOrd.cash_due || 0),
                 items: (itms || []).map((i: any) => ({
                   id: i.id,
                   order_id: i.order_id,
@@ -448,30 +406,20 @@ export const CustomerQrApp: React.FC = () => {
               setLastPlacedOrder(fullOrd);
               setCart([]);
               setIsCartOpen(false);
-
-              // Realtime broadcast to Owner & Staff screens
-              broadcastRealtimeEvent('order_event', { order: fullOrd });
-              broadcastRealtimeEvent('order_status_event', {
-                orderId: fullOrd.id,
-                order_status: fullOrd.order_status,
-                payment_status: 'paid_live',
-                order_number: fullOrd.order_number,
-                table_number: fullOrd.table_number,
-                restaurant_id: fullOrd.restaurant_id,
-                grand_total: fullOrd.grand_total,
-                online_amount: fullAmt,
-                cash_due: 0
-              });
-
-              showToast('🎉 অনলাইন পেমেন্ট সফল হয়েছে! আপনার অর্ডার গ্রহণ করা হয়েছে।', 'success');
+              
+              if (!['paid', 'paid_live', 'paid_demo'].includes(dbOrd.payment_status)) {
+                showToast('পেমেন্ট ভেরিফাই করা হচ্ছে... (Verifying payment...)', 'info');
+              } else {
+                showToast('🎉 অনলাইন পেমেন্ট সফল হয়েছে!', 'success');
+              }
             }
-          } catch (e) {
-            console.warn('Could not auto-restore order from Supabase:', e);
+          } catch (err) {
+            console.warn('Could not fetch order for verification:', err);
           }
         })();
       }
     }
-  }, [table?.id, restaurant?.id]);
+  }, [table?.id, restaurant?.id, orders, broadcastRealtimeEvent]);
 
   const restCategories = restaurant ? categories.filter(c => c.restaurant_id === restaurant.id && !c.is_hidden) : [];
   const restMenu = restaurant ? menuItems.filter(m => m.restaurant_id === restaurant.id && m.is_available) : [];

@@ -20,6 +20,7 @@ import { createPayUPaymentRequest } from '../../lib/paymentAdapters';
 export interface PayUCheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onCancel?: () => void;
   onSuccess: (paymentData: { txnid: string; mihpayid?: string; hash?: string; amount: number }) => void;
   amount: number;
   title: string;
@@ -42,6 +43,7 @@ export interface PayUCheckoutModalProps {
 export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
   isOpen,
   onClose,
+  onCancel,
   onSuccess,
   amount,
   title,
@@ -75,6 +77,13 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
   
   const pollingTimerRef = useRef<any>(null);
   const isCompletedRef = useRef<boolean>(false);
+
+  // Handle manual cancel / close
+  const handleCancel = useCallback(() => {
+    if (isCompletedRef.current) return;
+    if (onCancel) onCancel();
+    onClose();
+  }, [onCancel, onClose]);
 
   // Mark completion safely only once
   const completePayment = useCallback((data: { txnid: string; mihpayid?: string; hash?: string; amount: number }) => {
@@ -427,7 +436,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -560,7 +569,7 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={onClose}
+                      onClick={handleCancel}
                       className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 font-bold text-xs transition-all cursor-pointer"
                     >
                       Cancel

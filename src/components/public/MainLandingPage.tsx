@@ -204,6 +204,55 @@ export const MainLandingPage: React.FC = () => {
         </div>
       </section>
 
+      {/* NEW SECTION: OWNER & STAFF FACILITIES */}
+      <section className="max-w-7xl mx-auto px-4 lg:px-8 space-y-10">
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold">
+            <ShieldCheck className="w-3.5 h-3.5" /> {t.facilitiesTag}
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-white">{t.facilitiesTitle}</h2>
+          <p className="text-slate-400 max-w-2xl mx-auto text-sm sm:text-base">
+            {t.facilitiesSub}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {t.facilitiesItems?.map((item, idx) => (
+            <div key={idx} className="p-6 rounded-3xl bg-slate-900/40 border border-slate-800/60 hover:bg-slate-900/60 hover:border-blue-500/30 transition-all group">
+              <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-bold text-white mb-2">{item.title}</h3>
+              <p className="text-slate-400 text-[11px] leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Floating WhatsApp Button (Mandatory Context) */}
+      <div className="fixed bottom-6 right-6 z-[100] group">
+        <a
+          href="https://wa.me/919475388085?text=Hello%20DigiMoms,%20I%20am%20interested%20in%20your%20Smart%20Restaurant%20OS.%20Please%20send%20me%20demo%20videos."
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-3 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-2xl shadow-2xl shadow-emerald-600/40 transition-all transform hover:scale-105"
+        >
+          <div className="relative">
+            <div className="absolute inset-0 bg-white rounded-full animate-ping opacity-20" />
+            <PhoneCall className="w-6 h-6 relative z-10" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] font-bold opacity-80 uppercase tracking-wider leading-none mb-1">Click to Message</span>
+            <span className="text-sm font-black leading-none">WhatsApp Agent</span>
+          </div>
+        </a>
+        <div className="absolute bottom-full right-0 mb-3 bg-slate-900 border border-slate-800 p-3 rounded-xl shadow-xl w-60 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none transform translate-y-2 group-hover:translate-y-0">
+          <p className="text-[10px] text-slate-300 leading-relaxed font-medium text-center">
+             আমাদের মেসেজ করুন ডেমো ভিডিওর জন্য। ওয়েবে সবকিছু বিস্তারিত লেখা সম্ভব নয়। (Message us for demo videos)
+          </p>
+        </div>
+      </div>
+
       {/* SECTION 3: MORE THAN SOFTWARE */}
       <section className="max-w-7xl mx-auto px-4 lg:px-8 space-y-10">
         <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/60 border border-slate-800 space-y-8 shadow-2xl">

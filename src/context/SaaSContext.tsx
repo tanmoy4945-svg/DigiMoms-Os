@@ -1706,7 +1706,10 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const effectiveMode = newRow.payment_mode || existingOrd.payment_mode;
         const effectiveStatus = newRow.payment_status || existingOrd.payment_status;
         const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(effectiveStatus);
-        const computedCashDue = (effectiveMode === 'online' || effectiveMode === 'demo' || isPaid)
+        
+        // Fix: Do not force cash_due to 0 just because mode is 'online'. 
+        // Only set to 0 if it is actually PAID or if it's a demo order.
+        const computedCashDue = (isPaid || effectiveMode === 'demo')
           ? 0
           : (newRow.cash_due !== undefined ? Number(newRow.cash_due) : existingOrd.cash_due);
 

@@ -123,6 +123,11 @@ export interface LandingTranslation {
   contactSub: string;
   contactCta: string;
   whatsappCta: string;
+  // Facilities Section
+  facilitiesTag: string;
+  facilitiesTitle: string;
+  facilitiesSub: string;
+  facilitiesItems: Array<{ title: string; desc: string }>;
 }
 
 export const landingTranslations: Record<Language, LandingTranslation> = {
@@ -316,7 +321,20 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     contactTitle: 'Ready to Transform Your Restaurant?',
     contactSub: 'Get started with DigiMoms Smart Restaurant OS or speak with our agency team.',
     contactCta: 'View OS Plans (Starting ₹999/mo)',
-    whatsappCta: 'WhatsApp Agency: +91 9475388085'
+    whatsappCta: 'WhatsApp Agency: +91 9475388085',
+    facilitiesTag: 'Complete Management Suite',
+    facilitiesTitle: 'Owner & Staff Facilities',
+    facilitiesSub: 'Our system provides specialized tools for every role in your restaurant to ensure smooth operations.',
+    facilitiesItems: [
+      { title: 'Centralized Owner Dashboard', desc: 'Monitor live sales, manage menus, track staff, and view revenue analytics from one screen.' },
+      { title: 'Multi-Terminal Staff Access', desc: 'Dedicated logins for Waiters and Kitchen staff with role-specific task management.' },
+      { title: 'Live Kitchen Display (KDS)', desc: 'Real-time ticket updates with audio alerts for the chef to prepare orders without paper delays.' },
+      { title: 'Waiter Table Management', desc: 'Interactive table grid to track occupancy, take orders, and manage guest calls.' },
+      { title: 'Instant Bill Generation', desc: 'Generate and print digital PDF invoices with GST and packaging charges automatically added.' },
+      { title: 'Inventory & Item Control', desc: 'Turn items on/off instantly based on availability to avoid customer disappointment.' },
+      { title: 'Activity Logs & Audits', desc: 'Track every action taken by staff for full accountability and transparency.' },
+      { title: 'Subscription Self-Service', desc: 'Renew your restaurant plan and manage billing directly from your own portal.' }
+    ]
   },
 
   bn: {
@@ -509,7 +527,20 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     contactTitle: 'আজই আপনার রেস্তোরাঁকে ডিজিটালাইজ করুন',
     contactSub: 'ডিজিমমস স্মার্ট রেস্তোরাঁ ওএস শুরু করতে বা আমাদের সাথে কথা বলতে যোগাযোগ করুন।',
     contactCta: 'ওএস প্ল্যান দেখুন (শুরু ₹৯৯৯/মাস)',
-    whatsappCta: 'হোয়াটসঅ্যাপ এজেন্সি: +91 9475388085'
+    whatsappCta: 'এজেন্সি হোয়াটসঅ্যাপ: +91 9475388085',
+    facilitiesTag: 'সম্পূর্ণ ম্যানেজমেন্ট স্যুট',
+    facilitiesTitle: 'মালিক ও স্টাফদের সুবিধাসমূহ',
+    facilitiesSub: 'রেস্তোরাঁ পরিচালনার প্রতিটি ধাপ সহজ করতে আমাদের সিস্টেমে রয়েছে বিশেষায়িত টুলস।',
+    facilitiesItems: [
+      { title: 'সেন্ট্রালাইজড ওনার ড্যাশবোর্ড', desc: 'লাইভ সেলস মনিটর, মেনু ম্যানেজমেন্ট এবং আয়ের হিসাব এক স্ক্রিনে দেখুন।' },
+      { title: 'মাল্টি-টার্মিনাল স্টাফ অ্যাক্সেস', desc: 'ওয়েটার এবং কিচেন স্টাফদের জন্য আলাদা লগইন ও কাজ পরিচালনার সুবিধা।' },
+      { title: 'লাইভ কিচেন ডিসপ্লে (KDS)', desc: 'কাগজহীন অর্ডারের জন্য অডিও অ্যালার্ট সহ রান্নাঘরে রিয়েল-টাইম টিকিট আপডেট।' },
+      { title: 'ওয়েটার টেবিল ম্যানেজমেন্ট', desc: 'টেবিল বুকিং ট্র্যাক করা এবং গ্রাহকদের অর্ডার ও কল ম্যানেজ করার ইন্টারঅ্যাক্টিভ গ্রিড।' },
+      { title: 'তাৎক্ষণিক বিল জেনারেশন', desc: 'জিএসটি এবং প্যাকেজিং চার্জ সহ স্বয়ংক্রিয় ডিজিটাল পিডিএফ ইনভয়েস তৈরি।' },
+      { title: 'ইনভেন্টরি ও আইটেম কন্ট্রোল', desc: 'স্টক শেষ হলে তাৎক্ষণিকভাবে মেনু আইটেম বন্ধ বা চালু করার সুবিধা।' },
+      { title: 'অ্যাক্টিভিটি লগ ও অডিট', desc: 'স্বচ্ছতা বজায় রাখতে স্টাফদের প্রতিটি কাজের হিসাব ট্র্যাক করার ব্যবস্থা।' },
+      { title: 'সাবস্ক্রিপশন সেলফ-সার্ভিস', desc: 'নিজের পোর্টাল থেকেই রেস্তোরাঁ প্ল্যান রিনিউ এবং বিলিং ম্যানেজমেন্টের সুবিধা।' }
+    ]
   },
 
   hi: {
@@ -702,6 +733,19 @@ export const landingTranslations: Record<Language, LandingTranslation> = {
     contactTitle: 'क्या आप अपने रेस्टोरेंट को डिजिटल बनाने के लिए तैयार हैं?',
     contactSub: 'DigiMoms स्मार्ट रेस्टोरेंट OS शुरू करें या हमारी एजेंसी टीम से संपर्क करें।',
     contactCta: 'OS प्लान देखें (मात्र ₹999/माह से)',
-    whatsappCta: 'व्हाट्सएप एजेंसी: +91 9475388085'
+    whatsappCta: 'एजेंसी व्हाट्सएप: +91 9475388085',
+    facilitiesTag: 'संपूर्ण प्रबंधन सुइट',
+    facilitiesTitle: 'मालिक और स्टाफ सुविधाएं',
+    facilitiesSub: 'रेस्तरां संचालन के हर चरण को सुचारू बनाने के लिए हमारे सिस्टम में विशेष उपकरण हैं।',
+    facilitiesItems: [
+      { title: 'केंद्रीकृत ओनर डैशबोर्ड', desc: 'लाइव बिक्री की निगरानी, मेनू प्रबंधन और राजस्व विश्लेषण एक ही स्क्रीन पर देखें।' },
+      { title: 'मल्टी-टर्मिनल स्टाफ एक्सेस', desc: 'वेटर्स और किचन स्टाफ के लिए भूमिका-विशिष्ट कार्य प्रबंधन के साथ अलग लॉगिन।' },
+      { title: 'लाइव किचन डिस्प्ले (KDS)', desc: 'कागज रहित ऑर्डर के लिए ऑडियो अलर्ट के साथ रसोई में रीयल-टाइम टिकट अपडेट।' },
+      { title: 'वेटर टेबल प्रबंधन', desc: 'टेबल की स्थिति को ट्रैक करने और ग्राहकों के ऑर्डर और कॉल प्रबंधित करने के लिए ग्रिड।' },
+      { title: 'तत्काल बिल जनरेशन', desc: 'जीएसटी और पैकेजिंग शुल्क के साथ स्वचालित डिजिटल पीडीएफ चालान बनाएं।' },
+      { title: 'इन्वेंट्री और आइटम कंट्रोल', desc: 'उपलब्धता के आधार पर ग्राहकों की निराशा से बचने के लिए आइटम को तुरंत चालू/बंद करें।' },
+      { title: 'गतिविधि लॉग और ऑडिट', desc: 'पूर्ण जवाबदेही और पारदर्शिता के लिए स्टाफ द्वारा की गई हर कार्रवाई को ट्रैक करें।' },
+      { title: 'सब्सक्रिप्शन सेल्फ-सर्िस', desc: 'अपने रेस्तरां प्लान को रिन्यू करें और सीधे अपने पोर्टल से बिलिंग प्रबंधित करें।' }
+    ]
   }
 };
