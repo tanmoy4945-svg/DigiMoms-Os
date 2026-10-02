@@ -80,6 +80,7 @@ interface SaaSContextType {
     target_roles?: ('owner' | 'waiter' | 'kitchen' | 'ceo' | 'customer')[];
     eventId?: string;
   }) => void;
+  broadcastRealtimeEvent: (eventType: string, payload: any) => void;
 
   // Authentication State
   ceoAuthenticated: boolean;
@@ -1667,6 +1668,26 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cash_due: 0,
             items: newRow.items || []
           };
+
+          if (!newRow.items || newRow.items.length === 0) {
+            supabase.from('order_items').select('*').eq('order_id', newRow.id).then(({ data }) => {
+              if (data && data.length > 0) {
+                setOrders(curr => curr.map(o => o.id === newRow.id ? {
+                  ...o,
+                  items: data.map(i => ({
+                    id: i.id,
+                    order_id: i.order_id,
+                    menu_id: i.menu_id,
+                    menu_name: i.menu_name,
+                    quantity: Number(i.quantity),
+                    price: Number(i.price),
+                    special_instructions: i.special_instructions
+                  }))
+                } : o));
+              }
+            });
+          }
+
           return [formattedOrder, ...prev];
         }
 
@@ -5061,6 +5082,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
+      // Realtime Broadcast across all screens so owner, kitchen, waiter see the order immediately
+      broadcastRealtimeEvent('order_event', { order: updatedOrderObj });
+      broadcastRealtimeEvent('order_status_event', {
+        orderId: updatedOrderObj.id,
+        order_status: newOrderStatus,
+        payment_status: newPaymentStatus,
+        order_number: updatedOrderObj.order_number,
+        table_number: updatedOrderObj.table_number,
+        restaurant_id: updatedOrderObj.restaurant_id,
+        grand_total: updatedOrderObj.grand_total,
+        online_amount: newOnlineTotal,
+        cash_due: newCashDue
+      });
+
       fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via Razorpay!`, 'success');
@@ -5270,6 +5305,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         table_number: existingOrd.table_number
       });
 
+      // Realtime Broadcast across all screens so owner, kitchen, waiter see the order immediately
+      broadcastRealtimeEvent('order_event', { order: updatedOrderObj });
+      broadcastRealtimeEvent('order_status_event', {
+        orderId: updatedOrderObj.id,
+        order_status: newOrderStatus,
+        payment_status: newPaymentStatus,
+        order_number: updatedOrderObj.order_number,
+        table_number: updatedOrderObj.table_number,
+        restaurant_id: updatedOrderObj.restaurant_id,
+        grand_total: updatedOrderObj.grand_total,
+        online_amount: newOnlineTotal,
+        cash_due: newCashDue
+      });
+
       fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
       playNotificationSound('new_order');
       showToast(`Online payment ₹${onlineAmountToPay} verified via PayU!`, 'success');
@@ -5475,6 +5524,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         restaurant_id: existingOrd.restaurant_id,
         order_id: existingOrd.id,
         table_number: existingOrd.table_number
+      });
+
+      // Realtime Broadcast across all screens so owner, kitchen, waiter see the order immediately
+      broadcastRealtimeEvent('order_event', { order: updatedOrderObj });
+      broadcastRealtimeEvent('order_status_event', {
+        orderId: updatedOrderObj.id,
+        order_status: newOrderStatus,
+        payment_status: newPaymentStatus,
+        order_number: updatedOrderObj.order_number,
+        table_number: updatedOrderObj.table_number,
+        restaurant_id: updatedOrderObj.restaurant_id,
+        grand_total: updatedOrderObj.grand_total,
+        online_amount: newOnlineTotal,
+        cash_due: newCashDue
       });
 
       fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
@@ -6414,7 +6477,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       addCeoStaffMember, updateCeoStaffMember, toggleCeoStaffStatus, deleteCeoStaffMember, updateCeoStaffPassword,
       restaurants, staffList, tables, tableSessions, categories, menuItems,
       orders, feedbackList, callRequests, activityLogs, auditLogs, logAudit,
-      subscriptionHistory,
+      subscriptionHistory, broadcastRealtimeEvent,
       paymentTransactions, confirmCashPayment, processRazorpayOnlinePayment, processPayUOnlinePayment, processPhonePeOnlinePayment, updateOrderPaymentMethod,
       loginCeo, loginCeoStaffMember, logoutCeo, ceoRazorpayConfig, updateCeoRazorpayConfig, ceoPaymentConfig, updateCeoPaymentConfig,
       addRestaurant, updateRestaurant, suspendRestaurant,

@@ -44,6 +44,7 @@ export const CustomerQrApp: React.FC = () => {
     processRazorpayOnlinePayment,
     processPayUOnlinePayment,
     processPhonePeOnlinePayment,
+    broadcastRealtimeEvent,
     submitUpiPaymentConfirmation,
     sendCallWaiterRequest,
     showToast,
@@ -329,67 +330,100 @@ export const CustomerQrApp: React.FC = () => {
     if (orderIdParam) {
       const isPaymentSuccess = paymentParam === 'success';
 
+      // Clean up URL parameters immediately so fresh reloads don't re-trigger
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, '', cleanUrl);
+
+      // 1. PAYMENT CANCELLED OR FAILED:
+      if (!isPaymentSuccess) {
+        setLastPlacedOrder(null);
+        showToast('❌ অনলাইন পেমেন্ট সম্পন্ন হয়নি বা বাতিল করা হয়েছে। আপনার অর্ডার কনফার্ম করা হয়নি। (Payment cancelled - Order was not placed)', 'error');
+        
+        // Cancel the pending unpaid order in Supabase
+        (async () => {
+          try {
+            await supabase.from('orders').update({
+              order_status: 'cancelled',
+              payment_status: 'failed',
+              updated_at: new Date().toISOString()
+            }).eq('id', orderIdParam);
+          } catch (e) {
+            console.warn('Could not cancel unpaid order in Supabase:', e);
+          }
+        })();
+        return;
+      }
+
+      // 2. PAYMENT SUCCESSFUL:
       const alreadyShown = sessionStorage.getItem(`digimoms_order_shown_${orderIdParam}`) === 'true';
-      if (alreadyShown && !isPaymentSuccess) {
-        // Already shown previously; do not reopen popup on reload/revisit.
+      if (alreadyShown) {
         setLastPlacedOrder(null);
         setCustomerStep('menu');
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, '', cleanUrl);
         return;
       }
 
       // Mark as shown once so any subsequent refresh will not reopen this popup
       sessionStorage.setItem(`digimoms_order_shown_${orderIdParam}`, 'true');
 
-      // Clean up URL parameters immediately
-      const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, '', cleanUrl);
-
       const match = orders.find(o => o.id === orderIdParam || o.order_number === orderIdParam);
       if (match) {
-        if (isPaymentSuccess && match.payment_status !== 'paid_live') {
-          (async () => {
-            try {
-              const fullAmt = Number(match.grand_total || 0);
-              const updatePayload = {
-                payment_status: 'paid_live',
-                order_status: match.order_status === 'pending' ? 'accepted' : match.order_status,
-                online_amount: fullAmt,
-                cash_due: 0,
-                updated_at: new Date().toISOString()
-              };
-              await supabase.from('orders').update(updatePayload).eq('id', match.id);
-            } catch (err) {
-              console.warn('Could not finalize live payment state on match:', err);
-            }
-          })();
-          match.payment_status = 'paid_live';
-          match.order_status = match.order_status === 'pending' ? 'accepted' : match.order_status;
-          match.online_amount = Number(match.grand_total || 0);
-          match.cash_due = 0;
-        }
+        const fullAmt = Number(match.grand_total || 0);
+        const updatePayload = {
+          payment_status: 'paid_live',
+          order_status: match.order_status === 'pending' ? 'accepted' : match.order_status,
+          online_amount: fullAmt,
+          cash_due: 0,
+          updated_at: new Date().toISOString()
+        };
+
+        (async () => {
+          try {
+            await supabase.from('orders').update(updatePayload).eq('id', match.id);
+          } catch (err) {
+            console.warn('Could not finalize live payment state on match:', err);
+          }
+        })();
+
+        match.payment_status = 'paid_live';
+        match.order_status = match.order_status === 'pending' ? 'accepted' : match.order_status;
+        match.online_amount = fullAmt;
+        match.cash_due = 0;
+
         setLastPlacedOrder(match);
         setCart([]);
         setIsCartOpen(false);
+
+        // Realtime broadcast to Owner & Staff screens
+        broadcastRealtimeEvent('order_event', { order: match });
+        broadcastRealtimeEvent('order_status_event', {
+          orderId: match.id,
+          order_status: match.order_status,
+          payment_status: 'paid_live',
+          order_number: match.order_number,
+          table_number: match.table_number,
+          restaurant_id: match.restaurant_id,
+          grand_total: match.grand_total,
+          online_amount: fullAmt,
+          cash_due: 0
+        });
+
+        showToast('🎉 অনলাইন পেমেন্ট সফল হয়েছে! আপনার অর্ডার গ্রহণ করা হয়েছে।', 'success');
       } else {
         // Direct query to Supabase in case realtime state hasn't refreshed locally
         (async () => {
           try {
             const { data: dbOrd } = await supabase.from('orders').select('*').eq('id', orderIdParam).maybeSingle();
             if (dbOrd) {
-              if (isPaymentSuccess && dbOrd.payment_status !== 'paid_live') {
-                const fullAmt = Number(dbOrd.grand_total || 0);
-                const updatePayload = {
-                  payment_status: 'paid_live',
-                  order_status: dbOrd.order_status === 'pending' ? 'accepted' : dbOrd.order_status,
-                  online_amount: fullAmt,
-                  cash_due: 0,
-                  updated_at: new Date().toISOString()
-                };
-                await supabase.from('orders').update(updatePayload).eq('id', dbOrd.id);
-                Object.assign(dbOrd, updatePayload);
-              }
+              const fullAmt = Number(dbOrd.grand_total || 0);
+              const updatePayload = {
+                payment_status: 'paid_live',
+                order_status: dbOrd.order_status === 'pending' ? 'accepted' : dbOrd.order_status,
+                online_amount: fullAmt,
+                cash_due: 0,
+                updated_at: new Date().toISOString()
+              };
+              await supabase.from('orders').update(updatePayload).eq('id', dbOrd.id);
+              Object.assign(dbOrd, updatePayload);
 
               const { data: itms } = await supabase.from('order_items').select('*').eq('order_id', orderIdParam);
               const fullOrd: Order = {
@@ -398,9 +432,9 @@ export const CustomerQrApp: React.FC = () => {
                 tax: Number(dbOrd.tax || 0),
                 discount: Number(dbOrd.discount || 0),
                 grand_total: Number(dbOrd.grand_total || 0),
-                online_amount: Number(dbOrd.online_amount || 0),
+                online_amount: fullAmt,
                 cash_amount: Number(dbOrd.cash_amount || 0),
-                cash_due: Number(dbOrd.cash_due || 0),
+                cash_due: 0,
                 items: (itms || []).map((i: any) => ({
                   id: i.id,
                   order_id: i.order_id,
@@ -414,6 +448,22 @@ export const CustomerQrApp: React.FC = () => {
               setLastPlacedOrder(fullOrd);
               setCart([]);
               setIsCartOpen(false);
+
+              // Realtime broadcast to Owner & Staff screens
+              broadcastRealtimeEvent('order_event', { order: fullOrd });
+              broadcastRealtimeEvent('order_status_event', {
+                orderId: fullOrd.id,
+                order_status: fullOrd.order_status,
+                payment_status: 'paid_live',
+                order_number: fullOrd.order_number,
+                table_number: fullOrd.table_number,
+                restaurant_id: fullOrd.restaurant_id,
+                grand_total: fullOrd.grand_total,
+                online_amount: fullAmt,
+                cash_due: 0
+              });
+
+              showToast('🎉 অনলাইন পেমেন্ট সফল হয়েছে! আপনার অর্ডার গ্রহণ করা হয়েছে।', 'success');
             }
           } catch (e) {
             console.warn('Could not auto-restore order from Supabase:', e);
@@ -2149,8 +2199,17 @@ export const CustomerQrApp: React.FC = () => {
         <PayUCheckoutModal
           isOpen={true}
           onClose={() => {
+            const existingOrd = onlinePaymentModalData?.existingOrder;
+            if (existingOrd?.id && existingOrd.payment_status === 'pending') {
+              supabase.from('orders').update({
+                order_status: 'cancelled',
+                payment_status: 'failed',
+                updated_at: new Date().toISOString()
+              }).eq('id', existingOrd.id).then(() => {}, () => {});
+            }
             setOnlinePaymentModalData(null);
             setIsPlacingOrder(false);
+            showToast('পেমেন্ট বাতিল করা হয়েছে। অর্ডার কনফার্ম হয়নি।', 'info');
           }}
           onSuccess={async (paymentData) => {
             try {
@@ -2195,6 +2254,21 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
+
+              // Realtime broadcast to Owner & Staff dashboards immediately
+              broadcastRealtimeEvent('order_event', { order: updatedPaidOrder });
+              broadcastRealtimeEvent('order_status_event', {
+                orderId: updatedPaidOrder.id,
+                order_status: updatedPaidOrder.order_status,
+                payment_status: 'paid_live',
+                order_number: updatedPaidOrder.order_number,
+                table_number: updatedPaidOrder.table_number,
+                restaurant_id: updatedPaidOrder.restaurant_id,
+                grand_total: updatedPaidOrder.grand_total,
+                online_amount: updatedPaidOrder.online_amount,
+                cash_due: 0
+              });
+
               showToast('🎉 PayU payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PayU Order Payment Error:", err);
@@ -2226,8 +2300,17 @@ export const CustomerQrApp: React.FC = () => {
         <PhonePeCheckoutModal
           isOpen={true}
           onClose={() => {
+            const existingOrd = onlinePaymentModalData?.existingOrder;
+            if (existingOrd?.id && existingOrd.payment_status === 'pending') {
+              supabase.from('orders').update({
+                order_status: 'cancelled',
+                payment_status: 'failed',
+                updated_at: new Date().toISOString()
+              }).eq('id', existingOrd.id).then(() => {}, () => {});
+            }
             setOnlinePaymentModalData(null);
             setIsPlacingOrder(false);
+            showToast('পেমেন্ট বাতিল করা হয়েছে। অর্ডার কনফার্ম হয়নি।', 'info');
           }}
           onSuccess={async (paymentData) => {
             try {
@@ -2270,6 +2353,21 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
+
+              // Realtime broadcast to Owner & Staff dashboards immediately
+              broadcastRealtimeEvent('order_event', { order: updatedPaidOrder });
+              broadcastRealtimeEvent('order_status_event', {
+                orderId: updatedPaidOrder.id,
+                order_status: updatedPaidOrder.order_status,
+                payment_status: 'paid_live',
+                order_number: updatedPaidOrder.order_number,
+                table_number: updatedPaidOrder.table_number,
+                restaurant_id: updatedPaidOrder.restaurant_id,
+                grand_total: updatedPaidOrder.grand_total,
+                online_amount: updatedPaidOrder.online_amount,
+                cash_due: 0
+              });
+
               showToast('🎉 PhonePe payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("PhonePe Order Payment Error:", err);
@@ -2301,8 +2399,17 @@ export const CustomerQrApp: React.FC = () => {
         <RazorpayCheckoutModal
           isOpen={true}
           onClose={() => {
+            const existingOrd = onlinePaymentModalData?.existingOrder;
+            if (existingOrd?.id && existingOrd.payment_status === 'pending') {
+              supabase.from('orders').update({
+                order_status: 'cancelled',
+                payment_status: 'failed',
+                updated_at: new Date().toISOString()
+              }).eq('id', existingOrd.id).then(() => {}, () => {});
+            }
             setOnlinePaymentModalData(null);
             setIsPlacingOrder(false);
+            showToast('পেমেন্ট বাতিল করা হয়েছে। অর্ডার কনফার্ম হয়নি।', 'info');
           }}
           onSuccess={async (paymentData) => {
             try {
@@ -2333,6 +2440,21 @@ export const CustomerQrApp: React.FC = () => {
               setIsCartOpen(false);
               setOnlinePaymentModalData(null);
               setLastPlacedOrder(updatedPaidOrder);
+
+              // Realtime broadcast to Owner & Staff dashboards immediately
+              broadcastRealtimeEvent('order_event', { order: updatedPaidOrder });
+              broadcastRealtimeEvent('order_status_event', {
+                orderId: updatedPaidOrder.id,
+                order_status: updatedPaidOrder.order_status,
+                payment_status: 'paid_live',
+                order_number: updatedPaidOrder.order_number,
+                table_number: updatedPaidOrder.table_number,
+                restaurant_id: updatedPaidOrder.restaurant_id,
+                grand_total: updatedPaidOrder.grand_total,
+                online_amount: updatedPaidOrder.online_amount,
+                cash_due: 0
+              });
+
               showToast('🎉 Razorpay payment confirmed! Your food order is placed and being prepared.', 'success');
             } catch (err: any) {
               console.error("Razorpay Order Payment Error:", err);

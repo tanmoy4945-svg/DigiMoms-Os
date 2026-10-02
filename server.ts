@@ -795,7 +795,7 @@ async function startServer() {
         items: itemsList
       };
 
-      // 3. Broadcast realtime SSE events to Owner & Staff dashboards
+      // 3. Broadcast realtime events to Owner & Staff dashboards
       if (effectiveRestId) {
         // Broadcast as NEW_ORDER so live order streams and staff terminals add it as a new confirmed order
         broadcastRealtimeOrderEvent(effectiveRestId, {
@@ -812,6 +812,43 @@ async function startServer() {
           order: finalOrderObj,
           timestamp: confirmedAtIso
         });
+
+        // 4. Authoritative Supabase Broadcast on WebSocket channels for instant owner notification
+        try {
+          const channelsToNotify = [`restaurant-orders-${effectiveRestId}`, 'all-restaurant-orders'];
+          channelsToNotify.forEach(chName => {
+            const ch = serverSupabase.channel(chName);
+            ch.subscribe((subStatus) => {
+              if (subStatus === 'SUBSCRIBED') {
+                ch.send({
+                  type: 'broadcast',
+                  event: 'order_event',
+                  payload: { order: finalOrderObj }
+                });
+                ch.send({
+                  type: 'broadcast',
+                  event: 'order_status_event',
+                  payload: {
+                    orderId: finalOrderObj.id,
+                    order_status: finalOrderObj.order_status,
+                    payment_status: 'paid_live',
+                    order_number: finalOrderObj.order_number,
+                    table_number: finalOrderObj.table_number,
+                    restaurant_id: effectiveRestId,
+                    grand_total: finalOrderObj.grand_total,
+                    online_amount: finalOrderObj.online_amount,
+                    cash_due: 0
+                  }
+                });
+                setTimeout(() => {
+                  serverSupabase.removeChannel(ch).catch(() => {});
+                }, 2000);
+              }
+            });
+          });
+        } catch (bcastEx) {
+          console.warn('[serverSupabase] Realtime broadcast notice:', bcastEx);
+        }
       }
 
       return finalOrderObj;
@@ -1297,6 +1334,10 @@ async function startServer() {
         ? 'https://secure.payu.in/_payment'
         : 'https://test.payu.in/_payment';
 
+      const ua = req.get('user-agent') || '';
+      const isMobileReq = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+      const deviceType = req.body.device_type || (isMobileReq ? '1' : '2');
+
       return res.json({
         success: true,
         actionUrl,
@@ -1320,7 +1361,8 @@ async function startServer() {
           udf4,
           udf5,
           hash,
-          service_provider: 'payu_paisa'
+          service_provider: 'payu_paisa',
+          device_type: deviceType
         }
       });
     } catch (err: any) {
@@ -1690,15 +1732,44 @@ async function startServer() {
       }
 
       const isSubscription = udf5 === '1' || txnid.startsWith('SUB_') || txnid.startsWith('RENEW_');
+      const statusParam = isSuccess ? 'success' : 'cancelled';
 
       let targetRedirectUrl = '/';
       if (isSubscription) {
-        targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
+        targetRedirectUrl = `/owner-dashboard?payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
       } else if (udf3) {
         const basePath = udf3.startsWith('/') ? udf3 : `/q/${encodeURIComponent(udf3)}`;
-        targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(udf2)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
+        targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(udf2)}&payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
       } else if (udf2) {
-        targetRedirectUrl = `/?order_id=${encodeURIComponent(udf2)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(txnid)}`;
+        targetRedirectUrl = `/?order_id=${encodeURIComponent(udf2)}&payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
+      }
+
+      // If payment failed or was cancelled, ensure any pending unpaid food order is discarded/cancelled
+      if (!isSuccess && udf2) {
+        try {
+          await serverSupabase
+            .from('orders')
+            .update({
+              order_status: 'cancelled',
+              payment_status: 'failed',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', udf2);
+
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const idx = allOrders.findIndex(o => o.id === udf2);
+          if (idx >= 0) {
+            allOrders[idx] = {
+              ...allOrders[idx],
+              order_status: 'cancelled',
+              payment_status: 'failed',
+              updated_at: new Date().toISOString()
+            };
+            writeJsonFile('orders.json', allOrders.slice(0, 1000));
+          }
+        } catch (cancelErr) {
+          console.warn('Could not cancel unpaid order on PayU failure:', cancelErr);
+        }
       }
 
       // Sync payment to Supabase orders and payment_transactions table immediately
@@ -1737,7 +1808,7 @@ async function startServer() {
         <html lang="en">
         <head>
           <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
           <title>PayU Payment ${isSuccess ? 'Success' : 'Status'}</title>
           <style>
             body {
@@ -1809,8 +1880,8 @@ async function startServer() {
         <body>
           <div class="card">
             <div class="icon">${isSuccess ? '✓' : '!'}</div>
-            <h1>${isSuccess ? 'Payment Confirmed by PayU!' : 'Payment ' + (status || 'Processed')}</h1>
-            <p>${isSuccess ? 'Your transaction has been verified securely by PayU Gateway.' : 'Transaction response received from PayU gateway.'}</p>
+            <h1>${isSuccess ? 'Payment Confirmed by PayU!' : 'Payment Cancelled / Incomplete'}</h1>
+            <p>${isSuccess ? 'Your transaction has been verified securely by PayU Gateway.' : 'Payment was not completed. Your food order was not placed.'}</p>
             
             <div class="details">
               <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${status}</strong></div>
@@ -1819,7 +1890,7 @@ async function startServer() {
               ${mihpayid ? `<div class="row"><span>PayU ID:</span><span style="font-family: monospace; font-size: 11px;">${mihpayid}</span></div>` : ''}
             </div>
 
-            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : 'Go to Home'}</button>
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : (isSuccess ? 'Go to Home' : 'Return to Table Menu')}</button>
           </div>
 
           <script>

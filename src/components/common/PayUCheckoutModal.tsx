@@ -369,8 +369,14 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = actionUrl;
-    const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    form.target = isMobile ? '_self' : '_blank';
+    const isMobile = typeof window !== 'undefined' && (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent) ||
+      window.innerWidth <= 1024 ||
+      ('ontouchstart' in window)
+    );
+    // For restaurant table food orders, ALWAYS navigate current tab (_self) so mobile browsers
+    // maintain the native mobile viewport and invoke installed UPI apps directly
+    form.target = (!isSubscription || isMobile) ? '_self' : '_blank';
 
     Object.entries(payuParams).forEach(([key, val]) => {
       const input = document.createElement('input');
@@ -379,6 +385,14 @@ export const PayUCheckoutModal: React.FC<PayUCheckoutModalProps> = ({
       input.value = String(val ?? '');
       form.appendChild(input);
     });
+
+    if (!payuParams.device_type) {
+      const devInput = document.createElement('input');
+      devInput.type = 'hidden';
+      devInput.name = 'device_type';
+      devInput.value = isMobile ? '1' : '2';
+      form.appendChild(devInput);
+    }
 
     document.body.appendChild(form);
     form.submit();

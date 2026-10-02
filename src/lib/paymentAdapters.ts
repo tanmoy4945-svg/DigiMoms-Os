@@ -107,6 +107,7 @@ export interface PayUPayloadOptions {
   udf4?: string;
   udf5?: string;
   env?: 'TEST' | 'LIVE';
+  device_type?: string;
 }
 
 /**
@@ -128,6 +129,13 @@ export async function createPayUPaymentRequest(options: PayUPayloadOptions) {
     ? 'https://secure.payu.in/_payment'
     : 'https://test.payu.in/_payment';
 
+  const isMobileClient = typeof window !== 'undefined' && (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent) ||
+    window.innerWidth <= 1024 ||
+    ('ontouchstart' in window)
+  );
+  const deviceType = options.device_type || (isMobileClient ? '1' : '2');
+
   return {
     actionUrl,
     hash,
@@ -147,7 +155,8 @@ export async function createPayUPaymentRequest(options: PayUPayloadOptions) {
       udf4,
       udf5,
       hash,
-      service_provider: 'payu_paisa'
+      service_provider: 'payu_paisa',
+      device_type: deviceType
     }
   };
 }
