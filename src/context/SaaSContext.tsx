@@ -588,8 +588,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Function to load all fresh data from Supabase
   const fetchAllFromSupabase = async (force = false) => {
     const now = Date.now();
-    if (!force && now - lastFetchTimeRef.current < 20000) {
-      console.log('[SaaSContext] Throttling sync (last fetch < 20s ago)');
+    if (!force && now - lastFetchTimeRef.current < 5000) {
+      console.log('[SaaSContext] Throttling sync (last fetch < 5s ago)');
       return;
     }
     lastFetchTimeRef.current = now;
@@ -2066,7 +2066,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } finally {
         isPolling = false;
       }
-    }, 15000); // Polling every 15 seconds (Safety net only, Realtime handles the speed)
+    }, 10000); // Polling every 10 seconds (Speed like air)
 
     const onFocusOrVisible = () => {
       fetchAllFromSupabase();
@@ -5568,8 +5568,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       online_amount = partialOnlineAmount || Math.round(grandTotal / 2);
       cash_due = Number((grandTotal - online_amount - cash_amount).toFixed(2));
     } else if (newMode === 'online') {
-      online_amount = grandTotal;
-      cash_due = 0;
+      online_amount = 0; // Fixed: Do not assume paid until gateway confirms
+      cash_due = grandTotal; // Fixed: Keep as due until verified
     } else if (newMode === 'upi_qr') {
       online_amount = 0;
       cash_due = grandTotal;
@@ -6035,7 +6035,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         paymentStatus = 'pending';
         orderStatus = 'pending';
         online_amount = 0;
-        cash_due = 0; // Online orders do not have cash due
+        cash_due = grand_total; // Fixed: Set to grand_total initially so UI shows 'Pending' until verified
       }
     } else if (effectivePaymentMode === 'partial') {
       const targetOnline = partialDetails?.online_amount || 0;

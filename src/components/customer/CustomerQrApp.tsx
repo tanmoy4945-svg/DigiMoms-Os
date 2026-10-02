@@ -979,11 +979,11 @@ export const CustomerQrApp: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-slate-400">Payment:</span>
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border ${
-                          (activeSessionOrders[0].payment_status === 'paid' || activeSessionOrders[0].payment_status === 'paid_live' || activeSessionOrders[0].payment_status === 'paid_demo' || (activeSessionOrders[0].cash_due !== undefined && activeSessionOrders[0].cash_due <= 0))
+                          (['paid', 'paid_live', 'paid_demo', 'paid_cash', 'paid_online'].includes(activeSessionOrders[0].payment_status) || (activeSessionOrders[0].payment_mode === 'cash' && activeSessionOrders[0].cash_due <= 0))
                             ? 'bg-emerald-950 text-emerald-400 border-emerald-500/40'
                             : 'bg-amber-950 text-amber-400 border-amber-500/40'
                         }`}>
-                          {(activeSessionOrders[0].payment_status === 'paid' || activeSessionOrders[0].payment_status === 'paid_live' || activeSessionOrders[0].payment_status === 'paid_demo' || (activeSessionOrders[0].cash_due !== undefined && activeSessionOrders[0].cash_due <= 0))
+                          {(['paid', 'paid_live', 'paid_demo', 'paid_cash', 'paid_online'].includes(activeSessionOrders[0].payment_status) || (activeSessionOrders[0].payment_mode === 'cash' && activeSessionOrders[0].cash_due <= 0))
                             ? 'PAID'
                             : 'PAYMENT PENDING'}
                         </span>
@@ -1080,11 +1080,11 @@ export const CustomerQrApp: React.FC = () => {
                         {activeSessionOrders[0].order_status}
                       </span>
                       <span className={`ml-1.5 px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase border ${
-                        (activeSessionOrders[0].payment_status === 'paid' || activeSessionOrders[0].payment_status === 'paid_live' || activeSessionOrders[0].payment_status === 'paid_demo' || (activeSessionOrders[0].cash_due !== undefined && activeSessionOrders[0].cash_due <= 0))
+                        (['paid', 'paid_live', 'paid_demo', 'paid_cash', 'paid_online'].includes(activeSessionOrders[0].payment_status) || (activeSessionOrders[0].payment_mode === 'cash' && activeSessionOrders[0].cash_due <= 0))
                           ? 'bg-emerald-950 text-emerald-400 border-emerald-500/30'
                           : 'bg-amber-950 text-amber-400 border-amber-500/30'
                       }`}>
-                        {(activeSessionOrders[0].payment_status === 'paid' || activeSessionOrders[0].payment_status === 'paid_live' || activeSessionOrders[0].payment_status === 'paid_demo' || (activeSessionOrders[0].cash_due !== undefined && activeSessionOrders[0].cash_due <= 0)) ? 'PAID' : 'PAYMENT PENDING'}
+                        {(['paid', 'paid_live', 'paid_demo', 'paid_cash', 'paid_online'].includes(activeSessionOrders[0].payment_status) || (activeSessionOrders[0].payment_mode === 'cash' && activeSessionOrders[0].cash_due <= 0)) ? 'PAID' : 'PAYMENT PENDING'}
                       </span>
                     </div>
                   </div>
@@ -1132,12 +1132,13 @@ export const CustomerQrApp: React.FC = () => {
 
                 <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar pr-1">
                   {activeSessionOrders.map(order => {
-                    const dueAmt = order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0));
-                    const isFullyPaid = order.payment_status === 'paid_live' || order.payment_status === 'paid' || order.payment_status === 'paid_demo' || dueAmt <= 0;
+                    const totalPaid = Number((order.online_amount || 0) + (order.cash_amount || 0));
+                    const isFullyPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(order.payment_status) || (order.payment_mode !== 'online' && order.payment_mode !== 'partial' && (order.cash_due ?? 0) <= 0);
+                    const dueAmt = order.cash_due ?? Math.max(0, order.grand_total - totalPaid);
 
                     // Timeline steps mapping
                     const statusSteps = [
-                      { id: 'pending', label: 'Order Placed' },
+                      { id: 'pending', label: (order.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(order.payment_status)) ? 'Awaiting Payment' : 'Order Placed' },
                       { id: 'accepted', label: 'Accepted' },
                       { id: 'cooking', label: 'Cooking' },
                       { id: 'ready', label: 'Ready' },
