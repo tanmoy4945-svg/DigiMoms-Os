@@ -1524,6 +1524,34 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     restoreSession();
 
+    // 2. NATIVE APP PUSH TOKEN REGISTRATION
+    // If running inside the DigiMoms Native Shell (WebView), register the Expo Push Token for lock-screen alerts.
+    const registerNativePushToken = async () => {
+      try {
+        const owner = currentOwner || (localStorage.getItem('digimoms_current_owner') ? JSON.parse(localStorage.getItem('digimoms_current_owner')!) : null);
+        const staff = currentStaff || (localStorage.getItem('digimoms_current_staff') ? JSON.parse(localStorage.getItem('digimoms_current_staff')!) : null);
+        const restId = owner?.id || staff?.restaurant_id;
+        
+        // window.expoPushToken is injected by the Native WebView shell
+        const token = (window as any).expoPushToken;
+        
+        if (restId && token && token !== "null" && token !== "undefined") {
+          console.log('[Native App] Attempting to register push token:', token, 'for restaurant:', restId);
+          await fetch('/api/register-fcm-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ restaurantId: restId, token })
+          });
+          console.log('[Native App] Push token registered successfully');
+        }
+      } catch (err) {
+        console.warn('[Native App] Push token registration failed:', err);
+      }
+    };
+
+    // Small delay to ensure injected token is available
+    setTimeout(registerNativePushToken, 3000);
+
     const handleFocusOrOnline = () => {
       console.log('[SaaSContext] Window focused or online: resynchronizing Supabase state...');
       // Use a background fetch to not block the UI

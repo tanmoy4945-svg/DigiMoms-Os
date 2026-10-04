@@ -16,7 +16,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 
 // Production Live Web Application URL
-const LIVE_WEB_APP_URL = 'https://ais-pre-5x3soypc4mbolsewuequye-904064987853.asia-southeast1.run.app';
+const LIVE_WEB_APP_URL = 'https://ais-dev-5x3soypc4mbolsewuequye-904064987853.asia-southeast1.run.app';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -111,6 +111,14 @@ export default function App() {
     webViewRef.current?.reload();
   };
 
+  const injectedJavaScript = `
+    (function() {
+      window.expoPushToken = "${pushToken || ''}";
+      window.isNativeApp = true;
+      true;
+    })();
+  `;
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#020617" />
@@ -127,6 +135,7 @@ export default function App() {
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={true}
+        injectedJavaScript={injectedJavaScript}
         onNavigationStateChange={(navState) => {
           setCanGoBack(navState.canGoBack);
         }}
