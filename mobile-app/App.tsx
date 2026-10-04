@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, FlatList, TextInput, Alert, Platform, ActivityIndicator, SafeAreaView, StatusBar } from 'react-native';
 import * as Notifications from 'expo-notifications';
