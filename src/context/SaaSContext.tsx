@@ -4580,6 +4580,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .from('restaurants')
           .update({ wallet_balance: newBal, updated_at: confirmedAtIso })
           .eq('id', restaurantId);
+
+        // Update local state immediately for 0ms lag in reports
+        setRestaurants(prev => prev.map(r => r.id === restaurantId ? { ...r, wallet_balance: newBal } : r));
+        if (currentOwner?.id === restaurantId) {
+          const updatedOwner = { ...currentOwner, wallet_balance: newBal };
+          setCurrentOwner(updatedOwner);
+          sessionStorage.setItem('digimoms_current_owner', JSON.stringify(updatedOwner));
+          localStorage.setItem('digimoms_current_owner', JSON.stringify(updatedOwner));
+        }
       }
     } catch (rErr) {
       console.warn("[Hotel Wallet] Restaurant balance update notice:", rErr);

@@ -12,12 +12,14 @@ import { GstReportsAnalytics } from './GstReportsAnalytics';
 import { Order } from '../../types';
 
 export const ReportsAnalytics: React.FC = () => {
-  const { currentOwner, orders, auditLogs, paymentTransactions, showToast } = useSaaS();
+  const { currentOwner, orders, auditLogs, paymentTransactions, deleteOrdersByMonth, showToast } = useSaaS();
 
   const [activeTab, setActiveTab] = useState<'sales' | 'transactions' | 'gst' | 'audit'>('sales');
   
   // Sales Filters
   const [salesFilterMode, setSalesFilterMode] = useState<'all' | 'cash' | 'demo' | 'online' | 'partial'>('all');
+  const [salesMonthFilter, setSalesMonthFilter] = useState<string>('all');
+  const [isDeletingMonthly, setIsDeletingMonthly] = useState<boolean>(false);
   
   // Transactions Filters
   const [txFilterMethod, setTxFilterMethod] = useState<'all' | 'online' | 'cash' | 'split' | 'demo'>('all');
@@ -32,6 +34,21 @@ export const ReportsAnalytics: React.FC = () => {
 
   const [selectedBillOrder, setSelectedBillOrder] = useState<Order | null>(null);
 
+  const monthOptions = useMemo(() => {
+    const options: { key: string; label: string }[] = [];
+    const now = new Date();
+    // Generate options for last 6 months (180 days coverage)
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const monthKey = `${year}-${month}`; // YYYY-MM (Local)
+      const label = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+      options.push({ key: monthKey, label });
+    }
+    return options;
+  }, []);
+
   if (!currentOwner) return null;
 
   // --- SALES DATA & REVENUE CALCULATION ---
@@ -39,71 +56,102 @@ export const ReportsAnalytics: React.FC = () => {
     return orders.filter(o => o.restaurant_id === currentOwner.id);
   }, [orders, currentOwner.id]);
 
-  // Valid non-cancelled orders that are either placed (cash/split/upi) or verified paid (online)
+  // Valid non-cancelled orders for display in the list (includes pending)
+  const displayOrders = useMemo(() => {
+    return restOrders.filter(o => o.order_status !== 'cancelled');
+  }, [restOrders]);
+
+  // Strictly PAID or partially paid orders for revenue calculation
+  const revenueOrders = useMemo(() => {
+    return displayOrders.filter(o => {
+      const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
+      const isPartialPaid = ['partially_paid', 'partial'].includes(o.payment_status);
+      
+      // If online and not paid at all, ignore as abandoned checkout
+      if (o.payment_mode === 'online' && !isPaid) return false;
+      
+      return isPaid || isPartialPaid;
+    });
+  }, [displayOrders]);
+
   const validOrders = useMemo(() => {
-    return restOrders.filter(o => {
-      if (o.order_status === 'cancelled') return false;
-      // If payment mode is online and payment has not been verified/paid, ignore as uncompleted gateway checkout
-      if (o.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-        return false;
+    return displayOrders.filter(o => {
+      // Month Filter using local date components to avoid UTC timezone shift bugs
+      if (salesMonthFilter !== 'all') {
+        const d = new Date(o.created_at);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const orderMonthKey = `${year}-${month}`; // YYYY-MM
+        
+        if (orderMonthKey !== salesMonthFilter) {
+          return false;
+        }
       }
       return true;
     });
-  }, [restOrders]);
+  }, [displayOrders, salesMonthFilter]);
 
   const filteredOrders = useMemo(() => {
     return validOrders.filter(o => salesFilterMode === 'all' || o.payment_mode === salesFilterMode);
   }, [validOrders, salesFilterMode]);
 
-  // 1. Online Revenue: All auto-verified online transactions (Razorpay, PayU, PhonePe, Demo, verified UPI)
-  const onlineSales = useMemo(() => {
-    return restOrders.reduce((sum, o) => {
-      if (o.order_status === 'cancelled') return sum;
-      if (o.payment_mode === 'online' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-        return sum + Number(o.online_amount || o.grand_total);
-      }
-      if (o.payment_mode === 'demo') {
-        return sum + Number(o.online_amount || o.grand_total);
-      }
-      if (o.payment_mode === 'partial') {
-        if (['paid_live', 'paid', 'paid_demo', 'paid_online', 'partially_paid'].includes(o.payment_status) || (o.online_amount || 0) > 0) {
-          return sum + Number(o.online_amount || 0);
-        }
-      }
-      if (o.payment_mode === 'upi_qr' && ['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-        return sum + Number(o.online_amount || o.grand_total);
-      }
-      return sum;
-    }, 0);
-  }, [restOrders]);
+  // Stats calculation should only look at the selected month AND only paid orders
+  const statsBaseOrders = useMemo(() => {
+    return validOrders.filter(o => {
+      const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
+      const isPartialPaid = ['partially_paid', 'partial'].includes(o.payment_status);
+      if (o.payment_mode === 'online' && !isPaid) return false;
+      return isPaid || isPartialPaid;
+    });
+  }, [validOrders]);
 
-  // 2. Cash Revenue: Confirmed cash payments received and marked by Owner or Staff
-  const cashSales = useMemo(() => {
-    return restOrders.reduce((sum, o) => {
-      if (o.order_status === 'cancelled') return sum;
-      if (o.payment_mode === 'cash') {
-        if (['paid_cash', 'paid', 'paid_live', 'paid_demo', 'paid_online'].includes(o.payment_status)) {
-          return sum + Number(o.cash_amount || o.grand_total);
-        } else if ((o.cash_amount || 0) > 0) {
-          return sum + Number(o.cash_amount || 0);
-        }
-      }
-      if (o.payment_mode === 'partial') {
-        if (['paid', 'paid_cash'].includes(o.payment_status)) {
-          const onlinePaid = Number(o.online_amount || 0);
-          return sum + Number(o.cash_amount || (o.grand_total - onlinePaid));
-        } else if ((o.cash_amount || 0) > 0) {
-          return sum + Number(o.cash_amount || 0);
-        }
-      }
-      return sum;
-    }, 0);
-  }, [restOrders]);
+  // Helper to sum revenue components from an order list
+  const calculateRevenue = (orderList: Order[]) => {
+    return orderList.reduce((acc, o) => {
+      const isPaidFull = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
+      const isPartial = ['partially_paid', 'partial'].includes(o.payment_status);
+      
+      if (!isPaidFull && !isPartial) return acc;
 
-  // 3. Total Realized Revenue: Strictly the actual collected money (Online Auto + Confirmed Cash)
-  const totalSales = useMemo(() => {
-    return onlineSales + cashSales;
-  }, [onlineSales, cashSales]);
+      const grandTotal = Number(o.grand_total || 0);
+      const onlinePaid = Number(o.online_amount || 0);
+      const cashPaid = Number(o.cash_amount || 0);
+
+      let online = onlinePaid;
+      let cash = cashPaid;
+
+      // For full payments where specific breakdown might be missing in older records
+      if (isPaidFull && online === 0 && cash === 0) {
+        if (o.payment_mode === 'online' || o.payment_mode === 'demo') {
+          online = grandTotal;
+        } else {
+          cash = grandTotal;
+        }
+      }
+
+      return {
+        online: acc.online + online,
+        cash: acc.cash + cash,
+        total: acc.total + online + cash
+      };
+    }, { online: 0, cash: 0, total: 0 });
+  };
+
+  const periodStats = useMemo(() => calculateRevenue(statsBaseOrders), [statsBaseOrders]);
+  const lifetimeStats = useMemo(() => calculateRevenue(revenueOrders), [revenueOrders]);
+
+  const periodOnlineSales = periodStats.online;
+  const periodCashSales = periodStats.cash;
+  const periodTotalSales = periodStats.total;
+
+  const onlineSales = lifetimeStats.online;
+  const cashSales = lifetimeStats.cash;
+
+  const lifetimeRevenue = useMemo(() => {
+    const calculatedTotal = onlineSales + cashSales;
+    const walletBalance = Number((currentOwner as any).wallet_balance || 0);
+    return Math.max(calculatedTotal, walletBalance);
+  }, [onlineSales, cashSales, currentOwner]);
 
   // 4. Pending Payment: Real uncollected cash due on active placed orders (excludes cancelled and abandoned online)
   const pendingSales = useMemo(() => {
@@ -326,6 +374,33 @@ export const ReportsAnalytics: React.FC = () => {
     showToast('Staff Audit Log CSV Downloaded!', 'success');
   };
 
+  const handleDeleteMonthlyOrders = async () => {
+    if (salesMonthFilter === 'all') {
+      showToast('Please select a specific month to delete orders.', 'error');
+      return;
+    }
+
+    const monthLabel = monthOptions.find(m => m.key === salesMonthFilter)?.label || salesMonthFilter;
+    const confirmMsg = `WARNING: Are you sure you want to PERMANENTLY delete all orders for ${monthLabel}? This will free up database storage but you will lose the individual order history for this month. Revenue stats will remain saved in your wallet.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeletingMonthly(true);
+    try {
+      const res = await deleteOrdersByMonth(currentOwner.id, salesMonthFilter);
+      if (res.success) {
+        showToast(`Successfully deleted ${res.count} orders for ${monthLabel}.`, 'success');
+        setSalesMonthFilter('all');
+      } else {
+        showToast(`Deletion failed: ${res.error}`, 'error');
+      }
+    } catch (err) {
+      showToast('An error occurred while deleting orders.', 'error');
+    } finally {
+      setIsDeletingMonthly(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header & Main Tab Navigation */}
@@ -416,52 +491,93 @@ export const ReportsAnalytics: React.FC = () => {
                 <span>Total Business Volume</span>
                 <DollarSign className="w-4 h-4 text-emerald-400" />
               </div>
-              <div className="text-2xl font-extrabold text-white">₹{totalSales.toLocaleString('en-IN')}</div>
-              <div className="text-[11px] text-emerald-400 font-medium">{totalOrdersCount} Total Orders</div>
+              <div className="text-2xl font-extrabold text-white">₹{lifetimeRevenue.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-emerald-400 font-medium">Lifetime Persistent Total</div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
-              <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
-                <span>Online Revenue (Razorpay)</span>
+            <div className="p-5 rounded-2xl bg-slate-900 border border-blue-500/30 bg-blue-950/10 space-y-1">
+              <div className="text-xs font-semibold text-blue-300 flex items-center justify-between">
+                <span>{salesMonthFilter === 'all' ? '180D Online Sales' : 'Monthly Online Revenue'}</span>
                 <CreditCard className="w-4 h-4 text-blue-400" />
               </div>
-              <div className="text-2xl font-extrabold text-blue-400">₹{onlineSales.toLocaleString('en-IN')}</div>
+              <div className="text-2xl font-extrabold text-blue-400">₹{periodOnlineSales.toLocaleString('en-IN')}</div>
               <div className="text-[11px] text-slate-400 font-medium">Verified Online Payments</div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
-              <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
-                <span>Cash Revenue Collected</span>
+            <div className="p-5 rounded-2xl bg-slate-900 border border-emerald-500/30 bg-emerald-950/10 space-y-1">
+              <div className="text-xs font-semibold text-emerald-300 flex items-center justify-between">
+                <span>{salesMonthFilter === 'all' ? '180D Cash Sales' : 'Monthly Cash Revenue'}</span>
                 <ShoppingBag className="w-4 h-4 text-emerald-400" />
               </div>
-              <div className="text-2xl font-extrabold text-emerald-400">₹{cashSales.toLocaleString('en-IN')}</div>
+              <div className="text-2xl font-extrabold text-emerald-400">₹{periodCashSales.toLocaleString('en-IN')}</div>
               <div className="text-[11px] text-slate-400 font-medium">Confirmed Cash Received</div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-slate-900 border border-amber-500/40 bg-amber-950/20 space-y-1">
-              <div className="text-xs font-semibold text-amber-300 flex items-center justify-between">
-                <span>Pending / Cash Due</span>
-                <AlertCircle className="w-4 h-4 text-amber-400" />
+            <div className="p-5 rounded-2xl bg-slate-900 border border-indigo-500/40 bg-indigo-950/20 space-y-1">
+              <div className="text-xs font-semibold text-indigo-300 flex items-center justify-between">
+                <span>{salesMonthFilter === 'all' ? 'Total Period Revenue' : 'Monthly Total Revenue'}</span>
+                <TrendingUp className="w-4 h-4 text-indigo-400" />
               </div>
-              <div className="text-2xl font-extrabold text-amber-400">₹{pendingSales.toLocaleString('en-IN')}</div>
-              <div className="text-[11px] text-amber-300/80 font-medium">Uncollected Cash Due</div>
+              <div className="text-2xl font-extrabold text-indigo-400">₹{periodTotalSales.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-indigo-300/80 font-medium">
+                {salesMonthFilter === 'all' ? 'Total of last 6 months' : `Total for ${monthOptions.find(m => m.key === salesMonthFilter)?.label}`}
+              </div>
             </div>
           </div>
 
-          {/* Mode Filters */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 font-medium mr-1">Filter Payment Mode:</span>
-            {(['all', 'cash', 'online', 'partial', 'demo'] as const).map(mode => (
+          {/* Filters Row */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Month Selector */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium whitespace-nowrap">Selected Month:</span>
+                <select
+                  value={salesMonthFilter}
+                  onChange={(e) => setSalesMonthFilter(e.target.value)}
+                  className="bg-slate-950 text-white text-xs font-bold px-3 py-2 rounded-xl border border-slate-800 focus:border-blue-500 outline-none transition-all"
+                >
+                  <option value="all">All 180 Days (6 Months)</option>
+                  {monthOptions.map(m => (
+                    <option key={m.key} value={m.key}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Mode Filters */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium mr-1">Payment Mode:</span>
+                {(['all', 'cash', 'online', 'partial'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setSalesFilterMode(mode)}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all ${
+                      salesFilterMode === mode ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Storage Cleanup Action */}
+            {salesMonthFilter !== 'all' && (
               <button
-                key={mode}
-                onClick={() => setSalesFilterMode(mode)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase transition-all ${
-                  salesFilterMode === mode ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
+                onClick={handleDeleteMonthlyOrders}
+                disabled={isDeletingMonthly}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/30 text-xs font-bold transition-all disabled:opacity-50"
               >
-                {mode}
+                {isDeletingMonthly ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Purging Storage...
+                  </>
+                ) : (
+                  <>
+                    <X className="w-3.5 h-3.5" /> Purge {monthOptions.find(m => m.key === salesMonthFilter)?.label} Orders
+                  </>
+                )}
               </button>
-            ))}
+            )}
           </div>
 
           {/* Sales Orders Table */}

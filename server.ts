@@ -5,6 +5,30 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
+import admin from 'firebase-admin';
+
+// Initialize Firebase Admin SDK
+try {
+  const serviceAccountPath = path.join(process.cwd(), 'firebase-admin-config.json');
+  if (fs.existsSync(serviceAccountPath)) {
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+    (admin as any).initializeApp({
+      credential: (admin as any).credential.cert(serviceAccount)
+    });
+    console.log('[Firebase Admin] Initialized successfully');
+  } else if (process.env.FIREBASE_CONFIG) {
+    // Fallback for production hosting without the JSON file
+    const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+    (admin as any).initializeApp({
+      credential: (admin as any).credential.cert(serviceAccount)
+    });
+    console.log('[Firebase Admin] Initialized via Environment Variable');
+  } else {
+    console.warn('[Firebase Admin] Warning: No Firebase configuration found. Push notifications will be disabled.');
+  }
+} catch (err) {
+  console.warn('[Firebase Admin] Initialization failed:', err);
+}
 
 const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://qjkoeehgkfnailgmhyjs.supabase.co';
 const SUPABASE_URL = String(rawSupabaseUrl)
@@ -54,6 +78,61 @@ async function startServer() {
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // Helper to send push notifications
+  async function sendPushNotification(restaurantId: string, title: string, body: string, data: any = {}) {
+    try {
+      const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
+      const tokens = fcmTokens[restaurantId] || [];
+      
+      if (tokens.length === 0) return;
+
+      const message = {
+        notification: { title, body },
+        data: {
+          ...data,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK' // Standard for some frameworks
+        },
+        tokens: tokens,
+      };
+
+      const response = await (admin as any).messaging().sendEachForMulticast(message);
+      console.log(`[Push Notification] Sent ${response.successCount} messages successfully`);
+      
+      // Clean up invalid tokens
+      if (response.failureCount > 0) {
+        const failedTokens: string[] = [];
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success && (resp.error?.code === 'messaging/registration-token-not-registered' || resp.error?.code === 'messaging/invalid-registration-token')) {
+            failedTokens.push(tokens[idx]);
+          }
+        });
+        
+        if (failedTokens.length > 0) {
+          fcmTokens[restaurantId] = tokens.filter(t => !failedTokens.includes(t));
+          writeJsonFile('fcm_tokens.json', fcmTokens);
+        }
+      }
+    } catch (err) {
+      console.error('[Push Notification] Error sending message:', err);
+    }
+  }
+
+  // API Route: Register FCM Token
+  app.post('/api/fcm/register', (req, res) => {
+    const { restaurantId, token } = req.body;
+    if (!restaurantId || !token) return res.status(400).json({ success: false, message: 'Missing params' });
+
+    const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
+    if (!fcmTokens[restaurantId]) fcmTokens[restaurantId] = [];
+    
+    if (!fcmTokens[restaurantId].includes(token)) {
+      fcmTokens[restaurantId].push(token);
+      writeJsonFile('fcm_tokens.json', fcmTokens);
+    }
+    
+    res.json({ success: true });
+  });
 
   // API Route: Persistent CEO Payment Config
   app.get('/api/ceo/payment-config', (req, res) => {
@@ -767,6 +846,17 @@ async function startServer() {
 
       console.log(`[syncPaymentToSupabase SUCCESS] Order ${orderId} marked ${newPaymentStatus}, online_amount=₹${newOnlineAmount}, cash_due=₹${newCashDue}`);
 
+      // 1.5 Trigger Mobile Push Notification
+      const effectiveRestId = restaurantId || orderRecord.restaurant_id;
+      if (effectiveRestId) {
+        sendPushNotification(
+          effectiveRestId,
+          `💳 Payment Received: ₹${amount || grandTotal}`,
+          `Order #${orderRecord.order_number || ''} for Table ${orderRecord.table_number || ''} has been PAID online.`,
+          { orderId: orderId, type: 'payment_success' }
+        );
+      }
+
       // 2. Authoritative Update in local orders.json
       let itemsList = orderRecord.items || [];
       try {
@@ -784,8 +874,6 @@ async function startServer() {
       } catch (jsonErr) {
         console.warn('[syncPaymentToSupabase] orders.json update notice:', jsonErr);
       }
-
-      const effectiveRestId = restaurantId || dbOrd?.restaurant_id || orderRecord.restaurant_id;
 
       // Prepare final complete order object with items
       const finalOrderObj = {
@@ -2086,6 +2174,38 @@ Keep response concise, clear, friendly, and formatted with clean bullet points o
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Supabase Realtime Listener for Push Notifications
+  serverSupabase
+    .channel('server-push-notifications')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, async (payload) => {
+      const newOrder = payload.new;
+      if (newOrder && newOrder.restaurant_id) {
+        const isCash = newOrder.payment_mode === 'cash' || newOrder.payment_mode === 'partial';
+        const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
+        const body = `Table ${newOrder.table_number || 'Takeaway'} (Order #${newOrder.order_number}): ₹${newOrder.grand_total}. Check your dashboard!`;
+        
+        sendPushNotification(newOrder.restaurant_id, title, body, { 
+          orderId: newOrder.id, 
+          type: 'new_order',
+          restaurant_id: newOrder.restaurant_id 
+        });
+      }
+    })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_waiter' }, async (payload) => {
+      const newCall = payload.new;
+      if (newCall && newCall.restaurant_id && newCall.status === 'pending') {
+        const title = '👋 Waiter Called!';
+        const body = `Table ${newCall.table_number} is requesting: ${newCall.request_type.toUpperCase()}`;
+        
+        sendPushNotification(newCall.restaurant_id, title, body, { 
+          callId: newCall.id, 
+          type: 'call_waiter',
+          restaurant_id: newCall.restaurant_id 
+        });
+      }
+    })
+    .subscribe();
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
