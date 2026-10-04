@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "112968429598",
+    "project_id": "smart-restaurant-app-be13a",
+    "storage_bucket": "smart-restaurant-app-be13a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:112968429598:android:03a0ee7f09c6543985be0f",
+        "android_client_info": {
+          "package_name": "com.digimoms.manager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBg8vy7a7nZTQ475TVdn-Dau3ebgCqZiR0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
