@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "DigiMoms Manager",
-    "slug": "smart-restaurant-app",
+    "slug": "digimoms-manager",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -23,10 +23,11 @@
         "backgroundColor": "#020617"
       },
       "package": "com.digimoms.manager",
-      "googleServicesFile": "./google-services.json"
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "permissions": [
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "INTERNET"
+      ]
     },
     "plugins": [
       "expo-notifications"

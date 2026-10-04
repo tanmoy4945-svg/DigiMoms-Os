@@ -12,8 +12,8 @@ async function inspectTables() {
   const t2 = await supabase.from('payment_transactions').select('*').limit(3);
   console.log('payment_transactions:', t2.data, 'Error:', t2.error);
 
-  const t3 = await supabase.from('restaurants').select('*').limit(1);
-  console.log('restaurants sample keys:', t3.data ? Object.keys(t3.data[0] || {}) : null);
+  const t4 = await supabase.from('staff').select('*').limit(1);
+  console.log('staff sample keys:', t4.data ? Object.keys(t4.data[0] || {}) : null);
 }
 
 inspectTables();

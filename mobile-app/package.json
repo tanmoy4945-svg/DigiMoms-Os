@@ -25,6 +25,7 @@
     "react-native-gesture-handler": "~2.14.0",
     "react-native-reanimated": "~3.6.2",
     "react-native-svg": "14.1.0",
+    "react-native-webview": "13.6.4",
     "lucide-react-native": "^0.322.0"
   },
   "devDependencies": {
