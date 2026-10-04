@@ -1,0 +1,596 @@
+export type RestaurantStatus = 'trial' | 'active' | 'expired' | 'suspended' | 'maintenance' | 'archived' | 'inactive';
+export type PaymentMode = 'demo' | 'live';
+export type UserRole = 'ceo' | 'owner' | 'waiter' | 'kitchen' | 'customer';
+export type Language = 'en' | 'bn' | 'hi';
+
+export type TableStatus = 'available' | 'occupied' | 'cleaning' | 'reserved' | 'maintenance';
+export type SessionStatus = 'active' | 'closed';
+export type OrderStatus = 'pending' | 'accepted' | 'cooking' | 'ready' | 'served' | 'completed' | 'cancelled';
+export type OrderPaymentMode = 'cash' | 'demo' | 'online' | 'partial' | 'upi_qr';
+export type OrderPaymentStatus = 'pending' | 'payment_verification_pending' | 'paid_demo' | 'paid_live' | 'paid_cash' | 'partial' | 'partially_paid' | 'failed' | 'paid';
+export type RequestType = 'call' | 'water' | 'spoon' | 'tissue' | 'cleaning' | 'bill' | 'help' | 'payment';
+export type CallStatus = 'pending' | 'accepted' | 'completed';
+
+export interface CouponConfig {
+  id: string;
+  code: string;
+  discount_type: 'percent' | 'flat';
+  discount_value: number;
+  min_order_amount?: number;
+  is_active: boolean;
+}
+
+export interface Restaurant {
+  id: string;
+  name: string;
+  slug: string;
+  owner_name: string;
+  owner_mobile: string;
+  contact_mobile?: string;
+  password_hash?: string;
+  logo: string;
+  banner: string;
+  address: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  maps_location_url?: string;
+  contact_email?: string;
+  whatsapp_number?: string;
+  gst?: string;
+  fssai?: string;
+  business_hours: string;
+  weekly_closing_day?: string;
+  short_description?: string;
+  detailed_description?: string;
+  about_us?: string;
+  enabled_services?: string[];
+  privacy_policy?: string;
+  terms_conditions?: string;
+  refund_cancellation_policy?: string;
+  shipping_delivery_policy?: string;
+  contact_us_info?: string;
+  archived_revenue?: number;
+  archived_orders_count?: number;
+  archived_revenue_by_year?: Record<string, number>;
+  payment_mode: PaymentMode; // 'demo' | 'live'
+  live_gateway?: 'razorpay' | 'phonepe' | 'payu';
+  razorpay_key: string;
+  razorpay_secret: string;
+  phonepe_merchant_id?: string;
+  phonepe_salt_key?: string;
+  phonepe_salt_index?: string;
+  phonepe_env?: 'SANDBOX' | 'PRODUCTION';
+  payu_merchant_key?: string;
+  payu_merchant_salt?: string;
+  payu_env?: 'TEST' | 'LIVE';
+  gateway_verified?: boolean;
+  gateway_verified_at?: string;
+  gateway_status_message?: string;
+  // Tax & Extra Charges Settings
+  enable_gst?: boolean;
+  gst_percentage?: number;
+  enable_packaging_charge?: boolean;
+  packaging_charge_amount?: number;
+  enable_service_charge?: boolean;
+  service_charge_percentage?: number;
+  // Online Payment Discount & Coupons
+  enable_online_discount?: boolean;
+  online_discount_percentage?: number;
+  enable_coupons?: boolean;
+  coupons?: CouponConfig[];
+  // Allowed Payment Options & Methods
+  enable_cash_payment?: boolean;
+  enable_online_payment?: boolean;
+  enable_split_payment?: boolean;
+  enable_upi_qr?: boolean;
+  upi_id?: string;
+  upi_name?: string;
+  upi_qr_image?: string;
+  enable_gateway_payment?: boolean;
+  status: RestaurantStatus;
+  trial_start: string;
+  trial_end: string;
+  subscription_start: string;
+  subscription_end: string;
+  monthly_subscription_fee?: number;
+  trial_days?: number;
+  trial_status?: 'off' | 'active' | 'expired';
+  trial_granted_by?: string;
+  free_offer_status?: 'off' | 'active' | 'expired';
+  free_offer_days?: number;
+  free_offer_start?: string;
+  free_offer_end?: string;
+  free_offer_granted_by?: string;
+  custom_domain?: string;
+  custom_domain_verified?: boolean;
+  last_password_change?: string;
+  theme: string;
+  language: Language;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StaffPermissions {
+  can_view_menu?: boolean;
+  can_edit_menu?: boolean;
+  can_view_tables?: boolean;
+  can_edit_tables?: boolean;
+  can_view_orders?: boolean;
+  can_edit_orders?: boolean;
+  can_view_reports?: boolean;
+  can_view_settings?: boolean;
+  can_edit_settings?: boolean;
+  can_view_staff?: boolean;
+  can_edit_staff?: boolean;
+}
+
+export interface Staff {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  mobile: string;
+  password_hash?: string;
+  last_password_change?: string;
+  role: 'waiter' | 'kitchen' | 'manager';
+  status: 'active' | 'disabled';
+  permissions?: StaffPermissions;
+  last_login?: string;
+  created_at: string;
+}
+
+export interface CeoStaffPermissions {
+  // 1. Manage Tenants & Restaurants
+  can_view_restaurants?: boolean;     // View restaurant directory, tenant list & metrics
+  can_add_restaurants?: boolean;      // Add new restaurant tenant & owner credentials (CREATE)
+  can_edit_restaurants?: boolean;     // Edit restaurant profile, phone, address, fee, suspend/resume (EDIT)
+  can_setup_restaurants?: boolean;    // Full setup: tables, menu categories, dishes, QR codes, website & staff (SETUP)
+  can_manage_free_plans?: boolean;    // Grant promotional free days, trial extensions, monthly renewals (RENEW)
+  can_delete_restaurants?: boolean;   // Archive, permanently delete, or reset tenant data (DELETE)
+
+  // 2. Subscriptions & Renewal Plans
+  can_view_subscriptions?: boolean;   // View subscription plans, expiry alerts & history (VIEW)
+  can_edit_subscriptions?: boolean;   // Renew monthly plans, upgrade/downgrade subscription tiers (EDIT)
+  can_delete_subscriptions?: boolean; // Cancel or terminate active subscriptions (DELETE)
+
+  // 3. Restaurant Agreements & Legal Contracts
+  can_view_agreements?: boolean;      // View signed agreements, contract terms & status (VIEW)
+  can_create_agreements?: boolean;    // Generate new official legal agreement for a restaurant (CREATE)
+  can_edit_agreements?: boolean;      // Edit agreement clauses, custom terms & sign agreements (EDIT)
+  can_delete_agreements?: boolean;    // Revoke or delete legal agreement documents (DELETE)
+
+  // 4. Subscription Gateway & Payments
+  can_view_payments?: boolean;        // View subscription payments, revenue metrics & logs (VIEW)
+  can_edit_payments?: boolean;        // Configure Razorpay/PhonePe API keys, secrets, live mode (EDIT)
+  can_delete_payments?: boolean;      // Clear test transactions or transaction history (DELETE)
+
+  // 5. CEO Team & Staff Management
+  can_view_team?: boolean;            // View CEO staff directory, roles, phone & activity (VIEW)
+  can_add_team?: boolean;             // Add new CEO staff member accounts (CREATE)
+  can_edit_team?: boolean;            // Edit staff permissions, role, change staff passwords, toggle status (EDIT)
+  can_delete_team?: boolean;          // Permanently delete staff member accounts (DELETE)
+  can_manage_team?: boolean;          // Backwards-compatible alias for full team management
+
+  // 6. Reports & Financial Analytics
+  can_view_reports?: boolean;         // View SaaS income charts, restaurant turnover & analytics (VIEW)
+  can_edit_reports?: boolean;         // Filter periods, re-calculate analytics & export to CSV/Excel/PDF (EDIT / EXPORT)
+  can_delete_reports?: boolean;       // Clear or reset analytics caches (DELETE)
+
+  // 7. Supabase SQL Console & Database
+  can_view_sql?: boolean;             // View SQL schema, tables, columns & migration records (VIEW)
+  can_edit_sql?: boolean;             // Run SQL queries, execute migrations & alter tables (EDIT)
+  can_delete_sql?: boolean;           // Drop tables, truncate data, destructive SQL operations (DELETE)
+
+  // 8. Storage & System Assets
+  can_view_storage?: boolean;         // View storage buckets, media assets & storage usage (VIEW)
+  can_edit_storage?: boolean;         // Upload system media, configure buckets & edit settings (EDIT)
+  can_delete_storage?: boolean;       // Purge cache, delete files & empty media buckets (DELETE)
+
+  // 9. System Snapshot & Backup
+  can_view_backup?: boolean;          // View system backup history & snapshots (VIEW)
+  can_create_backup?: boolean;        // Trigger instant full system backup & download JSON (CREATE)
+  can_edit_backup?: boolean;          // Restore from snapshot, upload backup file (EDIT)
+  can_delete_backup?: boolean;        // Delete old backup snapshots (DELETE)
+
+  // 10. Customer Feedback & Reviews
+  can_view_feedback?: boolean;        // View customer reviews, star ratings & complaints (VIEW)
+  can_edit_feedback?: boolean;        // Respond to customer reviews & mark as resolved (EDIT)
+  can_delete_feedback?: boolean;      // Delete spam reviews & remove customer complaints (DELETE)
+
+  // 11. System Audit Trail Logs
+  can_view_logs?: boolean;            // View real-time security events & audit trail (VIEW)
+  can_edit_logs?: boolean;            // Filter logs, search logs & export audit trail (EDIT)
+  can_delete_logs?: boolean;          // Clear or purge security audit trail logs (DELETE)
+}
+
+export interface CeoStaffMember {
+  id: string;
+  name: string;
+  mobile: string;
+  password_hash: string;
+  role: 'manager' | 'support' | 'billing';
+  status: 'active' | 'disabled';
+  permissions: CeoStaffPermissions;
+  last_password_change?: string;
+  last_login?: string;
+  created_at: string;
+}
+
+export interface Table {
+  id: string;
+  restaurant_id: string;
+  table_number: string;
+  short_code: string;
+  qr_url: string;
+  status: TableStatus;
+  current_session_id?: string;
+  created_at: string;
+}
+
+export interface TableSession {
+  id: string;
+  restaurant_id: string;
+  table_id: string;
+  table_number: string;
+  customer_mobile?: string;
+  device_fingerprint?: string;
+  join_pin?: string; // 4-digit Friend Code
+  friend_code?: string; // Alias for join_pin
+  members_count?: number; // Up to 4 customers
+  status: SessionStatus;
+  started_at: string;
+  ended_at?: string;
+}
+
+export interface MenuCategory {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  sort_order: number;
+  is_hidden: boolean;
+}
+
+export interface MenuItem {
+  id: string;
+  restaurant_id: string;
+  category_id: string;
+  name: string;
+  description: string;
+  price: number;
+  image_url: string;
+  prep_time: number; // in minutes
+  is_veg: boolean;
+  is_available: boolean;
+  is_popular: boolean;
+  is_recommended: boolean;
+  spicy_level: number; // 0-3
+  sort_order: number;
+}
+
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  menu_id: string;
+  menu_name: string;
+  quantity: number;
+  price: number;
+  special_instructions?: string;
+}
+
+export type OfflinePaymentMethod = 'cash' | 'upi' | 'qr' | 'card' | 'other';
+
+export interface OfflinePaymentRecord {
+  id: string;
+  method: OfflinePaymentMethod;
+  amount: number;
+  reference?: string;
+  note?: string;
+  recorded_by?: string;
+  recorded_at: string;
+}
+
+export interface Order {
+  id: string;
+  restaurant_id: string;
+  table_id?: string;
+  session_id: string;
+  table_number: string;
+  order_number: string; // e.g. #001
+  payment_mode: OrderPaymentMode;
+  payment_status: OrderPaymentStatus;
+  online_amount?: number;
+  cash_amount?: number;
+  cash_due?: number;
+  offline_payments?: OfflinePaymentRecord[];
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  razorpay_signature?: string;
+  payu_txnid?: string;
+  payu_mihpayid?: string;
+  payu_hash?: string;
+  upi_ref_number?: string;
+  upi_id?: string;
+  notes?: string;
+  order_status: OrderStatus;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  packaging_charge?: number;
+  service_charge?: number;
+  online_discount?: number;
+  coupon_discount?: number;
+  coupon_code?: string;
+  grand_total: number;
+  customer_mobile?: string;
+  items: OrderItem[];
+  verified_by?: string;
+  verified_staff_id?: string;
+  verified_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Payment {
+  id: string;
+  restaurant_id: string;
+  order_id: string;
+  amount: number;
+  mode: OrderPaymentMode;
+  payment_status: OrderPaymentStatus;
+  transaction_id: string;
+  created_at: string;
+}
+
+export interface PaymentTransaction {
+  id: string;
+  restaurant_id: string;
+  order_id: string;
+  table_number: string;
+  order_number: string;
+  payment_method: 'online' | 'cash' | 'partial' | 'upi_qr' | 'upi' | 'qr' | 'card' | 'other';
+  amount: number;
+  transaction_id: string;
+  status: 'paid' | 'pending' | 'partially_paid' | 'failed';
+  actor_id?: string;
+  actor_type?: 'waiter' | 'owner' | 'customer' | 'system' | 'staff';
+  actor_name?: string;
+  created_at: string;
+}
+
+export interface CustomerFeedback {
+  id: string;
+  restaurant_id: string;
+  order_id?: string;
+  table_number?: string;
+  food_rating: number; // 1-5
+  service_rating: number;
+  cleanliness_rating: number;
+  overall_rating: number;
+  comment: string;
+  customer_name?: string;
+  customer_mobile?: string;
+  guest_name?: string;
+  is_public?: boolean;
+  created_at: string;
+}
+
+export interface CallWaiterRequest {
+  id: string;
+  restaurant_id: string;
+  session_id: string;
+  table_number: string;
+  request_type: RequestType;
+  status: CallStatus;
+  accepted_by?: string;
+  accepted_by_name?: string;
+  accepted_at?: string;
+  created_at: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  restaurant_id: string;
+  user_role: string;
+  user_name: string;
+  action: string;
+  details: string;
+  created_at: string;
+}
+
+export interface AuditLog {
+  id: string;
+  restaurant_id?: string;
+  order_id?: string;
+  table_id?: string;
+  session_id?: string;
+  actor_type: 'ceo' | 'owner' | 'staff' | 'customer';
+  actor_id?: string;
+  actor_name: string;
+  actor_role?: string;
+  action: string;
+  previous_status?: string;
+  new_status?: string;
+  description?: string;
+  ip?: string;
+  device?: string;
+  created_at: string;
+}
+
+export interface SubscriptionHistory {
+  id: string;
+  restaurant_id: string;
+  plan_name?: string;
+  amount: number;
+  amount_paid?: number;
+  payment_date?: string;
+  transaction_id?: string;
+  duration_months?: number;
+  days_added?: number;
+  payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  start_date?: string;
+  end_date?: string;
+  previous_expiry?: string;
+  new_expiry?: string;
+  payment_status: string;
+  payment_mode?: string;
+  subscription_type?: string;
+  granted_by?: string;
+  reason?: string;
+  created_at: string;
+}
+
+export interface CeoRazorpayConfig {
+  razorpay_key_id: string;
+  razorpay_key_secret: string;
+  mode: 'demo' | 'live';
+  primary_gateway?: 'razorpay' | 'phonepe' | 'payu' | 'demo';
+  phonepe_merchant_id?: string;
+  phonepe_salt_key?: string;
+  phonepe_salt_index?: string;
+  phonepe_env?: 'SANDBOX' | 'PRODUCTION';
+  phonepe_verified?: boolean;
+  phonepe_verified_at?: string;
+  razorpay_verified?: boolean;
+  razorpay_verified_at?: string;
+  payu_merchant_key?: string;
+  payu_merchant_salt?: string;
+  payu_env?: 'TEST' | 'LIVE';
+  payu_verified?: boolean;
+  payu_verified_at?: string;
+}
+
+export type CeoPaymentConfig = CeoRazorpayConfig;
+
+export interface RestaurantWebsiteSettings {
+  id?: string;
+  restaurant_id: string;
+  about_us?: string;
+  description?: string;
+  cover_banner?: string;
+  google_map_embed_url?: string;
+  phone?: string;
+  whatsapp?: string;
+  email?: string;
+  opening_time?: string;
+  closing_time?: string;
+  weekly_closed_day?: string;
+  gallery_urls?: string[];
+  facilities?: string[];
+  special_offers?: { title: string; code?: string; discount?: string; description?: string }[];
+  booking_info?: string;
+  website_url?: string;
+  custom_domain?: string;
+  custom_domain_verified?: boolean;
+  seo_title?: string;
+  seo_description?: string;
+  seo_keywords?: string;
+  updated_at?: string;
+}
+
+export interface RestaurantServiceItem {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  description: string;
+  price: number;
+  image?: string;
+  duration?: string;
+  availability: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface RestaurantPricingItem {
+  id: string;
+  restaurant_id: string;
+  service_name: string;
+  price: number;
+  offer_price?: number;
+  unit: string;
+  description?: string;
+  show_price: boolean;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface RestaurantLegalPages {
+  id?: string;
+  restaurant_id: string;
+  privacy_policy?: string;
+  terms_conditions?: string;
+  refund_policy?: string;
+  cancellation_policy?: string;
+  shipping_policy?: string;
+  return_policy?: string;
+  grievance_contact?: string;
+  disclaimer?: string;
+  updated_at?: string;
+}
+
+export interface RestaurantSocialLinks {
+  id?: string;
+  restaurant_id: string;
+  instagram?: string;
+  facebook?: string;
+  twitter?: string;
+  youtube?: string;
+  linkedin?: string;
+  google_business?: string;
+  updated_at?: string;
+}
+
+
+export type NotificationEventType = 
+  | 'new_order'
+  | 'order_accepted'
+  | 'order_rejected'
+  | 'cooking'
+  | 'kitchen_ready'
+  | 'order_served'
+  | 'order_completed'
+  | 'order_cancelled'
+  | 'call_waiter'
+  | 'cash_request'
+  | 'payment_confirmed'
+  | 'online_paid'
+  | 'payment_failed'
+  | 'customer_joined'
+  | 'customer_request'
+  | 'general';
+
+export interface AppNotification {
+  id: string;
+  restaurant_id?: string;
+  type: NotificationEventType;
+  title: string;
+  body: string;
+  timestamp: string;
+  read: boolean;
+  order_id?: string;
+  table_number?: string;
+  target_roles?: ('owner' | 'waiter' | 'kitchen' | 'ceo' | 'customer')[];
+}
+
+export interface DigiMomsSubscriptionPayment {
+  id: string;
+  restaurant_id: string;
+  restaurant_name: string;
+  subscription_id: string;
+  gateway: 'phonepe' | 'razorpay' | 'demo';
+  transaction_id: string;
+  amount: number;
+  billing_period: string; // e.g. '1_month'
+  status: 'pending' | 'paid' | 'failed' | 'cancelled';
+  payment_mode: 'demo' | 'live';
+  gateway_reference?: string;
+  checksum_verified?: boolean;
+  created_at: string;
+  confirmed_at?: string;
+  error_message?: string;
+}
+
+

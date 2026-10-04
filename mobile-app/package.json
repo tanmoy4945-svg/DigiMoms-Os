@@ -9,10 +9,10 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "expo": "~50.0.0",
+    "expo": "~50.0.14",
     "expo-status-bar": "~1.11.1",
     "react": "18.2.0",
-    "react-native": "0.73.2",
+    "react-native": "0.73.6",
     "expo-notifications": "~0.27.6",
     "expo-device": "~5.9.3",
     "expo-constants": "~15.4.5",
@@ -24,7 +24,7 @@
     "react-native-screens": "~3.29.0",
     "react-native-gesture-handler": "~2.14.0",
     "react-native-reanimated": "~3.6.2",
-    "@react-native-community/masked-view": "0.1.11",
+    "react-native-svg": "14.1.0",
     "lucide-react-native": "^0.322.0",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.2.1"
