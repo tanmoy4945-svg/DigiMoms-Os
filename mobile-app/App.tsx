@@ -123,11 +123,12 @@ export default function App() {
   const registerTokenOnServer = async (restaurantId: string) => {
     if (!expoPushToken) return;
     try {
-      await fetch(`${SERVER_URL}/api/fcm/register`, {
+      await fetch(`${SERVER_URL}/api/register-fcm-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ restaurantId, token: expoPushToken }),
+        body: JSON.stringify({ restaurant_id: restaurantId, token: expoPushToken }),
       });
+      console.log('FCM Token registered successfully on server');
     } catch (err) {
       console.warn('Error registering token on server:', err);
     }

@@ -469,6 +469,27 @@ async function startServer() {
     res.json({ success: true, data: tx });
   });
 
+  // API Route: Register FCM Token for Push Notifications
+  app.post('/api/register-fcm-token', (req, res) => {
+    const { restaurant_id, token } = req.body;
+    if (!restaurant_id || !token) {
+      return res.status(400).json({ error: 'Missing restaurant_id or token' });
+    }
+
+    const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
+    if (!fcmTokens[restaurant_id]) {
+      fcmTokens[restaurant_id] = [];
+    }
+
+    if (!fcmTokens[restaurant_id].includes(token)) {
+      fcmTokens[restaurant_id].push(token);
+      writeJsonFile('fcm_tokens.json', fcmTokens);
+      console.log(`[FCM] Token registered for restaurant: ${restaurant_id}`);
+    }
+
+    res.json({ success: true });
+  });
+
   // API Route: Create PhonePe Payment Request for DigiMoms Subscriptions
   app.post('/api/phonepe/create-payment', async (req, res) => {
     try {
