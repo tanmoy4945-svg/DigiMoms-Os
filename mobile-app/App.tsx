@@ -156,6 +156,24 @@ export default function App() {
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={true}
         injectedJavaScript={injectedJavaScript}
+        onMessage={(event) => {
+          try {
+            const data = JSON.parse(event.nativeEvent.data);
+            if (data.type === 'NATIVE_NOTIFICATION') {
+              Notifications.scheduleNotificationAsync({
+                content: {
+                  title: data.title || '🔔 DigiMoms Alert',
+                  body: data.body || '',
+                  sound: true,
+                  vibrate: [0, 250, 250, 250],
+                },
+                trigger: null, // show immediately
+              });
+            }
+          } catch (e) {
+            // Ignore non-json messages
+          }
+        }}
         onNavigationStateChange={(navState) => {
           setCanGoBack(navState.canGoBack);
         }}

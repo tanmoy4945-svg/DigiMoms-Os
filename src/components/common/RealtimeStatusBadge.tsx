@@ -110,6 +110,17 @@ export const RealtimeStatusBadge: React.FC = () => {
 
   const handleEnablePush = async () => {
     unlockAudioContext();
+    const isNative = typeof window !== 'undefined' && ((window as any).ReactNativeWebView || (window as any).isNativeApp);
+    if (isNative) {
+      showToast('✅ Mobile App Notifications Active & Enabled!', 'success');
+      triggerSystemNotification({
+        eventId: `push_enabled_${Date.now()}`,
+        title: '🔔 DigiMoms Mobile Notifications Active',
+        body: 'You will receive instant alerts for new orders and table calls!'
+      });
+      return;
+    }
+
     const granted = await requestNotificationPermission();
     setPermState(getNotificationPermissionState());
     if (granted) {
@@ -120,7 +131,7 @@ export const RealtimeStatusBadge: React.FC = () => {
         body: 'You will receive instant alerts for new orders and table calls!'
       });
     } else {
-      showToast('Notification permission denied by browser settings.', 'error');
+      showToast('Please enable notifications in site permissions or mobile settings.', 'info');
     }
   };
 

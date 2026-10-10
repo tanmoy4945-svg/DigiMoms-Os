@@ -24,24 +24,35 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
 }
 
 /**
- * Checks if browser supports native Notifications
+ * Checks if browser or native mobile app supports notifications
  */
 export function isNotificationSupported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  if (typeof window === 'undefined') return false;
+  // If running inside React Native WebView app, notifications are ALWAYS natively supported!
+  if ((window as any).ReactNativeWebView || (window as any).isNativeApp) return true;
+  return 'Notification' in window;
 }
 
 /**
  * Returns current permission status ('granted' | 'denied' | 'default' | 'unsupported')
  */
 export function getNotificationPermissionState(): 'granted' | 'denied' | 'default' | 'unsupported' {
+  if (typeof window !== 'undefined' && ((window as any).ReactNativeWebView || (window as any).isNativeApp)) {
+    // Inside native app, notifications are handled natively by Android OS
+    return 'granted';
+  }
   if (!isNotificationSupported()) return 'unsupported';
   return Notification.permission;
 }
 
 /**
- * Requests Browser Notification Permission from User
+ * Requests Browser or Native Notification Permission from User
  */
 export async function requestNotificationPermission(): Promise<boolean> {
+  if (typeof window !== 'undefined' && ((window as any).ReactNativeWebView || (window as any).isNativeApp)) {
+    // Already granted in native app environment
+    return true;
+  }
   if (!isNotificationSupported()) return false;
 
   try {
@@ -86,7 +97,23 @@ export function triggerSystemNotification(opts: TriggerNotificationOptions): boo
     arr.slice(0, 50).forEach(id => shownEventIds.delete(id));
   }
 
-  if (!isNotificationSupported() || Notification.permission !== 'granted') {
+  // 0. If running inside React Native WebView app, send message directly to Native Android Notification Manager!
+  if (typeof window !== 'undefined' && (window as any).ReactNativeWebView) {
+    try {
+      (window as any).ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'NATIVE_NOTIFICATION',
+        title: opts.title || '🔔 DigiMoms Alert',
+        body: opts.body || '',
+        data: { url: opts.url, restaurantId: opts.restaurantId }
+      }));
+      return true;
+    } catch (e) {
+      console.warn('[NotificationService] ReactNativeWebView postMessage error:', e);
+    }
+  }
+
+  const isNative = typeof window !== 'undefined' && ((window as any).ReactNativeWebView || (window as any).isNativeApp);
+  if (!isNative && (!isNotificationSupported() || Notification.permission !== 'granted')) {
     return false;
   }
 
