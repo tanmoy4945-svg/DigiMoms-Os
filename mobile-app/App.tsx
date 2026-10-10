@@ -3,6 +3,7 @@ import {
   StyleSheet,
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   BackHandler,
   ActivityIndicator,
@@ -10,13 +11,14 @@ import {
   StatusBar,
   Platform,
   Alert,
+  Modal,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 
-// Production Live Web Application URL
-const LIVE_WEB_APP_URL = 'https://ais-dev-5x3soypc4mbolsewuequye-904064987853.asia-southeast1.run.app';
+// Default Production URL
+const DEFAULT_URL = 'https://os.digimoms.in';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -28,6 +30,9 @@ Notifications.setNotificationHandler({
 
 export default function App() {
   const webViewRef = useRef<WebView>(null);
+  const [appUrl, setAppUrl] = useState<string>(DEFAULT_URL);
+  const [customUrlInput, setCustomUrlInput] = useState<string>('');
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -111,6 +116,21 @@ export default function App() {
     webViewRef.current?.reload();
   };
 
+  const handleSaveCustomUrl = () => {
+    let formatted = customUrlInput.trim();
+    if (!formatted) {
+      Alert.alert('Notice', 'Please enter a valid web URL.');
+      return;
+    }
+    if (!formatted.startsWith('http://') && !formatted.startsWith('https://')) {
+      formatted = 'https://' + formatted;
+    }
+    setAppUrl(formatted);
+    setShowSettingsModal(false);
+    setHasError(false);
+    setIsLoading(true);
+  };
+
   const injectedJavaScript = `
     (function() {
       window.expoPushToken = "${pushToken || ''}";
@@ -126,7 +146,7 @@ export default function App() {
       {/* Main Full-Screen Native WebView */}
       <WebView
         ref={webViewRef}
-        source={{ uri: LIVE_WEB_APP_URL }}
+        source={{ uri: appUrl }}
         style={styles.webview}
         javaScriptEnabled={true}
         domStorageEnabled={true}
@@ -151,22 +171,79 @@ export default function App() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#10b981" />
             <Text style={styles.loadingText}>Opening DigiMoms Restaurant OS...</Text>
+            <Text style={styles.loadingSubText}>Loading live app & real-time updates</Text>
           </View>
         )}
       />
 
-      {/* Sleek Offline / Error Screen */}
+      {/* Sleek Offline / Error Screen with Server URL setting */}
       {hasError && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorTitle}>Connection Offline</Text>
           <Text style={styles.errorMessage}>
-            Could not connect to DigiMoms Restaurant OS. Please check your internet connection and try again.
+            Could not connect to {appUrl}. Please check your internet connection or update the app domain.
           </Text>
-          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
-            <Text style={styles.retryButtonText}>Retry Connection</Text>
-          </TouchableOpacity>
+
+          <View style={styles.errorActions}>
+            <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+              <Text style={styles.retryButtonText}>Retry Connection</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => {
+                setCustomUrlInput(appUrl);
+                setShowSettingsModal(true);
+              }}
+            >
+              <Text style={styles.settingsButtonText}>Change Server URL</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
+
+      {/* Domain / Server URL Switcher Modal */}
+      <Modal
+        visible={showSettingsModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowSettingsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Set Live App Domain</Text>
+            <Text style={styles.modalDescription}>
+              Enter your live Vercel or custom domain (e.g. digimoms-os.vercel.app):
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              value={customUrlInput}
+              onChangeText={setCustomUrlInput}
+              placeholder="https://your-domain.vercel.app"
+              placeholderTextColor="#64748b"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowSettingsModal(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalSaveButton}
+                onPress={handleSaveCustomUrl}
+              >
+                <Text style={styles.modalSaveButtonText}>Save & Connect</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -188,10 +265,15 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   loadingText: {
-    color: '#94a3b8',
-    marginTop: 14,
-    fontSize: 14,
-    fontWeight: '600',
+    color: '#ffffff',
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  loadingSubText: {
+    color: '#64748b',
+    marginTop: 6,
+    fontSize: 12,
   },
   errorContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -203,27 +285,111 @@ const styles = StyleSheet.create({
   },
   errorTitle: {
     color: '#ffffff',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 8,
   },
   errorMessage: {
     color: '#94a3b8',
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 20,
   },
+  errorActions: {
+    flexDirection: 'column',
+    gap: 12,
+    width: '100%',
+    maxWidth: 280,
+  },
   retryButton: {
     backgroundColor: '#10b981',
-    paddingVertical: 12,
-    paddingHorizontal: 28,
+    paddingVertical: 14,
     borderRadius: 12,
+    alignItems: 'center',
     elevation: 3,
   },
   retryButtonText: {
     color: '#ffffff',
     fontSize: 15,
+    fontWeight: 'bold',
+  },
+  settingsButton: {
+    backgroundColor: '#1e293b',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  settingsButtonText: {
+    color: '#cbd5e1',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#0f172a',
+    borderRadius: 16,
+    padding: 22,
+    width: '100%',
+    maxWidth: 360,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  modalTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  modalDescription: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  input: {
+    backgroundColor: '#020617',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: '#ffffff',
+    fontSize: 14,
+    marginBottom: 18,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  modalCancelButtonText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalSaveButton: {
+    backgroundColor: '#8b5cf6',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+  },
+  modalSaveButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: 'bold',
   },
 });

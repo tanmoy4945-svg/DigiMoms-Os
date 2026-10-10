@@ -15,6 +15,7 @@ import { AiHelpAssistant } from '../common/AiHelpAssistant';
 import { RestaurantWebsiteManager } from '../owner/RestaurantWebsiteManager';
 import { CeoHealthMonitor } from './CeoHealthMonitor';
 import { CeoStaffManagement } from './CeoStaffManagement';
+import { CeoRenewalHistory } from './CeoRenewalHistory';
 import { Restaurant } from '../../types';
 
 export type RevenuePeriod = 'this_month' | 'today' | 'yesterday' | 'this_week' | 'last_month' | 'this_year' | 'lifetime';
@@ -173,7 +174,7 @@ export const CeoDashboard: React.FC = () => {
   const canEditLogs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_logs === true;
   const canDeleteLogs = isMasterCeo || currentCeoStaff?.permissions?.can_delete_logs === true;
 
-  const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
+  const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'history' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
     if (currentCeoStaff) {
       if (canViewRest) return 'restaurants';
       if (canViewPay) return 'payment-settings';
@@ -692,6 +693,15 @@ export const CeoDashboard: React.FC = () => {
           </button>
         )}
 
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'history' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <History className="w-4 h-4 text-emerald-400" /> History (রিনিউয়াল)
+        </button>
+
         {canViewSubs && (
           <button
             onClick={() => setActiveTab('agreement')}
@@ -1139,6 +1149,9 @@ export const CeoDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* TAB: RENEWAL HISTORY */}
+      {activeTab === 'history' && <CeoRenewalHistory />}
 
       {/* TAB: RESTAURANT AGREEMENT PDF GENERATOR */}
       {activeTab === 'agreement' && <CeoAgreementGenerator restaurants={restaurants} showToast={showToast} />}
