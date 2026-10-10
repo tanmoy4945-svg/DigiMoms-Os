@@ -1525,32 +1525,54 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     restoreSession();
 
     // 2. NATIVE APP PUSH TOKEN REGISTRATION
-    // If running inside the DigiMoms Native Shell (WebView), register the Expo Push Token for lock-screen alerts.
+    // If running inside the DigiMoms Native Shell (WebView), register the tokens for lock-screen & background alerts.
     const registerNativePushToken = async () => {
       try {
         const owner = currentOwner || (localStorage.getItem('digimoms_current_owner') ? JSON.parse(localStorage.getItem('digimoms_current_owner')!) : null);
         const staff = currentStaff || (localStorage.getItem('digimoms_current_staff') ? JSON.parse(localStorage.getItem('digimoms_current_staff')!) : null);
         const restId = owner?.id || staff?.restaurant_id;
         
-        // window.expoPushToken is injected by the Native WebView shell
-        const token = (window as any).expoPushToken;
-        
-        if (restId && token && token !== "null" && token !== "undefined") {
-          console.log('[Native App] Attempting to register push token:', token, 'for restaurant:', restId);
-          await fetch('/api/register-fcm-token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ restaurantId: restId, token })
-          });
-          console.log('[Native App] Push token registered successfully');
+        const expoTok = (window as any).expoPushToken;
+        const fcmTok = (window as any).fcmDeviceToken;
+        const tokensToRegister = [expoTok, fcmTok].filter(t => t && t !== 'null' && t !== 'undefined' && typeof t === 'string' && t.length > 5);
+
+        if (restId) {
+          // Tell native shell to ensure direct background registration
+          if ((window as any).ReactNativeWebView) {
+            try {
+              (window as any).ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'REGISTER_PUSH_TOKEN',
+                restaurantId: restId,
+              }));
+            } catch (postErr) {
+              console.warn('[Native App] postMessage REGISTER_PUSH_TOKEN failed:', postErr);
+            }
+          }
+
+          if (tokensToRegister.length > 0) {
+            console.log('[Native App] Attempting to register push tokens:', tokensToRegister, 'for restaurant:', restId);
+            await fetch('/api/register-fcm-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ restaurantId: restId, token: tokensToRegister })
+            });
+            console.log('[Native App] Push token(s) registered successfully on server');
+          }
         }
       } catch (err) {
         console.warn('[Native App] Push token registration failed:', err);
       }
     };
 
-    // Small delay to ensure injected token is available
-    setTimeout(registerNativePushToken, 3000);
+    // Small delay to ensure injected token is available, plus re-checks
+    setTimeout(registerNativePushToken, 1500);
+    setTimeout(registerNativePushToken, 4000);
+
+    const handleNativeTokenReady = () => {
+      console.log('[Native App] Received native_token_ready event');
+      registerNativePushToken();
+    };
+    window.addEventListener('native_token_ready', handleNativeTokenReady);
 
     const handleFocusOrOnline = () => {
       console.log('[SaaSContext] Window focused or online: resynchronizing Supabase state...');

@@ -27,11 +27,19 @@
       "permissions": [
         "VIBRATE",
         "RECEIVE_BOOT_COMPLETED",
-        "INTERNET"
+        "INTERNET",
+        "POST_NOTIFICATIONS",
+        "WAKE_LOCK"
       ]
     },
     "plugins": [
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#10b981"
+        }
+      ]
     ],
     "extra": {
       "eas": {

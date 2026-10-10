@@ -101,8 +101,25 @@ export const RealtimeStatusBadge: React.FC = () => {
       title: '🔔 DigiMoms New Order Alert',
       body: 'Table 04: Order #025 Received (₹450 Paid). Header alert working!'
     });
+
+    // Also trigger server-side remote push so notification arrives even if app is backgrounded/locked
+    try {
+      const restId = currentOwner?.id || currentStaff?.restaurant_id;
+      if (restId) {
+        fetch('/api/send-test-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            restaurantId: restId,
+            title: '🔔 DigiMoms New Order Alert',
+            body: 'Table 04: Order #025 Received (₹450 Paid). Lock-screen alert working!'
+          })
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
     if (ok) {
-      showToast('📱 Header notification sent! Check your mobile top bar.', 'success');
+      showToast('📱 Header notification sent! Check your mobile top bar & lock screen.', 'success');
     } else {
       showToast('Please enable notifications in your browser or phone settings.', 'warning');
     }
@@ -118,6 +135,21 @@ export const RealtimeStatusBadge: React.FC = () => {
         title: '🔔 DigiMoms Mobile Notifications Active',
         body: 'You will receive instant alerts for new orders and table calls!'
       });
+
+      try {
+        const restId = currentOwner?.id || currentStaff?.restaurant_id;
+        if (restId) {
+          fetch('/api/send-test-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              restaurantId: restId,
+              title: '🔔 DigiMoms Mobile Notifications Active',
+              body: 'Lock-screen and background push notifications are active!'
+            })
+          }).catch(() => {});
+        }
+      } catch (e) {}
       return;
     }
 

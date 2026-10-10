@@ -37,13 +37,32 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
+  const [deviceToken, setDeviceToken] = useState<string | null>(null);
+
+  const injectTokensIntoWebView = (expTok: string | null, devTok: string | null) => {
+    if (!webViewRef.current) return;
+    const js = `
+      (function() {
+        window.expoPushToken = "${expTok || ''}";
+        window.fcmDeviceToken = "${devTok || ''}";
+        window.isNativeApp = true;
+        try {
+          window.dispatchEvent(new CustomEvent('native_token_ready', { 
+            detail: { expoToken: "${expTok || ''}", fcmToken: "${devTok || ''}" } 
+          }));
+        } catch (e) {}
+      })();
+      true;
+    `;
+    webViewRef.current.injectJavaScript(js);
+  };
 
   // Setup Push Notifications on mount
   useEffect(() => {
-    registerForPushNotificationsAsync().then((token) => {
-      if (token) {
-        setPushToken(token);
-      }
+    registerForPushNotificationsAsync().then(({ expoToken, rawDeviceToken }) => {
+      if (expoToken) setPushToken(expoToken);
+      if (rawDeviceToken) setDeviceToken(rawDeviceToken);
+      injectTokensIntoWebView(expoToken, rawDeviceToken);
     });
 
     const notificationListener = Notifications.addNotificationReceivedListener((notification) => {
@@ -77,7 +96,8 @@ export default function App() {
   }, [canGoBack]);
 
   const registerForPushNotificationsAsync = async () => {
-    let token: string | null = null;
+    let expoToken: string | null = null;
+    let rawDeviceToken: string | null = null;
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('orders', {
@@ -86,6 +106,20 @@ export default function App() {
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#10b981',
         sound: 'default',
+        enableVibrate: true,
+        showBadge: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      });
+
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'General Alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#10b981',
+        sound: 'default',
+        enableVibrate: true,
+        showBadge: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
 
@@ -98,16 +132,26 @@ export default function App() {
       }
       if (finalStatus === 'granted') {
         try {
-          const pushTokenData = await Notifications.getExpoPushTokenAsync();
-          token = pushTokenData.data;
-          console.log('[Native App] Push Token:', token);
+          const pushTokenData = await Notifications.getExpoPushTokenAsync({
+            projectId: 'ee23229b-e7cd-45d3-8dff-8f146abad8ad',
+          });
+          expoToken = pushTokenData.data;
+          console.log('[Native App] Expo Push Token:', expoToken);
         } catch (e) {
-          console.log('[Native App] Note: Push token registration requires active network:', e);
+          console.log('[Native App] Note on Expo push token:', e);
+        }
+
+        try {
+          const devicePushData = await Notifications.getDevicePushTokenAsync();
+          rawDeviceToken = devicePushData.data;
+          console.log('[Native App] Device FCM Token:', rawDeviceToken);
+        } catch (e) {
+          console.log('[Native App] Note on Device push token:', e);
         }
       }
     }
 
-    return token;
+    return { expoToken, rawDeviceToken };
   };
 
   const handleRetry = () => {
@@ -134,7 +178,13 @@ export default function App() {
   const injectedJavaScript = `
     (function() {
       window.expoPushToken = "${pushToken || ''}";
+      window.fcmDeviceToken = "${deviceToken || ''}";
       window.isNativeApp = true;
+      try {
+        window.dispatchEvent(new CustomEvent('native_token_ready', { 
+          detail: { expoToken: "${pushToken || ''}", fcmToken: "${deviceToken || ''}" } 
+        }));
+      } catch (e) {}
       true;
     })();
   `;
@@ -156,19 +206,38 @@ export default function App() {
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={true}
         injectedJavaScript={injectedJavaScript}
-        onMessage={(event) => {
+        onMessage={async (event) => {
           try {
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === 'NATIVE_NOTIFICATION') {
-              Notifications.scheduleNotificationAsync({
+              await Notifications.scheduleNotificationAsync({
                 content: {
                   title: data.title || '🔔 DigiMoms Alert',
                   body: data.body || '',
-                  sound: true,
+                  sound: 'default',
                   vibrate: [0, 250, 250, 250],
+                  channelId: 'orders',
+                  priority: Notifications.AndroidNotificationPriority.MAX,
                 },
                 trigger: null, // show immediately
               });
+            } else if (data.type === 'REGISTER_PUSH_TOKEN' && data.restaurantId) {
+              const activeTokens = [pushToken, deviceToken].filter(Boolean);
+              if (activeTokens.length > 0) {
+                try {
+                  await fetch(`${appUrl}/api/register-fcm-token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      restaurantId: data.restaurantId,
+                      token: activeTokens,
+                    }),
+                  });
+                  console.log('[Native App] Successfully registered push tokens directly to server for restaurant:', data.restaurantId);
+                } catch (netErr) {
+                  console.warn('[Native App] Token direct server registration error:', netErr);
+                }
+              }
             }
           } catch (e) {
             // Ignore non-json messages
@@ -178,7 +247,10 @@ export default function App() {
           setCanGoBack(navState.canGoBack);
         }}
         onLoadStart={() => setIsLoading(true)}
-        onLoadEnd={() => setIsLoading(false)}
+        onLoadEnd={() => {
+          setIsLoading(false);
+          injectTokensIntoWebView(pushToken, deviceToken);
+        }}
         onError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
           console.warn('WebView error: ', nativeEvent);

@@ -79,59 +79,148 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Helper to send push notifications
+  // Helper to send push notifications to both FCM and Expo Push Services
   async function sendPushNotification(restaurantId: string, title: string, body: string, data: any = {}) {
     try {
       const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
       const tokens = fcmTokens[restaurantId] || [];
       
-      if (tokens.length === 0) return;
+      if (tokens.length === 0) {
+        console.log(`[Push Notification] No tokens registered for restaurant ${restaurantId}`);
+        return { success: false, reason: 'no_tokens' };
+      }
 
-      const message = {
-        notification: { title, body },
-        data: {
-          ...data,
-          click_action: 'FLUTTER_NOTIFICATION_CLICK' // Standard for some frameworks
-        },
-        tokens: tokens,
-      };
+      console.log(`[Push Notification] Dispatching alert to ${tokens.length} token(s) for restaurant ${restaurantId}...`);
 
-      const response = await (admin as any).messaging().sendEachForMulticast(message);
-      console.log(`[Push Notification] Sent ${response.successCount} messages successfully`);
-      
-      // Clean up invalid tokens
-      if (response.failureCount > 0) {
-        const failedTokens: string[] = [];
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success && (resp.error?.code === 'messaging/registration-token-not-registered' || resp.error?.code === 'messaging/invalid-registration-token')) {
-            failedTokens.push(tokens[idx]);
-          }
-        });
-        
-        if (failedTokens.length > 0) {
-          fcmTokens[restaurantId] = tokens.filter(t => !failedTokens.includes(t));
-          writeJsonFile('fcm_tokens.json', fcmTokens);
+      const expoTokens: string[] = [];
+      const nativeFcmTokens: string[] = [];
+
+      tokens.forEach(tok => {
+        if (tok.startsWith('ExponentPushToken[') || tok.startsWith('ExpoPushToken[')) {
+          expoTokens.push(tok);
+        } else {
+          nativeFcmTokens.push(tok);
+        }
+      });
+
+      // 1. Send to Expo Push Tokens (for Expo Go or EAS built apps using Expo Push)
+      if (expoTokens.length > 0) {
+        try {
+          const expoMessages = expoTokens.map(tok => ({
+            to: tok,
+            sound: 'default',
+            title: title || '🔔 DigiMoms Alert',
+            body: body || 'New update available',
+            channelId: 'orders',
+            priority: 'high',
+            _displayInForeground: true,
+            data: { ...data, restaurantId }
+          }));
+
+          const expoResp = await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Accept-encoding': 'gzip, deflate',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(expoMessages),
+          });
+          const expoResult = await expoResp.json();
+          console.log('[Push Notification] Expo Push Result:', expoResult);
+        } catch (expoErr) {
+          console.error('[Push Notification] Expo Push send failed:', expoErr);
         }
       }
+
+      // 2. Send to Native FCM Tokens via Firebase Admin SDK
+      if (nativeFcmTokens.length > 0) {
+        try {
+          const fcmMessage = {
+            notification: { title, body },
+            data: {
+              ...Object.keys(data || {}).reduce((acc: any, k) => {
+                acc[k] = String(data[k] ?? '');
+                return acc;
+              }, {}),
+              restaurantId: String(restaurantId || ''),
+              click_action: 'FLUTTER_NOTIFICATION_CLICK'
+            },
+            android: {
+              priority: 'high' as const,
+              notification: {
+                channelId: 'orders',
+                sound: 'default',
+                priority: 'max' as const,
+                defaultVibrateTimings: true,
+                visibility: 'public' as const, // CRITICAL: displays on lock screen
+              }
+            },
+            tokens: nativeFcmTokens,
+          };
+
+          const response = await (admin as any).messaging().sendEachForMulticast(fcmMessage);
+          console.log(`[Push Notification] Native FCM sent: ${response.successCount} success, ${response.failureCount} failed`);
+
+          // Clean up only truly invalid FCM tokens
+          if (response.failureCount > 0) {
+            const failedTokens: string[] = [];
+            response.responses.forEach((resp: any, idx: number) => {
+              if (!resp.success && (resp.error?.code === 'messaging/registration-token-not-registered' || resp.error?.code === 'messaging/invalid-registration-token')) {
+                failedTokens.push(nativeFcmTokens[idx]);
+              }
+            });
+            if (failedTokens.length > 0) {
+              fcmTokens[restaurantId] = tokens.filter(t => !failedTokens.includes(t));
+              writeJsonFile('fcm_tokens.json', fcmTokens);
+            }
+          }
+        } catch (fcmErr) {
+          console.warn('[Push Notification] Firebase Admin send failed:', fcmErr);
+        }
+      }
+
+      return { success: true, count: tokens.length };
     } catch (err) {
       console.error('[Push Notification] Error sending message:', err);
+      return { success: false, error: String(err) };
     }
   }
 
-  // API Route: Register FCM Token
-  app.post('/api/fcm/register', (req, res) => {
-    const { restaurantId, token } = req.body;
-    if (!restaurantId || !token) return res.status(400).json({ success: false, message: 'Missing params' });
+  // API Route: Register Push / FCM Token (supports both param styles)
+  app.post(['/api/fcm/register', '/api/register-fcm-token'], (req, res) => {
+    const restaurantId = req.body.restaurantId || req.body.restaurant_id;
+    const token = req.body.token || req.body.fcmToken;
+    const tokensToAdd: string[] = Array.isArray(token) ? token : (token ? [token] : []);
+
+    if (!restaurantId || tokensToAdd.length === 0) {
+      return res.status(400).json({ success: false, message: 'Missing restaurantId or token' });
+    }
 
     const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
     if (!fcmTokens[restaurantId]) fcmTokens[restaurantId] = [];
-    
-    if (!fcmTokens[restaurantId].includes(token)) {
-      fcmTokens[restaurantId].push(token);
-      writeJsonFile('fcm_tokens.json', fcmTokens);
+
+    tokensToAdd.forEach(tok => {
+      if (tok && typeof tok === 'string' && tok.length > 5 && !fcmTokens[restaurantId].includes(tok)) {
+        fcmTokens[restaurantId].push(tok);
+        console.log(`[Push Token] Registered token (${tok.substring(0, 15)}...) for restaurant: ${restaurantId}`);
+      }
+    });
+
+    writeJsonFile('fcm_tokens.json', fcmTokens);
+    res.json({ success: true, tokenCount: fcmTokens[restaurantId].length });
+  });
+
+  // API Route: Test Push Notification directly to registered devices
+  app.post('/api/send-test-push', async (req, res) => {
+    const restaurantId = req.body.restaurantId || req.body.restaurant_id;
+    if (!restaurantId) {
+      return res.status(400).json({ success: false, message: 'Missing restaurantId' });
     }
-    
-    res.json({ success: true });
+    const title = req.body.title || '🔔 DigiMoms Lock-Screen Test';
+    const body = req.body.body || 'Alert test: Working in background & lock screen!';
+    const result = await sendPushNotification(restaurantId, title, body, { test: 'true', timestamp: String(Date.now()) });
+    res.json({ success: true, result });
   });
 
   // API Route: Persistent CEO Payment Config
@@ -469,26 +558,6 @@ async function startServer() {
     res.json({ success: true, data: tx });
   });
 
-  // API Route: Register FCM Token for Push Notifications
-  app.post('/api/register-fcm-token', (req, res) => {
-    const { restaurant_id, token } = req.body;
-    if (!restaurant_id || !token) {
-      return res.status(400).json({ error: 'Missing restaurant_id or token' });
-    }
-
-    const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
-    if (!fcmTokens[restaurant_id]) {
-      fcmTokens[restaurant_id] = [];
-    }
-
-    if (!fcmTokens[restaurant_id].includes(token)) {
-      fcmTokens[restaurant_id].push(token);
-      writeJsonFile('fcm_tokens.json', fcmTokens);
-      console.log(`[FCM] Token registered for restaurant: ${restaurant_id}`);
-    }
-
-    res.json({ success: true });
-  });
 
   // API Route: Create PhonePe Payment Request for DigiMoms Subscriptions
   app.post('/api/phonepe/create-payment', async (req, res) => {
