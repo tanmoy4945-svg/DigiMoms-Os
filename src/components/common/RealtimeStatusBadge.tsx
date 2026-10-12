@@ -13,7 +13,8 @@ import {
 export const RealtimeStatusBadge: React.FC = () => {
   const { 
     realtimeStatus, reconnectRealtime, showToast, fetchAllFromSupabase,
-    notifications, unreadNotificationCount, markNotificationAsRead, removeNotification, clearAllNotifications 
+    notifications, unreadNotificationCount, markNotificationAsRead, removeNotification, clearAllNotifications,
+    currentOwner, currentStaff, sendTestPushNotification
   } = useSaaS();
 
   const [soundOn, setSoundOn] = useState<boolean>(isSoundEnabled());
@@ -102,19 +103,11 @@ export const RealtimeStatusBadge: React.FC = () => {
       body: 'Table 04: Order #025 Received (₹450 Paid). Header alert working!'
     });
 
-    // Also trigger server-side remote push so notification arrives even if app is backgrounded/locked
+    // Also trigger server-side & Expo remote push so notification arrives even if app is closed/locked
     try {
       const restId = currentOwner?.id || currentStaff?.restaurant_id;
       if (restId) {
-        fetch('/api/send-test-push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            restaurantId: restId,
-            title: '🔔 DigiMoms New Order Alert',
-            body: 'Table 04: Order #025 Received (₹450 Paid). Lock-screen alert working!'
-          })
-        }).catch(() => {});
+        sendTestPushNotification(restId).catch(() => {});
       }
     } catch (e) {}
 

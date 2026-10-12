@@ -12,7 +12,7 @@ import { GstReportsAnalytics } from './GstReportsAnalytics';
 import { Order } from '../../types';
 
 export const ReportsAnalytics: React.FC = () => {
-  const { currentOwner, orders, auditLogs, paymentTransactions, deleteOrdersByMonth, showToast } = useSaaS();
+  const { currentOwner, orders, auditLogs, paymentTransactions, deleteOrdersByMonth, settleCompletedOrderPayment, showToast } = useSaaS();
 
   const [activeTab, setActiveTab] = useState<'sales' | 'transactions' | 'gst' | 'audit'>('sales');
   
@@ -20,6 +20,13 @@ export const ReportsAnalytics: React.FC = () => {
   const [salesFilterMode, setSalesFilterMode] = useState<'all' | 'cash' | 'demo' | 'online' | 'partial'>('all');
   const [salesMonthFilter, setSalesMonthFilter] = useState<string>('all');
   const [isDeletingMonthly, setIsDeletingMonthly] = useState<boolean>(false);
+
+  // Anti-fraud Unsettled Completed Orders Settlement State
+  const [settleOrderModal, setSettleOrderModal] = useState<Order | null>(null);
+  const [settlePaymentMethod, setSettlePaymentMethod] = useState<'cash' | 'upi' | 'card' | 'bank_transfer'>('cash');
+  const [settleAmount, setSettleAmount] = useState<number>(0);
+  const [settleNote, setSettleNote] = useState<string>('');
+  const [isSettling, setIsSettling] = useState<boolean>(false);
   
   // Transactions Filters
   const [txFilterMethod, setTxFilterMethod] = useState<'all' | 'online' | 'cash' | 'split' | 'demo'>('all');
@@ -170,6 +177,19 @@ export const ReportsAnalytics: React.FC = () => {
   }, [validOrders]);
 
   const totalOrdersCount = validOrders.length;
+
+  // Anti-fraud: Orders marked COMPLETED by staff or owner, but payment status is still unpaid/pending
+  const unsettledCompletedOrders = useMemo(() => {
+    if (!currentOwner) return [];
+    return orders.filter(o => {
+      if (o.restaurant_id !== currentOwner.id) return false;
+      if (o.order_status !== 'completed') return false;
+      const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
+      if (isPaid) return false;
+      const due = o.cash_due !== undefined && o.cash_due !== null ? Number(o.cash_due) : (Number(o.grand_total) - Number(o.online_amount || 0) - Number(o.cash_amount || 0));
+      return due > 0;
+    });
+  }, [orders, currentOwner]);
 
   // --- DERIVED PAYMENT TRANSACTIONS (Guaranteed Complete Real Data) ---
   const derivedTransactions = useMemo(() => {
@@ -580,6 +600,74 @@ export const ReportsAnalytics: React.FC = () => {
             )}
           </div>
 
+          {/* Unsettled Completed Orders (Anti-Fraud Owner Settlement) */}
+          {unsettledCompletedOrders.length > 0 && (
+            <div className="p-6 rounded-3xl bg-amber-950/40 border-2 border-amber-500/50 shadow-2xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                    <AlertCircle className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      বাকি থাকা কমপ্লিট অর্ডার ({unsettledCompletedOrders.length})
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+                        পেমেন্ট পেন্ডিং
+                      </span>
+                    </h3>
+                    <p className="text-xs text-amber-200/80">
+                      এই অর্ডারগুলো সার্ভিস কমপ্লিট করা হলেও পেমেন্ট মার্ক করা হয়নি। স্টাফদের কারচুপি রোধে শুধুমাত্র ওনার প্যানেল থেকে পেমেন্টের মাধ্যম (Cash, UPI, Card) উল্লেখ করে সেটেল করতে পারবেন।
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-slate-400 font-medium">মোট বকেয়া কালেকশন</div>
+                  <div className="text-xl font-black text-amber-400">
+                    ₹{unsettledCompletedOrders.reduce((sum, o) => sum + (o.cash_due ?? (o.grand_total - (o.online_amount || 0))), 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {unsettledCompletedOrders.map(order => {
+                  const due = order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0));
+                  return (
+                    <div key={order.id} className="p-4 rounded-2xl bg-slate-900 border border-amber-500/30 flex flex-col justify-between gap-3 hover:border-amber-500/60 transition-all">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-white font-mono text-sm">{order.order_number}</span>
+                          <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-800 text-slate-300">
+                            Table {order.table_number || 'Takeaway'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {order.items?.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
+                        </div>
+                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800">
+                          <span className="text-slate-400">Total: ₹{order.grand_total}</span>
+                          <span className="text-amber-400 font-bold">বকেয়া: ₹{due}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setSettleOrderModal(order);
+                          setSettlePaymentMethod('cash');
+                          setSettleAmount(due > 0 ? due : order.grand_total);
+                          setSettleNote('');
+                        }}
+                        className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>পেমেন্ট সেটেল ও পেইড করুন</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Sales Orders Table */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
             <div className="overflow-x-auto">
@@ -605,7 +693,11 @@ export const ReportsAnalytics: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    filteredOrders.map(order => (
+                    filteredOrders.map(order => {
+                      const isUnpaidCompleted = order.order_status === 'completed' && !['paid_live', 'paid', 'paid_cash', 'paid_demo', 'paid_online'].includes(order.payment_status);
+                      const dueAmt = order.cash_due ?? (order.grand_total - (order.online_amount || 0) - (order.cash_amount || 0));
+
+                      return (
                       <tr key={order.id} className="hover:bg-slate-800/40 transition-all">
                         <td className="p-4 font-bold text-white font-mono">{order.order_number}</td>
                         <td className="p-4 text-slate-200">{order.table_number}</td>
@@ -613,13 +705,19 @@ export const ReportsAnalytics: React.FC = () => {
                           <span className="uppercase font-semibold text-[11px] text-blue-400">{order.payment_mode}</span>
                         </td>
                         <td className="p-4">
-                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
-                            order.payment_status === 'paid_live' || order.payment_status === 'paid' || order.payment_status === 'paid_cash' || order.payment_status === 'paid_demo' ? 'bg-emerald-950 text-emerald-400 border-emerald-500/30' :
-                            order.payment_status === 'partially_paid' || order.payment_status === 'partial' ? 'bg-purple-950 text-purple-300 border-purple-500/30' :
-                            'bg-amber-950 text-amber-400 border-amber-500/30'
-                          }`}>
-                            {order.payment_status}
-                          </span>
+                          {isUnpaidCompleted ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase border bg-amber-950 text-amber-300 border-amber-500/50 flex items-center gap-1 w-max">
+                              <AlertCircle className="w-3 h-3 text-amber-400" /> COMPLETED (UNPAID)
+                            </span>
+                          ) : (
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                              order.payment_status === 'paid_live' || order.payment_status === 'paid' || order.payment_status === 'paid_cash' || order.payment_status === 'paid_demo' ? 'bg-emerald-950 text-emerald-400 border-emerald-500/30' :
+                              order.payment_status === 'partially_paid' || order.payment_status === 'partial' ? 'bg-purple-950 text-purple-300 border-purple-500/30' :
+                              'bg-amber-950 text-amber-400 border-amber-500/30'
+                            }`}>
+                              {order.payment_status}
+                            </span>
+                          )}
                         </td>
                         <td className="p-4 text-blue-400 font-bold">₹{order.online_amount || 0}</td>
                         <td className="p-4 text-emerald-400 font-bold">₹{order.cash_amount || 0}</td>
@@ -627,6 +725,20 @@ export const ReportsAnalytics: React.FC = () => {
                         <td className="p-4 font-extrabold text-white text-sm">₹{order.grand_total}</td>
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {isUnpaidCompleted && (
+                              <button
+                                onClick={() => {
+                                  setSettleOrderModal(order);
+                                  setSettlePaymentMethod('cash');
+                                  setSettleAmount(dueAmt > 0 ? dueAmt : order.grand_total);
+                                  setSettleNote('');
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all flex items-center gap-1 shadow-md"
+                                title="Settle Unpaid Order as Owner"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Settle
+                              </button>
+                            )}
                             <button
                               onClick={() => setSelectedBillOrder(order)}
                               className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white font-bold text-xs border border-blue-500/30 transition-all flex items-center gap-1"
@@ -651,7 +763,8 @@ export const ReportsAnalytics: React.FC = () => {
                           </div>
                         </td>
                       </tr>
-                    ))
+                    );
+                  })
                   )}
                 </tbody>
               </table>
@@ -994,6 +1107,134 @@ export const ReportsAnalytics: React.FC = () => {
           onClose={() => setSelectedBillOrder(null)}
           actorName={currentOwner.owner_name}
         />
+      )}
+
+      {/* Anti-Fraud Owner Settlement Modal */}
+      {settleOrderModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl text-left">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-amber-400" />
+                  অর্ডার সেটেলমেন্ট ও পেমেন্ট রিসিভ
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Order #{settleOrderModal.order_number} • Table {settleOrderModal.table_number || 'Takeaway'}
+                </p>
+              </div>
+              <button
+                onClick={() => setSettleOrderModal(null)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Payment Medium Selection */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-2">
+                  পেমেন্টের মাধ্যম নির্বাচন করুন (Payment Medium) *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'cash', label: '💵 নগদ টাকা (Cash)', desc: 'কাউন্টারে ক্যাশ জমা' },
+                    { id: 'upi', label: '📱 কাউন্টার UPI (QR / PhonePe)', desc: 'GPay, Paytm, PhonePe' },
+                    { id: 'card', label: '💳 কার্ড (POS Swiped)', desc: 'POS মেশিনে কার্ড পেমেন্ট' },
+                    { id: 'bank_transfer', label: '🏦 ব্যাংক ট্রান্সফার / IMPS', desc: 'সরাসরি ব্যাংক অ্যাকাউন্ট' },
+                  ].map(m => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setSettlePaymentMethod(m.id as any)}
+                      className={`p-3 rounded-2xl border text-left transition-all ${
+                        settlePaymentMethod === m.id
+                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-lg'
+                          : 'bg-slate-800/50 border-slate-700/60 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="font-bold text-xs">{m.label}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{m.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
+                  গৃহীত টাকার পরিমাণ (Settlement Amount ₹) *
+                </label>
+                <input
+                  type="number"
+                  value={settleAmount}
+                  onChange={(e) => setSettleAmount(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:border-amber-500 outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+
+              {/* Note / Reference */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
+                  ট্রানজ্যাকশন রেফারেন্স / নোট (ঐচ্ছিক)
+                </label>
+                <input
+                  type="text"
+                  value={settleNote}
+                  onChange={(e) => setSettleNote(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-xs focus:border-amber-500 outline-none"
+                  placeholder="যেমন: UTR No / Cash drawer slip / কাউন্টার ওনার কালেকশন"
+                />
+              </div>
+
+              {/* Anti-fraud Info */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <div className="text-amber-400 font-bold">🔒 সিকিউরিটি অডিট ট্রেইল:</div>
+                <div>এই অ্যাকশনটি ওনার হিসেবে স্থায়ীভাবে রেকর্ড হবে যাতে কোনো স্টাফ কারচুপি করতে না পারে।</div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSettleOrderModal(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all"
+              >
+                বাতিল করুন
+              </button>
+              <button
+                type="button"
+                disabled={isSettling || settleAmount <= 0}
+                onClick={async () => {
+                  if (!settleOrderModal) return;
+                  setIsSettling(true);
+                  try {
+                    await settleCompletedOrderPayment(
+                      settleOrderModal.id,
+                      settlePaymentMethod,
+                      settleAmount,
+                      settleNote,
+                      currentOwner?.owner_name
+                    );
+                    setSettleOrderModal(null);
+                  } finally {
+                    setIsSettling(false);
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isSettling ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                )}
+                <span>পেমেন্ট নিশ্চিত ও পেইড করুন</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

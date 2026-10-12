@@ -83,8 +83,44 @@ async function startServer() {
   async function sendPushNotification(restaurantId: string, title: string, body: string, data: any = {}) {
     try {
       const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
-      const tokens = fcmTokens[restaurantId] || [];
+      let tokens = fcmTokens[restaurantId] || [];
       
+      // If no local tokens found, query Supabase audit_logs for registered push tokens
+      if (tokens.length === 0) {
+        try {
+          const { data: logs } = await serverSupabase
+            .from('audit_logs')
+            .select('description')
+            .eq('restaurant_id', restaurantId)
+            .eq('action', 'PUSH_TOKEN_REGISTRATION')
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          if (logs && logs.length > 0) {
+            const tokenSet = new Set<string>();
+            logs.forEach((l: any) => {
+              try {
+                const parsed = JSON.parse(l.description);
+                if (Array.isArray(parsed?.tokens)) {
+                  parsed.tokens.forEach((tok: string) => {
+                    if (tok && typeof tok === 'string' && tok.length > 5) {
+                      tokenSet.add(tok);
+                    }
+                  });
+                }
+              } catch (e) {}
+            });
+            tokens = Array.from(tokenSet);
+            if (tokens.length > 0) {
+              fcmTokens[restaurantId] = tokens;
+              writeJsonFile('fcm_tokens.json', fcmTokens);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('[Push Notification] Supabase token query note:', dbErr);
+        }
+      }
+
       if (tokens.length === 0) {
         console.log(`[Push Notification] No tokens registered for restaurant ${restaurantId}`);
         return { success: false, reason: 'no_tokens' };
@@ -534,9 +570,37 @@ async function startServer() {
         order,
         timestamp: new Date().toISOString()
       });
+
+      // Dispatch high-priority lock-screen & background push notification to restaurant owners/staff
+      if (isNew && order.restaurant_id) {
+        const isCash = order.payment_mode === 'cash' || order.payment_mode === 'partial';
+        const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
+        const body = `Table ${order.table_number || 'Takeaway'} (Order #${order.order_number}): ₹${order.grand_total}. Please check dashboard!`;
+        sendPushNotification(order.restaurant_id, title, body, {
+          orderId: order.id,
+          type: 'new_order',
+          restaurant_id: order.restaurant_id
+        }).catch(pErr => console.warn('[Orders Save] Push dispatch note:', pErr));
+      }
     }
 
     res.json({ success: true, data: order });
+  });
+
+  // Direct push notification API endpoint
+  app.post('/api/send-push', async (req, res) => {
+    try {
+      const { restaurantId, restaurant_id, title, body, data } = req.body || {};
+      const targetRestId = restaurantId || restaurant_id;
+      if (!targetRestId) {
+        return res.status(400).json({ error: 'Missing restaurantId' });
+      }
+      const result = await sendPushNotification(targetRestId, title, body, data);
+      res.json({ success: true, result });
+    } catch (err: any) {
+      console.error('[API send-push] Error:', err);
+      res.status(500).json({ error: err.message || 'Push send error' });
+    }
   });
 
   // API Route: Persistent Transactions Record

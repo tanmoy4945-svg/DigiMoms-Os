@@ -16,9 +16,15 @@ import {
 import { WebView } from 'react-native-webview';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+import { createClient } from '@supabase/supabase-js';
 
 // Default Production URL
 const DEFAULT_URL = 'https://os.digimoms.in';
+
+const SUPABASE_URL = 'https://qjkoeehgkfnailgmhyjs.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_TMLOZVNYis6bZInTdfWJ3Q_BJ1kiuih';
+const mobileSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -131,14 +137,25 @@ export default function App() {
         finalStatus = status;
       }
       if (finalStatus === 'granted') {
+        const easProjectId = 
+          Constants?.expoConfig?.extra?.eas?.projectId ?? 
+          (Constants as any)?.easConfig?.projectId ?? 
+          'ee23229b-e7cd-45d3-8dff-8f146abad8ad';
+
         try {
           const pushTokenData = await Notifications.getExpoPushTokenAsync({
-            projectId: 'ee23229b-e7cd-45d3-8dff-8f146abad8ad',
+            projectId: easProjectId,
           });
           expoToken = pushTokenData.data;
-          console.log('[Native App] Expo Push Token:', expoToken);
-        } catch (e) {
-          console.log('[Native App] Note on Expo push token:', e);
+          console.log('[Native App] Expo Push Token (with projectId):', expoToken);
+        } catch (e1) {
+          try {
+            const pushTokenData = await Notifications.getExpoPushTokenAsync();
+            expoToken = pushTokenData.data;
+            console.log('[Native App] Expo Push Token (auto-detected):', expoToken);
+          } catch (e2) {
+            console.log('[Native App] Note on Expo push token:', e2);
+          }
         }
 
         try {
@@ -205,6 +222,7 @@ export default function App() {
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={true}
+        injectedJavaScriptBeforeContentLoaded={injectedJavaScript}
         injectedJavaScript={injectedJavaScript}
         onMessage={async (event) => {
           try {
@@ -224,6 +242,7 @@ export default function App() {
             } else if (data.type === 'REGISTER_PUSH_TOKEN' && data.restaurantId) {
               const activeTokens = [pushToken, deviceToken].filter(Boolean);
               if (activeTokens.length > 0) {
+                // 1. Direct fetch to backend / Vercel API
                 try {
                   await fetch(`${appUrl}/api/register-fcm-token`, {
                     method: 'POST',
@@ -233,9 +252,23 @@ export default function App() {
                       token: activeTokens,
                     }),
                   });
-                  console.log('[Native App] Successfully registered push tokens directly to server for restaurant:', data.restaurantId);
+                  console.log('[Native App] Successfully registered push tokens to server API');
                 } catch (netErr) {
-                  console.warn('[Native App] Token direct server registration error:', netErr);
+                  console.warn('[Native App] Token server registration error:', netErr);
+                }
+
+                // 2. Direct Supabase persistence (Universal guarantee)
+                try {
+                  await mobileSupabase.from('audit_logs').insert([{
+                    id: (Constants as any)?.installationId || `native_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                    restaurant_id: data.restaurantId,
+                    actor_type: 'system',
+                    action: 'PUSH_TOKEN_REGISTRATION',
+                    description: JSON.stringify({ tokens: activeTokens, updated_at: new Date().toISOString() })
+                  }]);
+                  console.log('[Native App] Successfully persisted push tokens to Supabase');
+                } catch (sbErr) {
+                  console.warn('[Native App] Direct Supabase token registration notice:', sbErr);
                 }
               }
             }

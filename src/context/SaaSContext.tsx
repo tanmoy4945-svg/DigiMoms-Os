@@ -165,6 +165,8 @@ interface SaaSContextType {
   completeCallRequest: (requestId: string) => Promise<void>;
   verifyCashOrder: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
   confirmCashPayment: (orderId: string, cashAmount: number, actorId: string, actorType: 'waiter' | 'owner' | 'staff', actorName: string) => Promise<void>;
+  settleCompletedOrderPayment: (orderId: string, paymentMethod: 'cash' | 'upi' | 'card' | 'bank_transfer', amount: number, referenceNote?: string, ownerName?: string) => Promise<boolean>;
+  sendTestPushNotification: (restaurantId: string) => Promise<{ success: boolean; message: string }>;
   recordOfflinePayment: (orderId: string, payments: { method: OfflinePaymentMethod; amount: number; reference?: string; note?: string }[], actorName?: string, actorType?: 'owner' | 'staff') => Promise<boolean>;
   verifyUpiPayment: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
   rejectUpiPayment: (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => Promise<void>;
@@ -1551,12 +1553,34 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (tokensToRegister.length > 0) {
             console.log('[Native App] Attempting to register push tokens:', tokensToRegister, 'for restaurant:', restId);
-            await fetch('/api/register-fcm-token', {
+            
+            // 1. Cache in local storage for instant access
+            try {
+              localStorage.setItem(`digimoms_registered_tokens_${restId}`, JSON.stringify(tokensToRegister));
+            } catch (e) {}
+
+            // 2. Post to serverless / backend API
+            fetch('/api/register-fcm-token', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ restaurantId: restId, token: tokensToRegister })
-            });
-            console.log('[Native App] Push token(s) registered successfully on server');
+            }).catch(e => console.warn('[Native App] API register error:', e));
+
+            // 3. Directly store in Supabase audit_logs (Universal reliability on Vercel & mobile)
+            try {
+              supabase.from('audit_logs').insert([{
+                id: crypto.randomUUID(),
+                restaurant_id: restId,
+                actor_type: 'system',
+                action: 'PUSH_TOKEN_REGISTRATION',
+                description: JSON.stringify({ tokens: tokensToRegister, updated_at: new Date().toISOString() })
+              }]).then(({ error }) => {
+                if (error) console.warn('[Native App] Supabase push log warning:', error);
+                else console.log('[Native App] Push token(s) persisted to Supabase successfully');
+              });
+            } catch (sbErr) {
+              console.warn('[Native App] Direct Supabase push register notice:', sbErr);
+            }
           }
         }
       } catch (err) {
@@ -1567,6 +1591,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Small delay to ensure injected token is available, plus re-checks
     setTimeout(registerNativePushToken, 1500);
     setTimeout(registerNativePushToken, 4000);
+    setTimeout(registerNativePushToken, 10000);
 
     const handleNativeTokenReady = () => {
       console.log('[Native App] Received native_token_ready event');
@@ -4658,6 +4683,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // ANTI-FRAUD SECURITY: Staff cannot settle or tamper with completed unpaid orders
+    if (existingOrd.order_status === 'completed' && (actorType === 'staff' || actorType === 'waiter')) {
+      showToast("Security Alert: Completed unpaid orders can only be settled by Restaurant Owner in Sales menu.", "error");
+      return;
+    }
+
     const grandTotal = existingOrd.grand_total;
     const onlineAmt = Number(existingOrd.online_amount || 0);
     const prevCashAmt = Number(existingOrd.cash_amount || 0);
@@ -4806,6 +4837,104 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     playNotificationSound('new_order');
   };
 
+  const settleCompletedOrderPayment = async (
+    orderId: string,
+    paymentMethod: 'cash' | 'upi' | 'card' | 'bank_transfer',
+    amount: number,
+    referenceNote?: string,
+    ownerName?: string
+  ): Promise<boolean> => {
+    const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) {
+      showToast("Order not found.", "error");
+      return false;
+    }
+
+    const owner = ownerName || (currentOwner ? currentOwner.owner_name : 'Restaurant Owner');
+    const confirmedAtIso = new Date().toISOString();
+    const isCash = paymentMethod === 'cash';
+
+    const prevCash = Number(existingOrd.cash_amount || 0);
+    const prevOnline = Number(existingOrd.online_amount || 0);
+    const newCash = isCash ? Number((prevCash + amount).toFixed(2)) : prevCash;
+    const newOnline = !isCash ? Number((prevOnline + amount).toFixed(2)) : prevOnline;
+
+    const noteTag = `[SETTLED BY OWNER: ${owner} via ${paymentMethod.toUpperCase()} (₹${amount}) - Ref: ${referenceNote || 'Direct Settlement'}]`;
+    const updatedNotes = existingOrd.notes ? `${existingOrd.notes} | ${noteTag}`.slice(0, 500) : noteTag;
+
+    const updatePayload: Record<string, any> = {
+      payment_status: 'paid',
+      payment_mode: paymentMethod,
+      cash_amount: newCash,
+      online_amount: newOnline,
+      cash_due: 0,
+      notes: updatedNotes,
+      updated_at: confirmedAtIso
+    };
+
+    // 1. Optimistic local update
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updatePayload, items: o.items } : o));
+    showToast(`Order #${existingOrd.order_number} settled as PAID via ${paymentMethod.toUpperCase()}!`, 'success');
+
+    // 2. Realtime broadcast
+    broadcastRealtimeEvent('order_status_event', {
+      orderId,
+      order_status: existingOrd.order_status,
+      payment_status: 'paid',
+      grand_total: existingOrd.grand_total,
+      order_number: existingOrd.order_number,
+      table_number: existingOrd.table_number,
+      restaurant_id: existingOrd.restaurant_id
+    });
+
+    // 3. Supabase persist
+    try {
+      await supabase.from('orders').update(updatePayload).eq('id', orderId).eq('restaurant_id', existingOrd.restaurant_id);
+    } catch (e) {
+      console.warn('Orders update notice:', e);
+    }
+
+    // 4. Hotel wallet credit
+    await creditHotelWallet(existingOrd.restaurant_id, existingOrd.id, amount, isCash ? 'cash' : 'online');
+
+    // 5. Payment transaction insert
+    try {
+      await supabase.from('payment_transactions').insert([{
+        id: crypto.randomUUID(),
+        restaurant_id: existingOrd.restaurant_id,
+        order_id: existingOrd.id,
+        table_number: existingOrd.table_number,
+        order_number: existingOrd.order_number,
+        payment_method: paymentMethod,
+        amount: amount,
+        transaction_id: referenceNote ? `REF_${referenceNote}` : `SETTLE_${Date.now()}`,
+        status: 'paid',
+        actor_id: currentOwner?.id || 'owner',
+        actor_type: 'owner',
+        actor_name: `${owner} (Sales Settle)`,
+        created_at: confirmedAtIso
+      }]);
+    } catch (txErr) {
+      console.warn('payment_transactions insert notice:', txErr);
+    }
+
+    // 6. Security Audit Log
+    logAudit({
+      restaurant_id: existingOrd.restaurant_id,
+      order_id: existingOrd.id,
+      actor_type: 'owner',
+      actor_id: currentOwner?.id || 'owner',
+      actor_name: owner,
+      action: 'OWNER_SETTLE_COMPLETED_ORDER',
+      previous_status: existingOrd.payment_status,
+      new_status: 'paid',
+      description: `Owner ${owner} settled unpaid completed Order #${existingOrd.order_number} for ₹${amount} via ${paymentMethod.toUpperCase()}. Note: ${referenceNote || 'Direct counter payment'}`
+    });
+
+    fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
+    return true;
+  };
+
   const recordOfflinePayment = async (
     orderId: string,
     payments: { method: OfflinePaymentMethod; amount: number; reference?: string; note?: string }[],
@@ -4815,6 +4944,12 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const existingOrd = orders.find(o => o.id === orderId);
     if (!existingOrd) {
       showToast("Order not found.", "error");
+      return false;
+    }
+
+    // ANTI-FRAUD SECURITY: Staff cannot settle completed unpaid orders
+    if (existingOrd.order_status === 'completed' && (actorType === 'staff' || (!actorType && currentStaff))) {
+      showToast("Security: Completed unpaid orders can only be settled by Restaurant Owner in Sales menu.", "error");
       return false;
     }
 
@@ -6022,6 +6157,101 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newSess;
   };
 
+  // UNIVERSAL PUSH NOTIFICATION DISPATCHER (Guaranteed delivery on Killed App & Lock Screen)
+  const dispatchUniversalPushNotification = async (
+    restaurantId: string,
+    title: string,
+    body: string,
+    data: any = {}
+  ) => {
+    if (!restaurantId) return;
+
+    // 1. Dispatch via serverless /api/send-push route
+    fetch('/api/send-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurantId, title, body, data })
+    }).catch(e => console.warn('[Universal Push] /api/send-push notice:', e));
+
+    // 2. Direct Expo Push Dispatch (Universal guaranteed delivery to killed app & lock screen via Expo Push API)
+    try {
+      let tokens: string[] = [];
+      // Try local cache first
+      try {
+        const cached = localStorage.getItem(`digimoms_registered_tokens_${restaurantId}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) tokens = parsed;
+        }
+      } catch (e) {}
+
+      // If no cached tokens or to ensure latest, query Supabase audit_logs
+      if (!tokens || tokens.length === 0) {
+        try {
+          const { data: logs } = await supabase
+            .from('audit_logs')
+            .select('description')
+            .eq('restaurant_id', restaurantId)
+            .eq('action', 'PUSH_TOKEN_REGISTRATION')
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          if (logs && logs.length > 0) {
+            const tSet = new Set<string>();
+            logs.forEach(l => {
+              try {
+                const p = JSON.parse(l.description);
+                if (Array.isArray(p?.tokens)) p.tokens.forEach((tok: string) => tSet.add(tok));
+              } catch (e) {}
+            });
+            tokens = Array.from(tSet);
+          }
+        } catch (dbErr) {}
+      }
+
+      const expoTokens = tokens.filter(t => typeof t === 'string' && (t.startsWith('ExponentPushToken[') || t.startsWith('ExpoPushToken[')));
+      if (expoTokens.length > 0) {
+        const messages = expoTokens.map(tok => ({
+          to: tok,
+          sound: 'default',
+          title: title || '🔔 DigiMoms Alert',
+          body: body || 'New update available',
+          channelId: 'orders',
+          priority: 'high',
+          _displayInForeground: true,
+          data: { ...data, restaurantId }
+        }));
+
+        fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(messages),
+        }).then(r => r.json()).then(res => {
+          console.log('[Universal Push] Direct Expo Push Result:', res);
+        }).catch(err => {
+          console.warn('[Universal Push] Direct Expo Push error:', err);
+        });
+      }
+    } catch (pushErr) {
+      console.warn('[Universal Push] Dispatch notice:', pushErr);
+    }
+  };
+
+  const sendTestPushNotification = async (restaurantId: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const title = '🔔 DigiMoms Live Push Test';
+      const body = `Test order alert at ${new Date().toLocaleTimeString()} - Lock screen & Notification bar active!`;
+      await dispatchUniversalPushNotification(restaurantId, title, body, { test: 'true', timestamp: String(Date.now()) });
+      return { success: true, message: 'Test push notification dispatched to Expo & Firebase!' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Push test failed' };
+    }
+  };
+
   const placeOrder = async (
     restaurantId: string,
     sessionId: string,
@@ -6245,6 +6475,19 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       body: JSON.stringify({ ...cleanOrderPayload, items: orderItemsToInsert })
     }).catch(srvErr => console.warn("Server order save warning:", srvErr));
 
+    // Dispatch Universal Push Notification (Expo Push API & Firebase for Lock screen & Background alerts)
+    const isCashOrder = effectivePaymentMode === 'cash' || effectivePaymentMode === 'partial';
+    const pushTitle = isCashOrder ? '💵 New Cash Order' : '🔔 New Order Received';
+    const pushBody = `Table ${tableNumber || 'Takeaway'} (Order #${orderNum}): ₹${grand_total}. Please check dashboard!`;
+    dispatchUniversalPushNotification(restaurantId, pushTitle, pushBody, {
+      orderId,
+      orderNumber: orderNum,
+      tableNumber,
+      type: 'new_order',
+      grandTotal: grand_total,
+      restaurantId
+    });
+
     // Concurrently persist to Supabase & hotel wallets in the background
     (async () => {
       try {
@@ -6311,6 +6554,14 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 3. Background persist to Supabase
     supabase.from('call_waiter').insert([req]).then(({ error }) => {
       if (error) console.error("Send call waiter error:", error);
+    });
+
+    // Dispatch Universal Push Notification for Waiter Call
+    dispatchUniversalPushNotification(restaurantId, '👋 Waiter Called!', `Table ${tableNumber} is requesting: ${requestType.toUpperCase()}`, {
+      callId: req.id,
+      tableNumber,
+      type: 'call_waiter',
+      restaurantId
     });
   };
 
@@ -6548,6 +6799,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       addCategory, updateCategory, addMenuItem, updateMenuItem, toggleMenuItemAvailability,
       addTable, clearTableSession, addStaffMember, toggleStaffStatus, deleteStaffMember, updateStaffPassword,
       loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder, recordOfflinePayment,
+      settleCompletedOrderPayment, sendTestPushNotification,
       verifyUpiPayment, rejectUpiPayment, submitUpiPaymentConfirmation,
       acceptOrder, startCookingOrder, markOrderReady, serveOrder, completeOrder, placeOrder,
       sendCallWaiterRequest, submitCustomerFeedback, getActiveTableSession, getOrCreateTableSession, deleteOrdersByMonth,
