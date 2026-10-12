@@ -139,13 +139,13 @@ export const Footer: React.FC = () => {
       <div className="max-w-7xl mx-auto mt-12 pt-6 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
         <div className="flex items-center gap-3">
           <p>© {new Date().getFullYear()} DigiMoms Smart Restaurant OS. All Rights Reserved.</p>
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-400">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-mono text-emerald-400 font-bold">
             <Code2 className="w-3 h-3 text-blue-400" />
-            {DEPLOYMENT_VERSION}
+            v{DEPLOYMENT_VERSION}
           </span>
         </div>
         <p className="font-medium text-slate-300">
-          Technology Powered by <span className="text-blue-400 font-bold">DigiMoms Enterprise</span> | Version 2026 Edition
+          Technology Powered by <span className="text-blue-400 font-bold">DigiMoms Enterprise</span> | Version {DEPLOYMENT_VERSION}
         </p>
       </div>
 

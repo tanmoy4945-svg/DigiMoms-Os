@@ -172,8 +172,8 @@ export const MobileAppPortal: React.FC<MobileAppPortalProps> = ({ onOpenPublicWe
             <span>Open Desktop / Marketing Website</span>
           </button>
         )}
-        <p className="text-[10px] text-slate-500">
-          DigiMoms Restaurant OS v2.0 • Enterprise Cloud Architecture
+        <p className="text-[10px] text-slate-500 font-mono">
+          DigiMoms Restaurant OS v5.5 • Enterprise Cloud Architecture
         </p>
       </div>
     </div>

@@ -1236,27 +1236,18 @@ export const OwnerDashboard: React.FC = () => {
                           const totalPaid = Number(order.online_amount || 0) + Number(order.cash_amount || 0);
                           const hasDue = !isPaid || totalPaid < Number(order.grand_total || 0);
 
+                          // JATOKHON NA PAID MARK HOCHHE, KONO COMPLETE BUTTON DAKHABE NA
                           if (hasDue) {
-                            return (
-                              <button
-                                onClick={() => {
-                                  showToast(`⚠️ পেমেন্ট বাকি আছে! সম্পূর্ণ পেমেন্ট 'Mark Cash Paid' বা অনলাইন না করা পর্যন্ত অর্ডার Complete করা যাবে না।`, 'warning');
-                                }}
-                                className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                                title="পেমেন্ট বাকি থাকলে Complete করা যাবে না"
-                              >
-                                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                                <span>পেমেন্ট ছাড়া Complete হবে না</span>
-                              </button>
-                            );
+                            return null;
                           }
 
                           return (
                             <button
                               onClick={() => completeOrder(order.id, currentOwner.owner_name, 'owner')}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md"
+                              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md flex items-center gap-1"
                             >
-                              Complete Order
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Complete Order</span>
                             </button>
                           );
                         })()
