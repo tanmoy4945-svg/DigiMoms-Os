@@ -54,10 +54,19 @@ export const OwnerDashboard: React.FC = () => {
     renewRestaurantMonthly,
     subscriptionHistory,
     updateOwnerPassword,
+    settleCompletedOrderPayment,
     showToast
   } = useSaaS();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'tables' | 'staff' | 'payments' | 'reports' | 'gst-reports' | 'feedback' | 'settings' | 'public-website'>('overview');
+  
+  // Anti-fraud Settlement Modal State
+  const [settleModalOrder, setSettleModalOrder] = useState<Order | null>(null);
+  const [settleMedium, setSettleMedium] = useState<'cash' | 'upi' | 'card' | 'bank_transfer'>('cash');
+  const [settleAmount, setSettleAmount] = useState<number>(0);
+  const [settleRefNote, setSettleRefNote] = useState<string>('');
+  const [isSubmittingSettle, setIsSubmittingSettle] = useState(false);
+
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [showPayUSubscriptionModal, setShowPayUSubscriptionModal] = useState(false);
   const [showPhonePeSubscriptionModal, setShowPhonePeSubscriptionModal] = useState(false);
@@ -122,6 +131,17 @@ export const OwnerDashboard: React.FC = () => {
         return false;
       }
       return true;
+    });
+  }, [restOrders]);
+
+  // Anti-fraud: Orders marked COMPLETED by staff/owner without marking cash paid
+  const unsettledCompletedOrders = React.useMemo(() => {
+    return restOrders.filter(o => {
+      if (o.order_status !== 'completed') return false;
+      const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(o.payment_status);
+      if (isPaid) return false;
+      const due = getEffectiveCashDue(o);
+      return due > 0 || o.payment_status === 'pending';
     });
   }, [restOrders]);
 
@@ -705,6 +725,11 @@ export const OwnerDashboard: React.FC = () => {
           }`}
         >
           <BarChart3 className="w-4 h-4" /> Sales & Reports
+          {unsettledCompletedOrders.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950 animate-pulse">
+              {unsettledCompletedOrders.length}
+            </span>
+          )}
         </button>
 
         <button
@@ -967,6 +992,74 @@ export const OwnerDashboard: React.FC = () => {
             </div>
           )}
 
+          {/* Unsettled Completed Cash Orders Banner (Immediate Owner Action) */}
+          {unsettledCompletedOrders.length > 0 && (
+            <div className="p-6 rounded-3xl bg-amber-950/60 border-2 border-amber-500 shadow-2xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-500/30 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                    <AlertCircle className="w-7 h-7 animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white flex items-center gap-2">
+                      🚨 বাকি থাকা কমপ্লিট ক্যাশ অর্ডার ({unsettledCompletedOrders.length})
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-500 text-slate-950 uppercase">
+                        পেমেন্ট বাকি
+                      </span>
+                    </h3>
+                    <p className="text-xs text-amber-200">
+                      স্টাফ ভুল করে ক্যাশ মার্ক না করে এই অর্ডারগুলো Complete করেছে। ওনার হিসেবে এখান থেকে পেমেন্টের মাধ্যম (Cash, UPI, Card) দিয়ে সরাসরি সেটেল করুন:
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-amber-300 font-bold">মোট বকেয়া ক্যাশ</div>
+                  <div className="text-2xl font-black text-amber-400 font-mono">
+                    ₹{unsettledCompletedOrders.reduce((sum, o) => sum + (getEffectiveCashDue(o) || o.grand_total), 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {unsettledCompletedOrders.map(order => {
+                  const due = getEffectiveCashDue(order) || order.grand_total;
+                  return (
+                    <div key={order.id} className="p-4 rounded-2xl bg-slate-900 border border-amber-500/50 flex flex-col justify-between gap-3 shadow-lg hover:border-amber-400 transition-all">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-white font-mono text-base">{order.order_number}</span>
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-800 text-amber-300 border border-slate-700">
+                            {order.table_number || 'Takeaway'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-300 truncate">
+                          {order.items.map(i => `${i.quantity}x ${i.menu_name}`).join(', ')}
+                        </div>
+                        <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-800">
+                          <span className="text-slate-400">Total: ₹{order.grand_total}</span>
+                          <span className="text-amber-400 font-black text-sm">বকেয়া: ₹{due}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setSettleModalOrder(order);
+                          setSettleMedium('cash');
+                          setSettleAmount(due);
+                          setSettleRefNote('');
+                        }}
+                        className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                        <span>পেমেন্ট সেটেল ও পেইড করুন (Settle)</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Active Orders Section */}
           <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 space-y-4">
             <div className="flex items-center justify-between">
@@ -1138,12 +1231,35 @@ export const OwnerDashboard: React.FC = () => {
                       </div>
 
                       {order.order_status === 'served' && (
-                        <button
-                          onClick={() => completeOrder(order.id, currentOwner.owner_name, 'owner')}
-                          className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs"
-                        >
-                          Complete Order
-                        </button>
+                        (() => {
+                          const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(order.payment_status);
+                          const totalPaid = Number(order.online_amount || 0) + Number(order.cash_amount || 0);
+                          const hasDue = !isPaid || totalPaid < Number(order.grand_total || 0);
+
+                          if (hasDue) {
+                            return (
+                              <button
+                                onClick={() => {
+                                  showToast(`⚠️ পেমেন্ট বাকি আছে! সম্পূর্ণ পেমেন্ট 'Mark Cash Paid' বা অনলাইন না করা পর্যন্ত অর্ডার Complete করা যাবে না।`, 'warning');
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                                title="পেমেন্ট বাকি থাকলে Complete করা যাবে না"
+                              >
+                                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                                <span>পেমেন্ট ছাড়া Complete হবে না</span>
+                              </button>
+                            );
+                          }
+
+                          return (
+                            <button
+                              onClick={() => completeOrder(order.id, currentOwner.owner_name, 'owner')}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md"
+                            >
+                              Complete Order
+                            </button>
+                          );
+                        })()
                       )}
                     </div>
                   </div>
@@ -1163,6 +1279,136 @@ export const OwnerDashboard: React.FC = () => {
           onClose={() => setSelectedBillOrder(null)}
           actorName={currentOwner.owner_name}
         />
+      )}
+
+      {/* Anti-Fraud Owner Settlement Modal */}
+      {settleModalOrder && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl text-left relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-500 via-emerald-500 to-blue-500"></div>
+            
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-amber-400" />
+                  অর্ডার সেটেলমেন্ট ও পেমেন্ট রিসিভ
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Order #{settleModalOrder.order_number} • Table {settleModalOrder.table_number || 'Takeaway'}
+                </p>
+              </div>
+              <button
+                onClick={() => setSettleModalOrder(null)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Payment Medium Selection */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-2">
+                  পেমেন্টের মাধ্যম নির্বাচন করুন (Payment Medium) *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'cash', label: '💵 নগদ টাকা (Cash)', desc: 'কাউন্টারে ক্যাশ জমা' },
+                    { id: 'upi', label: '📱 কাউন্টার UPI (QR / PhonePe)', desc: 'GPay, Paytm, PhonePe' },
+                    { id: 'card', label: '💳 কার্ড (POS Swiped)', desc: 'POS মেশিনে কার্ড পেমেন্ট' },
+                    { id: 'bank_transfer', label: '🏦 ব্যাংক ট্রান্সফার / IMPS', desc: 'সরাসরি ব্যাংক অ্যাকাউন্ট' },
+                  ].map(m => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setSettleMedium(m.id as any)}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                        settleMedium === m.id
+                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-lg'
+                          : 'bg-slate-800/50 border-slate-700/60 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="font-bold text-xs">{m.label}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{m.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
+                  গৃহীত টাকার পরিমাণ (Settlement Amount ₹) *
+                </label>
+                <input
+                  type="number"
+                  value={settleAmount}
+                  onChange={(e) => setSettleAmount(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:border-amber-500 outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+
+              {/* Note / Reference */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
+                  ট্রানজ্যাকশন রেফারেন্স / নোট (ঐচ্ছিক)
+                </label>
+                <input
+                  type="text"
+                  value={settleRefNote}
+                  onChange={(e) => setSettleRefNote(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-xs focus:border-amber-500 outline-none"
+                  placeholder="যেমন: UTR No / Cash drawer slip / কাউন্টার ওনার কালেকশন"
+                />
+              </div>
+
+              {/* Anti-fraud Info */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <div className="text-amber-400 font-bold">🔒 সিকিউরিটি অডিট ট্রেইল:</div>
+                <div>এই অ্যাকশনটি ওনার হিসেবে স্থায়ীভাবে রেকর্ড হবে যাতে কোনো স্টাফ কারচুপি করতে না পারে।</div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSettleModalOrder(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all cursor-pointer"
+              >
+                বাতিল করুন
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingSettle || settleAmount <= 0}
+                onClick={async () => {
+                  if (!settleModalOrder) return;
+                  setIsSubmittingSettle(true);
+                  try {
+                    await settleCompletedOrderPayment(
+                      settleModalOrder.id,
+                      settleMedium,
+                      settleAmount,
+                      settleRefNote,
+                      currentOwner?.owner_name
+                    );
+                    setSettleModalOrder(null);
+                  } finally {
+                    setIsSubmittingSettle(false);
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                {isSubmittingSettle ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                )}
+                <span>পেমেন্ট নিশ্চিত ও পেইড করুন</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* OTHER TABS */}

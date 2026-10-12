@@ -5956,6 +5956,20 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const completeOrder = async (orderId: string, actorName?: string, actorType?: 'owner' | 'staff') => {
     lockOrder(orderId);
     const existingOrd = orders.find(o => o.id === orderId);
+    if (!existingOrd) return;
+
+    // STRICT MANDATORY PAYMENT ENFORCEMENT:
+    // Mark as Paid NA KORLE COMPLETE KORA JABE NA!
+    const isPaid = ['paid_live', 'paid', 'paid_demo', 'paid_cash', 'paid_online'].includes(existingOrd.payment_status);
+    const totalPaid = Number(existingOrd.online_amount || 0) + Number(existingOrd.cash_amount || 0);
+    const grandTotal = Number(existingOrd.grand_total || 0);
+    const hasUnpaidBalance = !isPaid || totalPaid < grandTotal;
+
+    if (hasUnpaidBalance) {
+      showToast(`⚠️ Payment Pending! Order #${existingOrd.order_number} cannot be completed without marking payment as PAID.`, 'error');
+      return;
+    }
+
     const actor = actorName || (currentStaff ? currentStaff.name : (currentOwner ? currentOwner.owner_name : 'Manager'));
     const type = actorType || (currentStaff ? 'staff' : 'owner');
 
