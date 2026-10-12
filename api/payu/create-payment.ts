@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
