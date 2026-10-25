@@ -39,7 +39,7 @@ const SUPABASE_URL = String(rawSupabaseUrl)
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_TMLOZVNYis6bZInTdfWJ3Q_BJ1kiuih';
 const serverSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
   const PORT = 3000;
 
@@ -244,6 +244,21 @@ async function startServer() {
     });
 
     writeJsonFile('fcm_tokens.json', fcmTokens);
+
+    // Also persist to Supabase audit_logs for cloud-sync/persistence on read-only environments like Vercel
+    const cleanTokens = tokensToAdd.filter(t => typeof t === 'string' && t.trim().length > 5);
+    if (cleanTokens.length > 0) {
+      serverSupabase.from('audit_logs').insert([{
+        id: crypto.randomUUID(),
+        restaurant_id: restaurantId,
+        actor_type: 'system',
+        action: 'PUSH_TOKEN_REGISTRATION',
+        description: JSON.stringify({ tokens: cleanTokens, updated_at: new Date().toISOString() })
+      }]).then(({ error }) => {
+        if (error) console.warn('[FCM Sync] Supabase insert warning:', error.message);
+      }).catch(() => {});
+    }
+
     res.json({ success: true, tokenCount: fcmTokens[restaurantId].length });
   });
 
@@ -2361,9 +2376,27 @@ Keep response concise, clear, friendly, and formatted with clean bullet points o
     })
     .subscribe();
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-  });
+  return app;
 }
 
-startServer();
+// Global app instance for consolidation
+let globalApp: any = null;
+
+export default async function getApp() {
+  if (!globalApp) {
+    globalApp = await createExpressApp();
+  }
+  return globalApp;
+}
+
+// Standalone execution (Standard AI Studio / Node environment)
+const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.cjs');
+
+if (isMain) {
+  createExpressApp().then(app => {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+  });
+}
