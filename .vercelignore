@@ -1,17 +1,8 @@
-# Directories to ignore for Vercel functions
+# Directories to ignore for Vercel
 sql/
 scripts/
 data/
 mobile-app/
-assets/
-public/
-dist/
-node_modules/
 
-# Files to ignore
-.env*
-.gitignore
-package-lock.json
-tsconfig.json
-metadata.json
-index.html
+# Do NOT ignore index.html, src/, public/, or assets/
+# as they are required for the Vite frontend build.
