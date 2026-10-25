@@ -1,8 +1,23 @@
-# Directories to ignore for Vercel
+# Ignore everything in the api folder by default
+api/*
+
+# But allow the main consolidated entry point
+!api/index.ts
+
+# Ignore non-essential directories for deployment
 sql/
 scripts/
 data/
 mobile-app/
+assets/.aistudio/
 
-# Do NOT ignore index.html, src/, public/, or assets/
-# as they are required for the Vite frontend build.
+# Ensure frontend files are NOT ignored
+!index.html
+!src/
+!public/
+!assets/
+!package.json
+!server.ts
+!vite.config.ts
+!tsconfig.json
+!vercel.json
