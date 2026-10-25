@@ -1,4 +1,4 @@
-import getApp from '../server.ts';
+import getApp from '../src/backend/server.ts';
 
 export default async function handler(req: any, res: any) {
   const app = await getApp();

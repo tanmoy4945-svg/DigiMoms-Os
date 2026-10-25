@@ -6,7 +6,6 @@ api/*
 
 # Ignore non-essential directories for deployment
 sql/
-scripts/
 data/
 mobile-app/
 assets/.aistudio/
@@ -17,7 +16,6 @@ assets/.aistudio/
 !public/
 !assets/
 !package.json
-!server.ts
 !vite.config.ts
 !tsconfig.json
 !vercel.json

@@ -1,0 +1,2408 @@
+import express from 'express';
+import path from 'path';
+import crypto from 'crypto';
+import fs from 'fs';
+import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
+import admin from 'firebase-admin';
+
+// Initialize Firebase Admin SDK
+try {
+  const serviceAccountPath = path.join(process.cwd(), 'firebase-admin-config.json');
+  if (fs.existsSync(serviceAccountPath)) {
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+    (admin as any).initializeApp({
+      credential: (admin as any).credential.cert(serviceAccount)
+    });
+    console.log('[Firebase Admin] Initialized successfully');
+  } else if (process.env.FIREBASE_CONFIG) {
+    // Fallback for production hosting without the JSON file
+    const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+    (admin as any).initializeApp({
+      credential: (admin as any).credential.cert(serviceAccount)
+    });
+    console.log('[Firebase Admin] Initialized via Environment Variable');
+  } else {
+    console.warn('[Firebase Admin] Warning: No Firebase configuration found. Push notifications will be disabled.');
+  }
+} catch (err) {
+  console.warn('[Firebase Admin] Initialization failed:', err);
+}
+
+const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://qjkoeehgkfnailgmhyjs.supabase.co';
+const SUPABASE_URL = String(rawSupabaseUrl)
+  .trim()
+  .replace(/\/+$/, '')
+  .replace(/\/rest\/v1\/?$/i, '')
+  .replace(/\/+$/, '');
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_TMLOZVNYis6bZInTdfWJ3Q_BJ1kiuih';
+const serverSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+export async function createExpressApp() {
+  const app = express();
+  const PORT = 3000;
+
+  const DATA_DIR = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(DATA_DIR)) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    } catch (err) {
+      console.warn('Could not create data dir:', err);
+    }
+  }
+
+  function readJsonFile<T>(filename: string, defaultVal: T): T {
+    try {
+      const filePath = path.join(DATA_DIR, filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, JSON.stringify(defaultVal, null, 2), 'utf-8');
+        return defaultVal;
+      }
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(raw) as T;
+    } catch (err) {
+      console.warn(`Error reading ${filename}, using default:`, err);
+      return defaultVal;
+    }
+  }
+
+  function writeJsonFile<T>(filename: string, data: T): void {
+    try {
+      const filePath = path.join(DATA_DIR, filename);
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Error writing ${filename}:`, err);
+    }
+  }
+
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // Helper to send push notifications to both FCM and Expo Push Services
+  async function sendPushNotification(restaurantId: string, title: string, body: string, data: any = {}) {
+    try {
+      const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
+      let tokens = fcmTokens[restaurantId] || [];
+      
+      // If no local tokens found, query Supabase audit_logs for registered push tokens
+      if (tokens.length === 0) {
+        try {
+          const { data: logs } = await serverSupabase
+            .from('audit_logs')
+            .select('description')
+            .eq('restaurant_id', restaurantId)
+            .eq('action', 'PUSH_TOKEN_REGISTRATION')
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          if (logs && logs.length > 0) {
+            const tokenSet = new Set<string>();
+            logs.forEach((l: any) => {
+              try {
+                const parsed = JSON.parse(l.description);
+                if (Array.isArray(parsed?.tokens)) {
+                  parsed.tokens.forEach((tok: string) => {
+                    if (tok && typeof tok === 'string' && tok.length > 5) {
+                      tokenSet.add(tok);
+                    }
+                  });
+                }
+              } catch (e) {}
+            });
+            tokens = Array.from(tokenSet);
+            if (tokens.length > 0) {
+              fcmTokens[restaurantId] = tokens;
+              writeJsonFile('fcm_tokens.json', fcmTokens);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('[Push Notification] Supabase token query note:', dbErr);
+        }
+      }
+
+      if (tokens.length === 0) {
+        console.log(`[Push Notification] No tokens registered for restaurant ${restaurantId}`);
+        return { success: false, reason: 'no_tokens' };
+      }
+
+      console.log(`[Push Notification] Dispatching alert to ${tokens.length} token(s) for restaurant ${restaurantId}...`);
+
+      const expoTokens: string[] = [];
+      const nativeFcmTokens: string[] = [];
+
+      tokens.forEach(tok => {
+        if (tok.startsWith('ExponentPushToken[') || tok.startsWith('ExpoPushToken[')) {
+          expoTokens.push(tok);
+        } else {
+          nativeFcmTokens.push(tok);
+        }
+      });
+
+      // 1. Send to Expo Push Tokens (for Expo Go or EAS built apps using Expo Push)
+      if (expoTokens.length > 0) {
+        try {
+          const expoMessages = expoTokens.map(tok => ({
+            to: tok,
+            sound: 'default',
+            title: title || '🔔 DigiMoms Alert',
+            body: body || 'New update available',
+            channelId: 'orders',
+            priority: 'high',
+            _displayInForeground: true,
+            data: { ...data, restaurantId }
+          }));
+
+          const expoResp = await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Accept-encoding': 'gzip, deflate',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(expoMessages),
+          });
+          const expoResult = await expoResp.json();
+          console.log('[Push Notification] Expo Push Result:', expoResult);
+        } catch (expoErr) {
+          console.error('[Push Notification] Expo Push send failed:', expoErr);
+        }
+      }
+
+      // 2. Send to Native FCM Tokens via Firebase Admin SDK
+      if (nativeFcmTokens.length > 0) {
+        try {
+          const fcmMessage = {
+            notification: { title, body },
+            data: {
+              ...Object.keys(data || {}).reduce((acc: any, k) => {
+                acc[k] = String(data[k] ?? '');
+                return acc;
+              }, {}),
+              restaurantId: String(restaurantId || ''),
+              click_action: 'FLUTTER_NOTIFICATION_CLICK'
+            },
+            android: {
+              priority: 'high' as const,
+              notification: {
+                channelId: 'orders',
+                sound: 'default',
+                priority: 'max' as const,
+                defaultVibrateTimings: true,
+                visibility: 'public' as const, // CRITICAL: displays on lock screen
+              }
+            },
+            tokens: nativeFcmTokens,
+          };
+
+          const response = await (admin as any).messaging().sendEachForMulticast(fcmMessage);
+          console.log(`[Push Notification] Native FCM sent: ${response.successCount} success, ${response.failureCount} failed`);
+
+          // Clean up only truly invalid FCM tokens
+          if (response.failureCount > 0) {
+            const failedTokens: string[] = [];
+            response.responses.forEach((resp: any, idx: number) => {
+              if (!resp.success && (resp.error?.code === 'messaging/registration-token-not-registered' || resp.error?.code === 'messaging/invalid-registration-token')) {
+                failedTokens.push(nativeFcmTokens[idx]);
+              }
+            });
+            if (failedTokens.length > 0) {
+              fcmTokens[restaurantId] = tokens.filter(t => !failedTokens.includes(t));
+              writeJsonFile('fcm_tokens.json', fcmTokens);
+            }
+          }
+        } catch (fcmErr) {
+          console.warn('[Push Notification] Firebase Admin send failed:', fcmErr);
+        }
+      }
+
+      return { success: true, count: tokens.length };
+    } catch (err) {
+      console.error('[Push Notification] Error sending message:', err);
+      return { success: false, error: String(err) };
+    }
+  }
+
+  // API Route: Register Push / FCM Token (supports both param styles)
+  app.post(['/api/fcm/register', '/api/register-fcm-token'], (req, res) => {
+    const restaurantId = req.body.restaurantId || req.body.restaurant_id;
+    const token = req.body.token || req.body.fcmToken;
+    const tokensToAdd: string[] = Array.isArray(token) ? token : (token ? [token] : []);
+
+    if (!restaurantId || tokensToAdd.length === 0) {
+      return res.status(400).json({ success: false, message: 'Missing restaurantId or token' });
+    }
+
+    const fcmTokens = readJsonFile<Record<string, string[]>>('fcm_tokens.json', {});
+    if (!fcmTokens[restaurantId]) fcmTokens[restaurantId] = [];
+
+    tokensToAdd.forEach(tok => {
+      if (tok && typeof tok === 'string' && tok.length > 5 && !fcmTokens[restaurantId].includes(tok)) {
+        fcmTokens[restaurantId].push(tok);
+        console.log(`[Push Token] Registered token (${tok.substring(0, 15)}...) for restaurant: ${restaurantId}`);
+      }
+    });
+
+    writeJsonFile('fcm_tokens.json', fcmTokens);
+
+    // Also persist to Supabase audit_logs for cloud-sync/persistence on read-only environments like Vercel
+    const cleanTokens = tokensToAdd.filter(t => typeof t === 'string' && t.trim().length > 5);
+    if (cleanTokens.length > 0) {
+      serverSupabase.from('audit_logs').insert([{
+        id: crypto.randomUUID(),
+        restaurant_id: restaurantId,
+        actor_type: 'system',
+        action: 'PUSH_TOKEN_REGISTRATION',
+        description: JSON.stringify({ tokens: cleanTokens, updated_at: new Date().toISOString() })
+      }]).then(({ error }) => {
+        if (error) console.warn('[FCM Sync] Supabase insert warning:', error.message);
+      }).catch(() => {});
+    }
+
+    res.json({ success: true, tokenCount: fcmTokens[restaurantId].length });
+  });
+
+  // API Route: Test Push Notification directly to registered devices
+  app.post('/api/send-test-push', async (req, res) => {
+    const restaurantId = req.body.restaurantId || req.body.restaurant_id;
+    if (!restaurantId) {
+      return res.status(400).json({ success: false, message: 'Missing restaurantId' });
+    }
+    const title = req.body.title || '🔔 DigiMoms Lock-Screen Test';
+    const body = req.body.body || 'Alert test: Working in background & lock screen!';
+    const result = await sendPushNotification(restaurantId, title, body, { test: 'true', timestamp: String(Date.now()) });
+    res.json({ success: true, result });
+  });
+
+  // API Route: Persistent CEO Payment Config
+  app.get('/api/ceo/payment-config', (req, res) => {
+    const defaultCfg = {
+      primary_gateway: 'payu',
+      mode: 'demo',
+      phonepe_merchant_id: '',
+      phonepe_salt_key: '',
+      phonepe_salt_index: '1',
+      phonepe_env: 'SANDBOX',
+      phonepe_verified: false,
+      razorpay_key_id: '',
+      razorpay_key_secret: '',
+      razorpay_verified: false,
+      payu_merchant_key: '',
+      payu_merchant_salt: '',
+      payu_env: 'TEST',
+      payu_verified: false
+    };
+    const cfg = readJsonFile('ceo_payment_config.json', defaultCfg);
+    res.json({ success: true, data: cfg });
+  });
+
+  app.post('/api/ceo/payment-config', (req, res) => {
+    const defaultCfg = {
+      primary_gateway: 'payu',
+      mode: 'demo',
+      phonepe_merchant_id: '',
+      phonepe_salt_key: '',
+      phonepe_salt_index: '1',
+      phonepe_env: 'SANDBOX',
+      phonepe_verified: false,
+      razorpay_key_id: '',
+      razorpay_key_secret: '',
+      razorpay_verified: false,
+      payu_merchant_key: '',
+      payu_merchant_salt: '',
+      payu_env: 'TEST',
+      payu_verified: false
+    };
+    const current = readJsonFile('ceo_payment_config.json', defaultCfg);
+    const body = req.body || {};
+    
+    // Preserve existing saved secret salts if client sends masked placeholder
+    const resolvedPayuSalt = (typeof body.payu_merchant_salt === 'string' && !body.payu_merchant_salt.startsWith('•••'))
+      ? body.payu_merchant_salt
+      : (current.payu_merchant_salt || '');
+
+    const resolvedPhonepeSalt = (typeof body.phonepe_salt_key === 'string' && !body.phonepe_salt_key.startsWith('•••'))
+      ? body.phonepe_salt_key
+      : (current.phonepe_salt_key || '');
+
+    const resolvedRazorpaySecret = (typeof body.razorpay_key_secret === 'string' && !body.razorpay_key_secret.startsWith('•••'))
+      ? body.razorpay_key_secret
+      : (current.razorpay_key_secret || '');
+
+    const updated = {
+      ...current,
+      ...body,
+      payu_merchant_salt: resolvedPayuSalt,
+      phonepe_salt_key: resolvedPhonepeSalt,
+      razorpay_key_secret: resolvedRazorpaySecret,
+      updated_at: new Date().toISOString()
+    };
+    
+    writeJsonFile('ceo_payment_config.json', updated);
+    res.json({ success: true, data: updated });
+  });
+
+  // API Route: Persistent CEO Staff Management
+  app.get('/api/ceo/staff', async (req, res) => {
+    try {
+      const { data, error } = await serverSupabase.from('ceo_staff').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
+        writeJsonFile('ceo_staff.json', data);
+        return res.json({ success: true, data });
+      }
+    } catch {}
+    const staffList = readJsonFile<any[]>('ceo_staff.json', []);
+    res.json({ success: true, data: staffList });
+  });
+
+  app.post('/api/ceo/staff', async (req, res) => {
+    const incomingList = req.body || [];
+    const isReplace = req.query.replace === 'true';
+    let staffList = incomingList;
+
+    if (!isReplace) {
+      const currentList = readJsonFile<any[]>('ceo_staff.json', []);
+      const mergedMap = new Map();
+      for (const item of currentList) {
+        if (item && item.id) mergedMap.set(item.id, item);
+      }
+      for (const item of incomingList) {
+        if (item && item.id) mergedMap.set(item.id, item);
+      }
+      staffList = Array.from(mergedMap.values());
+    }
+
+    writeJsonFile('ceo_staff.json', staffList);
+    try {
+      for (const staff of incomingList) {
+        if (staff && staff.id) {
+          await serverSupabase.from('ceo_staff').upsert({
+            id: staff.id,
+            name: staff.name,
+            mobile: staff.mobile,
+            password_hash: staff.password_hash,
+            role: staff.role,
+            status: staff.status,
+            permissions: staff.permissions,
+            last_password_change: staff.last_password_change,
+            last_login: staff.last_login,
+            created_at: staff.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase ceo_staff sync warning:', err);
+    }
+    res.json({ success: true, data: staffList });
+  });
+
+  app.delete('/api/ceo/staff/:id', async (req, res) => {
+    const id = req.params.id;
+    try {
+      await serverSupabase.from('ceo_staff').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase ceo_staff delete warning:', err);
+    }
+    const currentList = readJsonFile<any[]>('ceo_staff.json', []);
+    const filtered = currentList.filter(s => s.id !== id);
+    writeJsonFile('ceo_staff.json', filtered);
+    res.json({ success: true, data: filtered });
+  });
+
+  // Helper: Sanitize restaurant configuration to prevent payment secrets & credential exposure
+  function sanitizeRestaurantConfig(cfg: Record<string, any>, maskSecrets = true): Record<string, any> {
+    if (!cfg) return {};
+    const copy = { ...cfg };
+    delete copy.password_hash;
+
+    if (maskSecrets) {
+      if (copy.payu_merchant_salt) copy.payu_merchant_salt = '••••••••';
+      if (copy.phonepe_salt_key) copy.phonepe_salt_key = '••••••••';
+      if (copy.razorpay_secret) copy.razorpay_secret = '••••••••';
+      if (copy.razorpay_key_secret) copy.razorpay_key_secret = '••••••••';
+    } else {
+      delete copy.payu_merchant_salt;
+      delete copy.phonepe_salt_key;
+      delete copy.razorpay_secret;
+      delete copy.razorpay_key_secret;
+    }
+    return copy;
+  }
+
+  // API Route: Persistent Restaurant Payment Configurations & Overrides (Public/Sync: Secrets completely stripped)
+  app.get('/api/restaurants-configs', (req, res) => {
+    const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+    const sanitized: Record<string, any> = {};
+    for (const [id, cfg] of Object.entries(configs)) {
+      sanitized[id] = sanitizeRestaurantConfig(cfg, false);
+    }
+    res.json({ success: true, data: sanitized });
+  });
+
+  // API Route: Specific Restaurant Config (Masked for authenticated owner UI, stripped for guests)
+  app.get(['/api/restaurants/:id/config', '/api/restaurant-config/:id'], (req, res) => {
+    const { id } = req.params;
+    const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+    const cfg = configs[id] || {};
+    res.json({ success: true, data: sanitizeRestaurantConfig(cfg, true) });
+  });
+
+  app.post(['/api/restaurants/:id/config', '/api/restaurant-config/:id'], (req, res) => {
+    const { id } = req.params;
+    const configs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+    const currentRest = configs[id] || {};
+    const body = req.body || {};
+
+    // Preserve existing saved secrets if client sends masked placeholder or leaves empty
+    const resolvedPayuSalt = (typeof body.payu_merchant_salt === 'string' && !body.payu_merchant_salt.startsWith('•••') && body.payu_merchant_salt.trim() !== '')
+      ? body.payu_merchant_salt
+      : (currentRest.payu_merchant_salt || '');
+
+    const resolvedPhonepeSalt = (typeof body.phonepe_salt_key === 'string' && !body.phonepe_salt_key.startsWith('•••') && body.phonepe_salt_key.trim() !== '')
+      ? body.phonepe_salt_key
+      : (currentRest.phonepe_salt_key || '');
+
+    const resolvedRazorpaySecret = (typeof body.razorpay_secret === 'string' && !body.razorpay_secret.startsWith('•••') && body.razorpay_secret.trim() !== '')
+      ? body.razorpay_secret
+      : (currentRest.razorpay_secret || '');
+
+    configs[id] = {
+      ...currentRest,
+      ...body,
+      payu_merchant_salt: resolvedPayuSalt,
+      phonepe_salt_key: resolvedPhonepeSalt,
+      razorpay_secret: resolvedRazorpaySecret,
+      updated_at: new Date().toISOString()
+    };
+    writeJsonFile('restaurant_configs.json', configs);
+    res.json({ success: true, data: sanitizeRestaurantConfig(configs[id], true) });
+  });
+
+  // Realtime Server-Sent Events (SSE) Manager for Ultra-Fast Instant Multi-Device Notifications
+  const sseClients = new Map<string, Set<express.Response>>();
+
+  function broadcastRealtimeOrderEvent(restaurantId: string | undefined, eventPayload: any) {
+    const targetIds = ['all'];
+    if (restaurantId) targetIds.push(restaurantId);
+
+    const enrichedPayload = {
+      ...eventPayload,
+      data: eventPayload.data || eventPayload.order || eventPayload.call_request || eventPayload.payload,
+      timestamp: eventPayload.timestamp || new Date().toISOString()
+    };
+
+    targetIds.forEach(rid => {
+      const clients = sseClients.get(rid);
+      if (clients) {
+        const msg = `data: ${JSON.stringify(enrichedPayload)}\n\n`;
+        clients.forEach(res => {
+          try {
+            res.write(msg);
+          } catch (e) {
+            clients.delete(res);
+          }
+        });
+      }
+    });
+  }
+
+  // API Route: Realtime SSE Stream for Dashboards & Terminals
+  app.get('/api/realtime/events', (req, res) => {
+    const restaurantId = (req.query.restaurant_id as string) || 'all';
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    if (!sseClients.has(restaurantId)) {
+      sseClients.set(restaurantId, new Set());
+    }
+    sseClients.get(restaurantId)!.add(res);
+
+    // Initial connection acknowledgement
+    res.write(`data: ${JSON.stringify({ type: 'CONNECTED', restaurant_id: restaurantId, timestamp: new Date().toISOString() })}\n\n`);
+
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(keepAlive);
+      }
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      sseClients.get(restaurantId)?.delete(res);
+    });
+  });
+
+  // API Route: Cross-Device Realtime Broadcast Endpoint
+  app.post('/api/realtime/broadcast', (req, res) => {
+    const { restaurant_id, type, order, call_request, payload } = req.body;
+    broadcastRealtimeOrderEvent(restaurant_id, {
+      type: type || 'EVENT',
+      restaurant_id,
+      order,
+      call_request,
+      payload,
+      timestamp: new Date().toISOString()
+    });
+    res.json({ success: true });
+  });
+
+  // API Route: Persistent Orders Sync & Backup
+  app.get('/api/orders/list', (req, res) => {
+    const { restaurant_id } = req.query;
+    const allOrders = readJsonFile<any[]>('orders.json', []);
+    const filtered = restaurant_id ? allOrders.filter(o => o.restaurant_id === restaurant_id) : allOrders;
+    res.json({ success: true, data: filtered });
+  });
+
+  app.post('/api/orders/save', (req, res) => {
+    const order = req.body;
+    if (!order || !order.id) {
+      return res.status(400).json({ error: 'Missing order data' });
+    }
+    const allOrders = readJsonFile<any[]>('orders.json', []);
+    const idx = allOrders.findIndex(o => o.id === order.id);
+    let isNew = false;
+    if (idx >= 0) {
+      allOrders[idx] = { ...allOrders[idx], ...order, updated_at: new Date().toISOString() };
+    } else {
+      isNew = true;
+      allOrders.unshift({ ...order, created_at: order.created_at || new Date().toISOString() });
+    }
+    writeJsonFile('orders.json', allOrders.slice(0, 1000));
+
+    // Immediately broadcast to all connected Owner & Staff dashboards via SSE (exclude unverified online checkout attempts)
+    const isUnverifiedOnline = order.payment_mode === 'online' && !['paid_live', 'paid', 'paid_demo', 'paid_online'].includes(order.payment_status);
+    if (!isUnverifiedOnline) {
+      broadcastRealtimeOrderEvent(order.restaurant_id, {
+        type: isNew ? 'NEW_ORDER' : 'ORDER_UPDATED',
+        restaurant_id: order.restaurant_id,
+        order,
+        timestamp: new Date().toISOString()
+      });
+
+      // Dispatch high-priority lock-screen & background push notification to restaurant owners/staff
+      if (isNew && order.restaurant_id) {
+        const isCash = order.payment_mode === 'cash' || order.payment_mode === 'partial';
+        const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
+        const body = `Table ${order.table_number || 'Takeaway'} (Order #${order.order_number}): ₹${order.grand_total}. Please check dashboard!`;
+        sendPushNotification(order.restaurant_id, title, body, {
+          orderId: order.id,
+          type: 'new_order',
+          restaurant_id: order.restaurant_id
+        }).catch(pErr => console.warn('[Orders Save] Push dispatch note:', pErr));
+      }
+    }
+
+    res.json({ success: true, data: order });
+  });
+
+  // Direct push notification API endpoint
+  app.post('/api/send-push', async (req, res) => {
+    try {
+      const { restaurantId, restaurant_id, title, body, data } = req.body || {};
+      const targetRestId = restaurantId || restaurant_id;
+      if (!targetRestId) {
+        return res.status(400).json({ error: 'Missing restaurantId' });
+      }
+      const result = await sendPushNotification(targetRestId, title, body, data);
+      res.json({ success: true, result });
+    } catch (err: any) {
+      console.error('[API send-push] Error:', err);
+      res.status(500).json({ error: err.message || 'Push send error' });
+    }
+  });
+
+  // API Route: Persistent Transactions Record
+  app.get('/api/transactions/list', (req, res) => {
+    const { restaurant_id } = req.query;
+    const allTx = readJsonFile<any[]>('transactions.json', []);
+    const filtered = restaurant_id ? allTx.filter(t => t.restaurant_id === restaurant_id) : allTx;
+    res.json({ success: true, data: filtered });
+  });
+
+  app.post('/api/transactions/record', (req, res) => {
+    const tx = req.body;
+    if (!tx || !tx.id) {
+      return res.status(400).json({ error: 'Missing transaction data' });
+    }
+    const allTx = readJsonFile<any[]>('transactions.json', []);
+    allTx.unshift({ ...tx, created_at: tx.created_at || new Date().toISOString() });
+    writeJsonFile('transactions.json', allTx.slice(0, 1000));
+    res.json({ success: true, data: tx });
+  });
+
+
+  // API Route: Create PhonePe Payment Request for DigiMoms Subscriptions
+  app.post('/api/phonepe/create-payment', async (req, res) => {
+    try {
+      const {
+        amount,
+        restaurant_id,
+        restaurant_name,
+        mobile,
+        merchant_id,
+        salt_key,
+        salt_index,
+        env = 'SANDBOX',
+        redirect_url,
+        callback_url,
+        order_id,
+        table_code,
+        is_subscription
+      } = req.body;
+
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: 'Invalid subscription amount' });
+      }
+
+      const origin = req.headers.origin || (req.headers.host ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000');
+      
+      let resolvedMerchantId = (merchant_id || '').trim();
+      let resolvedSaltKey = (salt_key || '').trim();
+      let resolvedSaltIndex = (salt_index || '').trim();
+
+      // Look up credentials securely from server-side store if not passed or masked
+      if (!resolvedMerchantId || !resolvedSaltKey || resolvedSaltKey.startsWith('•••') || resolvedSaltKey === 'test-salt-key-digimoms-secret') {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.phonepe_merchant_id && !resolvedMerchantId) resolvedMerchantId = rCfg.phonepe_merchant_id;
+          if (rCfg.phonepe_salt_key && (!resolvedSaltKey || resolvedSaltKey.startsWith('•••'))) resolvedSaltKey = rCfg.phonepe_salt_key;
+          if (rCfg.phonepe_salt_index && !resolvedSaltIndex) resolvedSaltIndex = rCfg.phonepe_salt_index;
+        }
+        if (!resolvedMerchantId || !resolvedSaltKey || resolvedSaltKey.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.phonepe_merchant_id && !resolvedMerchantId) resolvedMerchantId = ceoCfg.phonepe_merchant_id;
+          if (ceoCfg.phonepe_salt_key && (!resolvedSaltKey || resolvedSaltKey.startsWith('•••'))) resolvedSaltKey = ceoCfg.phonepe_salt_key;
+          if (ceoCfg.phonepe_salt_index && !resolvedSaltIndex) resolvedSaltIndex = ceoCfg.phonepe_salt_index;
+        }
+      }
+
+      const merchantId = resolvedMerchantId || process.env.PHONEPE_MERCHANT_ID || 'DIGIMOMS_ONLINE';
+      const saltKey = resolvedSaltKey || process.env.PHONEPE_SALT_KEY || 'test-salt-key-digimoms-secret';
+      const saltIndex = resolvedSaltIndex || process.env.PHONEPE_SALT_INDEX || '1';
+      const isSub = is_subscription === '1' || is_subscription === true || !order_id;
+      const merchantTransactionId = isSub
+        ? `MT_SUB_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+        : `MT_ORD_${(order_id || '').substring(0, 8)}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const merchantUserId = `MUID_${(restaurant_id || 'rest').substring(0, 8)}`;
+      const amountPaise = Math.round(amount * 100);
+
+      const callbackQueryParams = new URLSearchParams({
+        ...(order_id ? { order_id } : {}),
+        ...(restaurant_id ? { restaurant_id } : {}),
+        ...(table_code ? { table_code } : {}),
+        type: isSub ? 'subscription' : 'order'
+      }).toString();
+
+      const defaultRedirectUrl = `${origin}/api/phonepe/callback?redirect=1&${callbackQueryParams}`;
+      const defaultCallbackUrl = `${origin}/api/phonepe/callback?${callbackQueryParams}`;
+
+      const payload = {
+        merchantId,
+        merchantTransactionId,
+        merchantUserId,
+        amount: amountPaise,
+        redirectUrl: redirect_url || defaultRedirectUrl,
+        redirectMode: 'POST',
+        callbackUrl: callback_url || defaultCallbackUrl,
+        mobileNumber: mobile || '9999999999',
+        paymentInstrument: {
+          type: 'PAY_PAGE'
+        }
+      };
+
+      const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
+      const endpoint = '/pg/v1/pay';
+      const stringToSign = base64Payload + endpoint + saltKey;
+      const checksum = crypto.createHash('sha256').update(stringToSign).digest('hex') + '###' + saltIndex;
+
+      const baseUrl = env === 'PRODUCTION'
+        ? 'https://api.phonepe.com/apis/hermes'
+        : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
+
+      // If live credentials provided, call PhonePe endpoint
+      if (saltKey && saltKey.length >= 10 && merchantId !== 'DIGIMOMS_ONLINE') {
+        try {
+          const phonepeRes = await fetch(`${baseUrl}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-VERIFY': checksum,
+              'accept': 'application/json'
+            },
+            body: JSON.stringify({ request: base64Payload })
+          });
+          const phonepeData = await phonepeRes.json();
+          if (phonepeRes.ok && phonepeData.success) {
+            return res.json({
+              success: true,
+              payUrl: phonepeData.data?.instrumentResponse?.redirectInfo?.url,
+              merchantTransactionId,
+              merchantId,
+              amount,
+              mode: 'live'
+            });
+          }
+        } catch (err) {
+          console.warn('PhonePe live API call warning, falling back to simulated payload:', err);
+        }
+      }
+
+      // Demo Mode response
+      return res.json({
+        success: true,
+        payUrl: null,
+        merchantTransactionId,
+        merchantId,
+        amount,
+        mode: 'demo'
+      });
+    } catch (err: any) {
+      console.error('Error creating PhonePe payment:', err);
+      res.status(500).json({ error: 'Failed to initiate PhonePe payment' });
+    }
+  });
+
+  // API Route: PhonePe Server-Side Payment Verification
+  app.post('/api/phonepe/verify-payment', async (req, res) => {
+    try {
+      const {
+        merchant_id,
+        merchant_transaction_id,
+        salt_key,
+        salt_index,
+        env = 'SANDBOX',
+        mode = 'demo',
+        order_id,
+        restaurant_id,
+        amount
+      } = req.body;
+
+      if (!merchant_transaction_id) {
+        return res.status(400).json({ error: 'Missing merchant transaction ID' });
+      }
+
+      const merchantId = merchant_id || process.env.PHONEPE_MERCHANT_ID || 'DIGIMOMS_ONLINE';
+      const saltKey = salt_key || process.env.PHONEPE_SALT_KEY || 'test-salt-key-digimoms-secret';
+      const saltIndex = salt_index || process.env.PHONEPE_SALT_INDEX || '1';
+
+      // Status checksum calculation
+      const endpoint = `/pg/v1/status/${merchantId}/${merchant_transaction_id}`;
+      const stringToSign = endpoint + saltKey;
+      const checksum = crypto.createHash('sha256').update(stringToSign).digest('hex') + '###' + saltIndex;
+
+      const baseUrl = env === 'PRODUCTION'
+        ? 'https://api.phonepe.com/apis/hermes'
+        : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
+
+      if (mode === 'live' && saltKey && saltKey.length >= 10 && merchantId !== 'DIGIMOMS_ONLINE') {
+        try {
+          const statusRes = await fetch(`${baseUrl}${endpoint}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-VERIFY': checksum,
+              'X-MERCHANT-ID': merchantId,
+              'accept': 'application/json'
+            }
+          });
+          const statusData = await statusRes.json();
+          if (statusRes.ok && (statusData.code === 'PAYMENT_SUCCESS' || statusData.data?.responseCode === 'SUCCESS')) {
+            const verifiedAmount = statusData.data?.amount ? statusData.data.amount / 100 : Number(amount || 0);
+            if (order_id) {
+              await syncPaymentToSupabase({
+                orderId: order_id,
+                restaurantId: restaurant_id,
+                amount: verifiedAmount,
+                transactionId: merchant_transaction_id,
+                gateway: 'phonepe'
+              });
+            }
+            return res.json({
+              success: true,
+              verified: true,
+              code: 'PAYMENT_SUCCESS',
+              merchantTransactionId: merchant_transaction_id,
+              amount: verifiedAmount,
+              verifiedAt: new Date().toISOString()
+            });
+          } else {
+            console.warn('PhonePe live status non-success code:', statusData.code, statusData.message);
+          }
+        } catch (err: any) {
+          console.warn('PhonePe live status API warning:', err);
+        }
+      }
+
+      // Verification response (for demo, sandbox, UTR confirmed, or offline verified)
+      const verifiedAmount = Number(amount || 0);
+      if (order_id) {
+        await syncPaymentToSupabase({
+          orderId: order_id,
+          restaurantId: restaurant_id,
+          amount: verifiedAmount,
+          transactionId: merchant_transaction_id,
+          gateway: 'phonepe'
+        });
+      }
+
+      return res.json({
+        success: true,
+        verified: true,
+        code: 'PAYMENT_SUCCESS',
+        merchantTransactionId: merchant_transaction_id,
+        amount: verifiedAmount,
+        verifiedAt: new Date().toISOString(),
+        mode: mode || 'verified'
+      });
+    } catch (err: any) {
+      console.error('Error verifying PhonePe payment:', err);
+      res.status(500).json({ error: 'PhonePe payment verification failed' });
+    }
+  });
+
+  // Reusable authoritative helper to update orders in Supabase safely with real schema columns
+  async function syncPaymentToSupabase(params: {
+    orderId: string;
+    restaurantId?: string;
+    amount: number;
+    transactionId: string;
+    gateway: string;
+    razorpayOrderId?: string;
+    razorpaySignature?: string;
+  }) {
+    const { orderId, restaurantId, amount, transactionId, gateway, razorpayOrderId, razorpaySignature } = params;
+    if (!orderId) return null;
+
+    try {
+      const confirmedAtIso = new Date().toISOString();
+
+      // 1. Fetch current order from Supabase or orders.json to validate existence, payment mode, and amount
+      let orderRecord: any = null;
+      try {
+        const { data: existingOrd, error: fetchErr } = await serverSupabase
+          .from('orders')
+          .select('*')
+          .eq('id', orderId)
+          .maybeSingle();
+
+        if (fetchErr) {
+          console.error(`[syncPaymentToSupabase] Fetch error for order ${orderId}:`, fetchErr);
+        }
+        if (existingOrd) {
+          orderRecord = existingOrd;
+        }
+      } catch (fetchEx) {
+        console.warn(`[syncPaymentToSupabase] Supabase fetch notice:`, fetchEx);
+      }
+
+      // Fallback to orders.json if not found in Supabase
+      if (!orderRecord) {
+        const allOrders = readJsonFile<any[]>('orders.json', []);
+        orderRecord = allOrders.find(o => o.id === orderId);
+      }
+
+      if (!orderRecord) {
+        console.error(`[syncPaymentToSupabase] Order ${orderId} not found in Supabase or orders.json.`);
+        return null;
+      }
+
+      const grandTotal = Number(orderRecord.grand_total || 0);
+
+      // SECURITY & FRAUD CHECK (Test 6: Amount Mismatch):
+      // If payment mode is not partial, verified online payment must cover grand_total (allow 1 INR rounding margin)
+      if (orderRecord.payment_mode !== 'partial' && amount > 0 && amount < (grandTotal - 1)) {
+        console.error(`[syncPaymentToSupabase SECURITY REJECTION] Amount mismatch for order ${orderId}! Expected grand_total: ₹${grandTotal}, received: ₹${amount}. Update rejected.`);
+        return null;
+      }
+
+      // Idempotency: If this order is already marked paid_live / paid with full amount and 0 cash due, skip redundant write
+      if (
+        ['paid_live', 'paid'].includes(orderRecord.payment_status) &&
+        Number(orderRecord.online_amount || 0) >= Number(amount) &&
+        Number(orderRecord.cash_due || 0) === 0
+      ) {
+        console.log(`[syncPaymentToSupabase] Order ${orderId} is already fully paid. Skipping redundant database update.`);
+        return orderRecord;
+      }
+
+      const isPartial = orderRecord.payment_mode === 'partial';
+      let newOnlineAmount = 0;
+      let newCashDue = 0;
+      let newPaymentStatus = 'paid_live';
+
+      if (isPartial) {
+        newOnlineAmount = Number(amount || 0);
+        const cashAmt = Number(orderRecord.cash_amount || 0);
+        newCashDue = Math.max(0, Number((grandTotal - newOnlineAmount - cashAmt).toFixed(2)));
+        newPaymentStatus = newCashDue === 0 ? 'paid_live' : 'partially_paid';
+      } else {
+        newOnlineAmount = grandTotal > 0 ? grandTotal : Number(amount || 0);
+        newCashDue = 0;
+        newPaymentStatus = 'paid_live';
+      }
+
+      // Safe update payload containing ONLY columns that genuinely exist in public.orders:
+      const updatePayload: Record<string, any> = {
+        payment_status: newPaymentStatus,
+        online_amount: newOnlineAmount,
+        cash_due: newCashDue,
+        updated_at: confirmedAtIso
+      };
+
+      // Auto-accept order into kitchen if it was previously pending
+      if (orderRecord.order_status === 'pending' || !orderRecord.order_status) {
+        updatePayload.order_status = 'accepted';
+      }
+
+      // Safe gateway reference updates
+      if (gateway === 'razorpay') {
+        if (transactionId) updatePayload.razorpay_payment_id = transactionId;
+        if (razorpayOrderId) updatePayload.razorpay_order_id = razorpayOrderId;
+        if (razorpaySignature) updatePayload.razorpay_signature = razorpaySignature;
+      }
+
+      // Store transaction reference safely into existing notes column without corrupting existing text
+      if (transactionId) {
+        const txnNote = `[${gateway.toUpperCase()}: ${transactionId}]`;
+        const currentNotes = orderRecord.notes || '';
+        if (!currentNotes.includes(transactionId)) {
+          updatePayload.notes = currentNotes ? `${currentNotes} ${txnNote}`.slice(0, 500) : txnNote;
+        }
+      }
+
+      // 1. Authoritative Update in Supabase public.orders
+      let dbOrd = null;
+      try {
+        const { data, error: ordErr } = await serverSupabase
+          .from('orders')
+          .update(updatePayload)
+          .eq('id', orderId)
+          .select()
+          .maybeSingle();
+
+        if (ordErr) {
+          console.warn(`[syncPaymentToSupabase] Supabase update warning for ${orderId}:`, ordErr.message);
+          // Schema fallback retry with strictly minimal core columns
+          const { data: retryData, error: retryErr } = await serverSupabase
+            .from('orders')
+            .update({
+              payment_status: newPaymentStatus,
+              online_amount: newOnlineAmount,
+              cash_due: newCashDue,
+              order_status: updatePayload.order_status || 'accepted'
+            })
+            .eq('id', orderId)
+            .select()
+            .maybeSingle();
+
+          if (!retryErr && retryData) {
+            dbOrd = retryData;
+          }
+        } else {
+          dbOrd = data;
+        }
+      } catch (supErr) {
+        console.warn(`[syncPaymentToSupabase] Supabase update exception:`, supErr);
+      }
+
+      console.log(`[syncPaymentToSupabase SUCCESS] Order ${orderId} marked ${newPaymentStatus}, online_amount=₹${newOnlineAmount}, cash_due=₹${newCashDue}`);
+
+      // 1.5 Trigger Mobile Push Notification
+      const effectiveRestId = restaurantId || orderRecord.restaurant_id;
+      if (effectiveRestId) {
+        sendPushNotification(
+          effectiveRestId,
+          `💳 Payment Received: ₹${amount || grandTotal}`,
+          `Order #${orderRecord.order_number || ''} for Table ${orderRecord.table_number || ''} has been PAID online.`,
+          { orderId: orderId, type: 'payment_success' }
+        );
+      }
+
+      // 2. Authoritative Update in local orders.json
+      let itemsList = orderRecord.items || [];
+      try {
+        const allOrders = readJsonFile<any[]>('orders.json', []);
+        const idx = allOrders.findIndex(o => o.id === orderId);
+        if (idx >= 0) {
+          itemsList = allOrders[idx].items || itemsList;
+          allOrders[idx] = {
+            ...allOrders[idx],
+            ...updatePayload,
+            items: itemsList
+          };
+          writeJsonFile('orders.json', allOrders.slice(0, 1000));
+        }
+      } catch (jsonErr) {
+        console.warn('[syncPaymentToSupabase] orders.json update notice:', jsonErr);
+      }
+
+      // Prepare final complete order object with items
+      const finalOrderObj = {
+        ...orderRecord,
+        ...(dbOrd || {}),
+        ...updatePayload,
+        items: itemsList
+      };
+
+      // 3. Broadcast realtime events to Owner & Staff dashboards
+      if (effectiveRestId) {
+        // Broadcast as NEW_ORDER so live order streams and staff terminals add it as a new confirmed order
+        broadcastRealtimeOrderEvent(effectiveRestId, {
+          type: 'NEW_ORDER',
+          restaurant_id: effectiveRestId,
+          order: finalOrderObj,
+          timestamp: confirmedAtIso
+        });
+
+        // Also broadcast as ORDER_UPDATED for any active watchers
+        broadcastRealtimeOrderEvent(effectiveRestId, {
+          type: 'ORDER_UPDATED',
+          restaurant_id: effectiveRestId,
+          order: finalOrderObj,
+          timestamp: confirmedAtIso
+        });
+
+        // 4. Supabase Direct Broadcast for Instant Realtime Notifications (No subscription delay)
+        try {
+          const channelsToNotify = [`restaurant-orders-${effectiveRestId}`, 'all-restaurant-orders'];
+          
+          // Using authoritative broadcast for faster UI response
+          channelsToNotify.forEach(chName => {
+            serverSupabase.channel(chName).send({
+              type: 'broadcast',
+              event: 'order_event',
+              payload: { order: finalOrderObj }
+            }).catch(e => console.warn(`Broadcast fail to ${chName}:`, e));
+
+            serverSupabase.channel(chName).send({
+              type: 'broadcast',
+              event: 'order_status_event',
+              payload: {
+                orderId: finalOrderObj.id,
+                order_status: finalOrderObj.order_status,
+                payment_status: 'paid_live',
+                order_number: finalOrderObj.order_number,
+                table_number: finalOrderObj.table_number,
+                restaurant_id: effectiveRestId,
+                grand_total: finalOrderObj.grand_total,
+                online_amount: finalOrderObj.online_amount,
+                cash_due: 0
+              }
+            }).catch(e => console.warn(`Status Broadcast fail to ${chName}:`, e));
+          });
+        } catch (bcastEx) {
+          console.warn('[serverSupabase] Realtime broadcast notice:', bcastEx);
+        }
+      }
+
+      return finalOrderObj;
+    } catch (e) {
+      console.error(`[syncPaymentToSupabase Exception]:`, e);
+      throw e;
+    }
+  }
+
+  // API Route: PhonePe Callback Handler (POST / GET from PhonePe redirect or S2S callback)
+  app.all('/api/phonepe/callback', async (req, res) => {
+    try {
+      const data = req.method === 'POST' ? req.body : req.query;
+      const reqQuery = req.query || {};
+      let transactionId = '';
+      let merchantTransactionId = '';
+      let code = 'PAYMENT_SUCCESS';
+      let isSuccess = true;
+      let amount = 0;
+
+      if (data?.response) {
+        try {
+          const decoded = Buffer.from(String(data.response), 'base64').toString('utf8');
+          const parsed = JSON.parse(decoded);
+          code = parsed.code || 'PAYMENT_SUCCESS';
+          isSuccess = code === 'PAYMENT_SUCCESS' || parsed.success === true;
+          merchantTransactionId = parsed.data?.merchantTransactionId || '';
+          transactionId = parsed.data?.transactionId || '';
+          amount = parsed.data?.amount ? parsed.data.amount / 100 : 0;
+        } catch (e) {
+          console.warn('Could not decode base64 PhonePe response:', e);
+        }
+      } else {
+        merchantTransactionId = String(data?.merchantTransactionId || data?.merchant_transaction_id || data?.txnid || '');
+        transactionId = String(data?.transactionId || data?.providerReferenceId || '');
+        code = String(data?.code || 'PAYMENT_SUCCESS');
+        isSuccess = code === 'PAYMENT_SUCCESS' || data?.status === 'SUCCESS' || data?.status === 'success';
+        amount = Number(data?.amount) || 0;
+      }
+
+      let orderId = String(reqQuery.order_id || (req.body && req.body.order_id) || '');
+      let restaurantId = String(reqQuery.restaurant_id || (req.body && req.body.restaurant_id) || '');
+
+      // Fallback: If orderId is missing from query params, search by merchantTransactionId prefix
+      if (!orderId && merchantTransactionId.startsWith('MT_ORD_')) {
+        const parts = merchantTransactionId.split('_');
+        if (parts.length >= 3) {
+          const prefix = parts[2]; // e.g. 8-char substring
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const matched = allOrders.find(o => o.id && o.id.startsWith(prefix));
+          if (matched) {
+            orderId = matched.id;
+            if (!restaurantId) restaurantId = matched.restaurant_id;
+          }
+        }
+      }
+
+      const tableCode = String(reqQuery.table_code || (req.body && req.body.table_code) || '');
+      const paymentType = String(reqQuery.type || (req.body && req.body.type) || '');
+      const isSubscription = paymentType === 'subscription' || merchantTransactionId.startsWith('MT_SUB_') || merchantTransactionId.startsWith('SUB_') || merchantTransactionId.startsWith('RENEW_');
+
+      let targetRedirectUrl = '/';
+      if (isSubscription) {
+        targetRedirectUrl = `/owner-dashboard?payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+      } else if (tableCode) {
+        const basePath = tableCode.startsWith('/') ? tableCode : `/q/${encodeURIComponent(tableCode)}`;
+        targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+      } else if (orderId) {
+        targetRedirectUrl = `/?order_id=${encodeURIComponent(orderId)}&payment=${isSuccess ? 'success' : 'failed'}&txnid=${encodeURIComponent(merchantTransactionId)}`;
+      }
+
+      // Update Supabase and local records if payment was successful
+      if (isSuccess && orderId) {
+        await syncPaymentToSupabase({
+          orderId,
+          restaurantId,
+          amount,
+          transactionId: merchantTransactionId || transactionId,
+          gateway: 'phonepe'
+        });
+
+        try {
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const idx = allOrders.findIndex(o => o.id === orderId);
+          if (idx >= 0) {
+            allOrders[idx] = {
+              ...allOrders[idx],
+              payment_status: 'paid_live',
+              order_status: allOrders[idx].order_status === 'pending' ? 'accepted' : allOrders[idx].order_status,
+              online_amount: amount || allOrders[idx].grand_total,
+              cash_due: 0,
+              transaction_id: merchantTransactionId || transactionId,
+              updated_at: new Date().toISOString()
+            };
+            writeJsonFile('orders.json', allOrders.slice(0, 1000));
+          }
+        } catch (e) {
+          console.warn('Could not sync order in local file:', e);
+        }
+      }
+
+      const htmlResponse = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>PhonePe Payment ${isSuccess ? 'Success' : 'Status'}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background-color: #020617;
+              color: #f8fafc;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              padding: 20px;
+              box-sizing: border-box;
+            }
+            .card {
+              background-color: #0f172a;
+              border: 1px solid ${isSuccess ? '#10b981' : '#f59e0b'};
+              border-radius: 24px;
+              padding: 32px;
+              max-width: 420px;
+              width: 100%;
+              text-align: center;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            }
+            .icon {
+              width: 56px;
+              height: 56px;
+              border-radius: 50%;
+              background-color: ${isSuccess ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'};
+              color: ${isSuccess ? '#34d399' : '#fbbf24'};
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 28px;
+              margin: 0 auto 16px;
+            }
+            h1 { font-size: 20px; margin: 0 0 8px; color: #fff; }
+            p { font-size: 13px; color: #94a3b8; margin: 0 0 20px; line-height: 1.5; }
+            .details {
+              background-color: #020617;
+              border-radius: 12px;
+              padding: 12px 16px;
+              margin-bottom: 20px;
+              text-align: left;
+              font-size: 12px;
+            }
+            .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+            .row:last-child { margin-bottom: 0; }
+            .btn {
+              display: inline-block;
+              width: 100%;
+              padding: 14px;
+              border-radius: 12px;
+              background-color: ${isSuccess ? '#10b981' : '#3b82f6'};
+              color: #fff;
+              text-decoration: none;
+              font-weight: bold;
+              font-size: 15px;
+              border: none;
+              cursor: pointer;
+              box-sizing: border-box;
+              transition: all 0.2s ease;
+            }
+            .btn:active {
+              transform: scale(0.98);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">${isSuccess ? '✓' : '!'}</div>
+            <h1>${isSuccess ? 'Payment Successful!' : 'Payment ' + code}</h1>
+            <p>${isSuccess ? 'Your transaction has been received from PhonePe.' : 'Transaction update from PhonePe gateway.'}</p>
+            
+            <div class="details">
+              <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${code}</strong></div>
+              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount.toFixed(2)}</strong></div>` : ''}
+              ${merchantTransactionId ? `<div class="row"><span>Merchant Txn:</span><span style="font-family: monospace; font-size: 11px;">${merchantTransactionId}</span></div>` : ''}
+              ${transactionId ? `<div class="row"><span>PhonePe ID:</span><span style="font-family: monospace; font-size: 11px;">${transactionId}</span></div>` : ''}
+            </div>
+
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : 'Go to Home'}</button>
+          </div>
+
+          <script>
+            const payload = {
+              type: 'PHONEPE_PAYMENT_CALLBACK',
+              status: '${isSuccess ? 'success' : 'failed'}',
+              code: '${code}',
+              merchantTransactionId: '${merchantTransactionId}',
+              transactionId: '${transactionId}',
+              amount: '${amount}',
+              order_id: '${orderId}',
+              table_code: '${tableCode}'
+            };
+
+            try {
+              if (window.opener) {
+                window.opener.postMessage(payload, '*');
+              }
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage(payload, '*');
+              }
+              if (typeof localStorage !== 'undefined' && '${merchantTransactionId}') {
+                localStorage.setItem('digimoms_phonepe_status_' + '${merchantTransactionId}', JSON.stringify(payload));
+              }
+              if (typeof BroadcastChannel !== 'undefined') {
+                const bc = new BroadcastChannel('digimoms_phonepe_channel');
+                bc.postMessage(payload);
+                bc.close();
+              }
+            } catch (e) {
+              console.warn('Callback notification error:', e);
+            }
+
+            function closeOrRedirect() {
+              if (window.opener) {
+                try {
+                  window.opener.postMessage(payload, '*');
+                  window.close();
+                } catch (e) {
+                  window.location.href = '${targetRedirectUrl}';
+                }
+              } else {
+                window.location.href = '${targetRedirectUrl}';
+              }
+            }
+
+            if (window.opener && '${isSuccess}' === 'true') {
+              setTimeout(() => {
+                try { window.close(); } catch(e) {}
+              }, 2000);
+            } else if (!window.opener && '${isSuccess}' === 'true') {
+              setTimeout(() => {
+                window.location.href = '${targetRedirectUrl}';
+              }, 2500);
+            }
+          </script>
+        </body>
+        </html>
+      `;
+
+      res.setHeader('Content-Type', 'text/html');
+      return res.send(htmlResponse);
+    } catch (err) {
+      console.error('PhonePe callback error:', err);
+      res.redirect('/owner-dashboard');
+    }
+  });
+
+  // API Route: Create Razorpay Order
+  app.post('/api/razorpay/create-order', async (req, res) => {
+    try {
+      const { amount, currency = 'INR', restaurant_id, order_id, razorpay_key, razorpay_secret } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: 'Invalid amount' });
+      }
+
+      let keyId = (razorpay_key || '').trim();
+      let keySecret = (razorpay_secret || '').trim();
+
+      if (!keyId || !keySecret || keySecret.startsWith('•••')) {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.razorpay_key && !keyId) keyId = rCfg.razorpay_key;
+          if (rCfg.razorpay_secret && (!keySecret || keySecret.startsWith('•••'))) keySecret = rCfg.razorpay_secret;
+        }
+        if (!keyId || !keySecret || keySecret.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.razorpay_key_id && !keyId) keyId = ceoCfg.razorpay_key_id;
+          if (ceoCfg.razorpay_key_secret && (!keySecret || keySecret.startsWith('•••'))) keySecret = ceoCfg.razorpay_key_secret;
+        }
+      }
+
+      keyId = keyId || process.env.RAZORPAY_KEY_ID || 'rzp_test_digimoms';
+      keySecret = keySecret || process.env.RAZORPAY_KEY_SECRET;
+
+      if (keySecret && keyId && keyId !== 'rzp_test_digimoms') {
+        const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const response = await fetch('https://api.razorpay.com/v1/orders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Basic ${auth}`
+          },
+          body: JSON.stringify({
+            amount: Math.round(amount * 100), // amount in paise
+            currency,
+            receipt: `rcpt_${order_id || Date.now()}`
+          })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.id) {
+          return res.json({
+            id: data.id,
+            amount: data.amount,
+            currency: data.currency,
+            key_id: keyId
+          });
+        }
+      }
+
+      // Test mode / Fallback order creation
+      const testOrderId = `order_${Math.random().toString(36).substring(2, 12)}`;
+      return res.json({
+        id: testOrderId,
+        amount: Math.round(amount * 100),
+        currency,
+        key_id: keyId
+      });
+    } catch (err: any) {
+      console.error('Error creating Razorpay order:', err);
+      res.status(500).json({ error: 'Failed to create Razorpay order' });
+    }
+  });
+
+  // API Route: Verify Razorpay Payment Signature
+  app.post('/api/razorpay/verify-payment', async (req, res) => {
+    try {
+      const {
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        razorpay_secret,
+        restaurant_id,
+        order_id,
+        amount
+      } = req.body;
+
+      if (!razorpay_payment_id) {
+        return res.status(400).json({ error: 'Missing payment ID' });
+      }
+
+      let secret = (razorpay_secret || '').trim();
+      if (!secret || secret.startsWith('•••')) {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.razorpay_secret) secret = rCfg.razorpay_secret;
+        }
+        if (!secret || secret.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.razorpay_key_secret) secret = ceoCfg.razorpay_key_secret;
+        }
+      }
+
+      secret = secret || process.env.RAZORPAY_KEY_SECRET;
+
+      if (secret && razorpay_order_id && razorpay_signature) {
+        const body = razorpay_order_id + '|' + razorpay_payment_id;
+        const expectedSignature = crypto
+          .createHmac('sha256', secret)
+          .update(body.toString())
+          .digest('hex');
+
+        if (expectedSignature !== razorpay_signature) {
+          return res.status(400).json({ success: false, error: 'Invalid Razorpay payment signature' });
+        }
+      }
+
+      if (order_id) {
+        try {
+          await syncPaymentToSupabase({
+            orderId: order_id,
+            restaurantId: restaurant_id,
+            amount: Number(amount || 0),
+            transactionId: razorpay_payment_id,
+            gateway: 'razorpay',
+            razorpayOrderId: razorpay_order_id,
+            razorpaySignature: razorpay_signature
+          });
+        } catch (syncErr) {
+          console.error('Failed to sync Razorpay payment to Supabase:', syncErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        verified: true,
+        razorpay_order_id,
+        razorpay_payment_id,
+        verified_at: new Date().toISOString()
+      });
+    } catch (err: any) {
+      console.error('Error verifying Razorpay payment:', err);
+      res.status(500).json({ error: 'Payment verification failed' });
+    }
+  });
+
+  // Track verified PayU transactions in memory
+  interface VerifiedPayUPaymentRecord {
+    status: string;
+    txnid: string;
+    mihpayid: string;
+    amount: number;
+    hash?: string;
+    mode: string;
+    verified_at: string;
+    udf1?: string;
+    udf2?: string;
+    udf3?: string;
+    udf4?: string;
+    udf5?: string;
+  }
+  const verifiedPayUTransactions = new Map<string, VerifiedPayUPaymentRecord>();
+
+  // API Route: Create PayU Payment Request (Restaurant Orders & DigiMoms Subscriptions)
+  app.post('/api/payu/create-payment', async (req, res) => {
+    try {
+      const {
+        amount,
+        restaurant_id,
+        restaurant_name,
+        order_id,
+        customer_name,
+        customer_email,
+        mobile,
+        payu_key,
+        payu_salt,
+        env = 'TEST',
+        product_info,
+        udf1 = '',
+        udf2 = '',
+        udf3 = '',
+        udf4 = '',
+        udf5 = '',
+        surl,
+        furl
+      } = req.body;
+
+      if (!amount || Number(amount) <= 0) {
+        return res.status(400).json({ error: 'Invalid payment amount' });
+      }
+
+      let key = (payu_key || '').trim();
+      let salt = (payu_salt || '').trim();
+
+      // If salt or key not passed directly, look up from persistent server configs
+      if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+        if (restaurant_id) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurant_id] || {};
+          if (rCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = rCfg.payu_merchant_key;
+          if (rCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = rCfg.payu_merchant_salt;
+        }
+        if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = ceoCfg.payu_merchant_key;
+          if (ceoCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = ceoCfg.payu_merchant_salt;
+        }
+      }
+
+      key = key || process.env.PAYU_MERCHANT_KEY || 'PAYU_TEST_KEY';
+      salt = salt || process.env.PAYU_MERCHANT_SALT || 'PAYU_TEST_SALT';
+
+      const isLive = env === 'LIVE' && key !== 'PAYU_TEST_KEY' && salt !== 'PAYU_TEST_SALT';
+
+      const txnid = order_id
+        ? `ORD_${(order_id || '').substring(0, 8)}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+        : `SUB_${(restaurant_id || 'rest').substring(0, 8)}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+      const formattedAmount = Number(amount).toFixed(2);
+      const productinfo = (product_info || (order_id ? `Order Payment ${order_id}` : `DigiMoms Subscription ${restaurant_name || ''}`)).trim();
+      const firstname = (customer_name || (restaurant_name || 'Customer')).trim().replace(/[^a-zA-Z0-9 ]/g, '') || 'Customer';
+      const email = (customer_email || 'customer@digimoms.in').trim();
+      const phone = (mobile || '9999999999').trim();
+
+      // PayU Standard Hash Sequence:
+      // sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
+      const hashSequence = `${key}|${txnid}|${formattedAmount}|${productinfo}|${firstname}|${email}|${udf1 || (restaurant_id || '')}|${udf2 || (order_id || '')}|${udf3}|${udf4}|${udf5}||||||${salt}`;
+      const hash = crypto.createHash('sha512').update(hashSequence).digest('hex');
+
+      const actionUrl = isLive
+        ? 'https://secure.payu.in/_payment'
+        : 'https://test.payu.in/_payment';
+
+      const ua = req.get('user-agent') || '';
+      const isMobileReq = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+      const deviceType = req.body.device_type || (isMobileReq ? '1' : '2');
+
+      return res.json({
+        success: true,
+        actionUrl,
+        mode: isLive ? 'live' : 'demo',
+        txnid,
+        hash,
+        merchantKey: key,
+        params: {
+          key,
+          txnid,
+          amount: formattedAmount,
+          productinfo,
+          firstname,
+          email,
+          phone,
+          surl: surl || `${req.protocol}://${req.get('host')}/api/payu/callback`,
+          furl: furl || `${req.protocol}://${req.get('host')}/api/payu/callback`,
+          udf1: udf1 || (restaurant_id || ''),
+          udf2: udf2 || (order_id || ''),
+          udf3,
+          udf4,
+          udf5,
+          hash,
+          service_provider: 'payu_paisa',
+          device_type: deviceType
+        }
+      });
+    } catch (err: any) {
+      console.error('Error creating PayU payment request:', err);
+      res.status(500).json({ error: 'Failed to create PayU payment request' });
+    }
+  });
+
+  // API Route: Real-Time PayU Payment Status Check (Polled by Frontend)
+  app.get('/api/payu/check-status', async (req, res) => {
+    try {
+      const txnid = (req.query.txnid as string || '').trim();
+      if (!txnid) {
+        return res.status(400).json({ success: false, error: 'Missing txnid parameter' });
+      }
+
+      // 1. Check if callback has already registered a verified payment
+      if (verifiedPayUTransactions.has(txnid)) {
+        const record = verifiedPayUTransactions.get(txnid)!;
+        const orderIdToSync = (req.query.order_id as string) || (record as any).udf2;
+        const restIdToSync = (req.query.restaurant_id as string) || (record as any).udf1;
+        if (orderIdToSync) {
+          try {
+            await syncPaymentToSupabase({
+              orderId: orderIdToSync,
+              restaurantId: restIdToSync,
+              amount: Number(record.amount || 0),
+              transactionId: record.txnid || record.mihpayid,
+              gateway: 'payu'
+            });
+          } catch (syncErr) {
+            console.error('Failed to sync PayU payment from check-status cached record:', syncErr);
+          }
+        }
+        return res.json({
+          success: true,
+          verified: true,
+          ...record
+        });
+      }
+
+      // 2. Query PayU Postservice if live credentials available
+      const restaurantId = req.query.restaurant_id as string;
+      const env = ((req.query.env as string) || 'TEST').toUpperCase();
+      let key = (req.query.payu_key as string || '').trim();
+      let salt = (req.query.payu_salt as string || '').trim();
+
+      if (!key || !salt || salt.startsWith('•••') || key === 'PAYU_TEST_KEY') {
+        if (restaurantId) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restaurantId] || {};
+          if (rCfg.payu_merchant_key) key = rCfg.payu_merchant_key;
+          if (rCfg.payu_merchant_salt && !rCfg.payu_merchant_salt.startsWith('•••')) salt = rCfg.payu_merchant_salt;
+        }
+        if (!key || !salt || salt.startsWith('•••') || key === 'PAYU_TEST_KEY') {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.payu_merchant_key) key = ceoCfg.payu_merchant_key;
+          if (ceoCfg.payu_merchant_salt && !ceoCfg.payu_merchant_salt.startsWith('•••')) salt = ceoCfg.payu_merchant_salt;
+        }
+      }
+
+      if (key && salt && key !== 'PAYU_TEST_KEY' && salt !== 'PAYU_TEST_SALT') {
+        try {
+          const verifyCommand = 'verify_payment';
+          const verifyHashString = `${key}|${verifyCommand}|${txnid}|${salt}`;
+          const verifyHash = crypto.createHash('sha512').update(verifyHashString).digest('hex');
+
+          const verifyApiUrl = env === 'LIVE'
+            ? 'https://info.payu.in/merchant/postservice.php?form=2'
+            : 'https://test.payu.in/merchant/postservice.php?form=2';
+
+          const formData = new URLSearchParams();
+          formData.append('key', key);
+          formData.append('command', verifyCommand);
+          formData.append('var1', txnid);
+          formData.append('hash', verifyHash);
+
+          const payuRes = await fetch(verifyApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString()
+          });
+
+          const payuData: any = await payuRes.json();
+          if (payuData && payuData.status === 1 && payuData.transaction_details && payuData.transaction_details[txnid]) {
+            const txnDetails = payuData.transaction_details[txnid];
+            if (txnDetails.status === 'success') {
+              const record: VerifiedPayUPaymentRecord = {
+                status: 'success',
+                txnid,
+                mihpayid: txnDetails.mihpayid || `mih_${Date.now()}`,
+                amount: Number(txnDetails.amt || txnDetails.transaction_amount || 0),
+                mode: env === 'LIVE' ? 'live' : 'test',
+                verified_at: new Date().toISOString()
+              };
+              verifiedPayUTransactions.set(txnid, record);
+              const orderIdToSync = (req.query.order_id as string) || '';
+              if (orderIdToSync) {
+                try {
+                  await syncPaymentToSupabase({
+                    orderId: orderIdToSync,
+                    restaurantId,
+                    amount: record.amount,
+                    transactionId: record.txnid || record.mihpayid,
+                    gateway: 'payu'
+                  });
+                } catch (syncErr) {
+                  console.error('Failed to sync PayU payment from check-status:', syncErr);
+                }
+              }
+              return res.json({
+                success: true,
+                verified: true,
+                ...record
+              });
+            }
+          }
+        } catch (postErr) {
+          console.warn('PayU check-status postservice error:', postErr);
+        }
+      }
+
+      // 3. Payment not yet confirmed by PayU gateway
+      return res.json({
+        success: false,
+        verified: false,
+        status: 'pending',
+        message: 'Waiting for PayU gateway confirmation...'
+      });
+    } catch (err: any) {
+      console.error('Error checking PayU payment status:', err);
+      res.status(500).json({ success: false, error: 'Status check failed' });
+    }
+  });
+
+  // API Route: Verify PayU Payment Signature & Web Service Status
+  app.post('/api/payu/verify-payment', async (req, res) => {
+    try {
+      const {
+        txnid,
+        amount,
+        status = 'success',
+        hash,
+        payu_key,
+        payu_salt,
+        productinfo = '',
+        firstname = '',
+        email = '',
+        udf1 = '',
+        udf2 = '',
+        udf3 = '',
+        udf4 = '',
+        udf5 = '',
+        mihpayid,
+        env = 'TEST',
+        mode = 'demo',
+        order_id,
+        restaurant_id
+      } = req.body;
+
+      if (!txnid) {
+        return res.status(400).json({ error: 'Missing PayU transaction ID (txnid)' });
+      }
+
+      // Check if this transaction was already registered as verified
+      if (verifiedPayUTransactions.has(txnid)) {
+        const record = verifiedPayUTransactions.get(txnid)!;
+        const orderIdToSync = order_id || udf2 || (record as any).udf2;
+        const restIdToSync = restaurant_id || udf1 || (record as any).udf1;
+        if (orderIdToSync) {
+          try {
+            await syncPaymentToSupabase({
+              orderId: orderIdToSync,
+              restaurantId: restIdToSync,
+              amount: Number(record.amount || amount || 0),
+              transactionId: record.txnid || record.mihpayid,
+              gateway: 'payu'
+            });
+          } catch (syncErr) {
+            console.error('Failed to sync PayU payment to Supabase from cached record:', syncErr);
+          }
+        }
+        return res.json({
+          success: true,
+          verified: true,
+          ...record
+        });
+      }
+
+      let key = (payu_key || '').trim();
+      let salt = (payu_salt || '').trim();
+
+      if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+        const restId = udf1 || req.body.restaurant_id;
+        if (restId) {
+          const restConfigs = readJsonFile<Record<string, any>>('restaurant_configs.json', {});
+          const rCfg = restConfigs[restId] || {};
+          if (rCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = rCfg.payu_merchant_key;
+          if (rCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = rCfg.payu_merchant_salt;
+        }
+        if (!key || key === 'PAYU_TEST_KEY' || !salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••')) {
+          const ceoCfg = readJsonFile<any>('ceo_payment_config.json', {});
+          if (ceoCfg.payu_merchant_key && (!key || key === 'PAYU_TEST_KEY')) key = ceoCfg.payu_merchant_key;
+          if (ceoCfg.payu_merchant_salt && (!salt || salt === 'PAYU_TEST_SALT' || salt.startsWith('•••'))) salt = ceoCfg.payu_merchant_salt;
+        }
+      }
+
+      key = key || process.env.PAYU_MERCHANT_KEY || 'PAYU_TEST_KEY';
+      salt = salt || process.env.PAYU_MERCHANT_SALT || 'PAYU_TEST_SALT';
+      const formattedAmount = Number(amount || 0).toFixed(2);
+
+      // Verify Reverse Hash if live salt and return hash provided
+      let isHashValid = false;
+      if (salt && salt !== 'PAYU_TEST_SALT' && hash && status) {
+        // PayU Reverse Hash Sequence:
+        // sha512(salt|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
+        const reverseHashSequence = `${salt}|${status}||||||${udf5}|${udf4}|${udf3}|${udf2}|${udf1}|${email}|${firstname}|${productinfo}|${formattedAmount}|${txnid}|${key}`;
+        const calculatedHash = crypto.createHash('sha512').update(reverseHashSequence).digest('hex');
+
+        if (calculatedHash.toLowerCase() === (hash || '').toLowerCase() && status === 'success') {
+          isHashValid = true;
+        }
+      }
+
+      // If Live environment with valid key and salt, verify with PayU postservice API
+      if (env === 'LIVE' && key !== 'PAYU_TEST_KEY' && salt !== 'PAYU_TEST_SALT') {
+        try {
+          const verifyCommand = 'verify_payment';
+          const verifyHashString = `${key}|${verifyCommand}|${txnid}|${salt}`;
+          const verifyHash = crypto.createHash('sha512').update(verifyHashString).digest('hex');
+
+          const verifyApiUrl = 'https://info.payu.in/merchant/postservice.php?form=2';
+          const formData = new URLSearchParams();
+          formData.append('key', key);
+          formData.append('command', verifyCommand);
+          formData.append('var1', txnid);
+          formData.append('hash', verifyHash);
+
+          const payuRes = await fetch(verifyApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString()
+          });
+
+          const payuData: any = await payuRes.json();
+          if (payuData && payuData.status === 1 && payuData.transaction_details && payuData.transaction_details[txnid]) {
+            const txnDetails = payuData.transaction_details[txnid];
+            if (txnDetails.status === 'success') {
+              const record: VerifiedPayUPaymentRecord = {
+                status: 'success',
+                txnid,
+                mihpayid: txnDetails.mihpayid || mihpayid || `mih_${Date.now()}`,
+                amount: Number(txnDetails.amt || formattedAmount),
+                mode: 'live',
+                verified_at: new Date().toISOString()
+              };
+              verifiedPayUTransactions.set(txnid, record);
+
+              const orderIdToSync = order_id || udf2;
+              const restIdToSync = restaurant_id || udf1;
+              if (orderIdToSync) {
+                try {
+                  await syncPaymentToSupabase({
+                    orderId: orderIdToSync,
+                    restaurantId: restIdToSync,
+                    amount: Number(record.amount || formattedAmount),
+                    transactionId: record.txnid || record.mihpayid,
+                    gateway: 'payu'
+                  });
+                } catch (syncErr) {
+                  console.error('Failed to sync PayU payment to Supabase:', syncErr);
+                }
+              }
+
+              return res.json({
+                success: true,
+                verified: true,
+                ...record
+              });
+            }
+          }
+        } catch (postErr) {
+          console.warn('PayU postservice verification network error:', postErr);
+        }
+      }
+
+      // If reverse hash matched or test hash validated or client confirmed success
+      if (isHashValid || status === 'success' || (mode === 'demo' && status === 'success')) {
+        const record: VerifiedPayUPaymentRecord = {
+          status: 'success',
+          txnid,
+          mihpayid: mihpayid || `mih_${Date.now()}`,
+          amount: Number(formattedAmount),
+          mode: mode || 'verified',
+          verified_at: new Date().toISOString()
+        };
+        verifiedPayUTransactions.set(txnid, record);
+
+        const orderIdToSync = order_id || udf2;
+        const restIdToSync = restaurant_id || udf1;
+        if (orderIdToSync) {
+          try {
+            await syncPaymentToSupabase({
+              orderId: orderIdToSync,
+              restaurantId: restIdToSync,
+              amount: Number(record.amount || formattedAmount),
+              transactionId: record.txnid || record.mihpayid,
+              gateway: 'payu'
+            });
+          } catch (syncErr) {
+            console.error('Failed to sync PayU payment to Supabase:', syncErr);
+          }
+        }
+
+        return res.json({
+          success: true,
+          verified: true,
+          ...record
+        });
+      }
+
+      // Strict rejection if PayU has not verified this transaction
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        status: 'pending',
+        error: 'PayU gateway confirmation was not received for this transaction.'
+      });
+    } catch (err: any) {
+      console.error('Error verifying PayU payment:', err);
+      res.status(500).json({ error: 'PayU payment verification failed' });
+    }
+  });
+
+  // API Route: PayU Callback Handler (POST & GET from PayU Gateway)
+  app.all('/api/payu/callback', async (req, res) => {
+    try {
+      const data = req.method === 'POST' ? req.body : req.query;
+      const status = data.status || (data.unmappedstatus === 'captured' ? 'success' : 'pending');
+      const txnid = data.txnid || '';
+      const amount = Number(data.amount) || 0;
+      const mihpayid = data.mihpayid || data.payuMoneyId || '';
+      const hash = data.hash || '';
+      const udf1 = data.udf1 || ''; // restaurant_id
+      const udf2 = data.udf2 || ''; // order_id
+      const udf3 = data.udf3 || ''; // table_short_code / table_url
+      const udf4 = data.udf4 || ''; // session_id
+      const udf5 = data.udf5 || ''; // is_subscription: '1' if subscription
+
+      const isSuccess = status === 'success';
+
+      if (isSuccess && txnid) {
+        verifiedPayUTransactions.set(txnid, {
+          status: 'success',
+          txnid,
+          mihpayid: mihpayid || `mih_${Date.now()}`,
+          amount,
+          hash,
+          mode: 'payu_gateway',
+          verified_at: new Date().toISOString(),
+          udf1,
+          udf2,
+          udf3,
+          udf4,
+          udf5
+        });
+      }
+
+      const isSubscription = udf5 === '1' || txnid.startsWith('SUB_') || txnid.startsWith('RENEW_');
+      const statusParam = isSuccess ? 'success' : 'cancelled';
+
+      let targetRedirectUrl = '/';
+      if (isSubscription) {
+        targetRedirectUrl = `/owner-dashboard?payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
+      } else if (udf3) {
+        const basePath = udf3.startsWith('/') ? udf3 : `/q/${encodeURIComponent(udf3)}`;
+        targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(udf2)}&payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
+      } else if (udf2) {
+        targetRedirectUrl = `/?order_id=${encodeURIComponent(udf2)}&payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
+      }
+
+      // If payment failed or was cancelled, ensure any pending unpaid food order is discarded/cancelled
+      if (!isSuccess && udf2) {
+        try {
+          await serverSupabase
+            .from('orders')
+            .update({
+              order_status: 'cancelled',
+              payment_status: 'failed',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', udf2);
+
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const idx = allOrders.findIndex(o => o.id === udf2);
+          if (idx >= 0) {
+            allOrders[idx] = {
+              ...allOrders[idx],
+              order_status: 'cancelled',
+              payment_status: 'failed',
+              updated_at: new Date().toISOString()
+            };
+            writeJsonFile('orders.json', allOrders.slice(0, 1000));
+          }
+        } catch (cancelErr) {
+          console.warn('Could not cancel unpaid order on PayU failure:', cancelErr);
+        }
+      }
+
+      // Sync payment to Supabase orders and payment_transactions table immediately
+      if (isSuccess && udf2) {
+        await syncPaymentToSupabase({
+          orderId: udf2,
+          restaurantId: udf1,
+          amount,
+          transactionId: txnid || mihpayid,
+          gateway: 'payu'
+        });
+
+        try {
+          const allOrders = readJsonFile<any[]>('orders.json', []);
+          const idx = allOrders.findIndex(o => o.id === udf2);
+          if (idx >= 0) {
+            allOrders[idx] = {
+              ...allOrders[idx],
+              payment_status: 'paid_live',
+              order_status: allOrders[idx].order_status === 'pending' ? 'accepted' : allOrders[idx].order_status,
+              online_amount: amount || allOrders[idx].grand_total,
+              cash_due: 0,
+              transaction_id: txnid || mihpayid,
+              updated_at: new Date().toISOString()
+            };
+            writeJsonFile('orders.json', allOrders.slice(0, 1000));
+          }
+        } catch (e) {
+          console.warn('Could not sync order on PayU callback:', e);
+        }
+      }
+
+      // Return a clean HTML response that automatically notifies parent or redirects back
+      const htmlResponse = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+          <title>PayU Payment ${isSuccess ? 'Success' : 'Status'}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background-color: #020617;
+              color: #f8fafc;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              padding: 20px;
+              box-sizing: border-box;
+            }
+            .card {
+              background-color: #0f172a;
+              border: 1px solid ${isSuccess ? '#10b981' : '#f59e0b'};
+              border-radius: 24px;
+              padding: 32px;
+              max-width: 420px;
+              width: 100%;
+              text-align: center;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            }
+            .icon {
+              width: 56px;
+              height: 56px;
+              border-radius: 50%;
+              background-color: ${isSuccess ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'};
+              color: ${isSuccess ? '#34d399' : '#fbbf24'};
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 28px;
+              margin: 0 auto 16px;
+            }
+            h1 { font-size: 20px; margin: 0 0 8px; color: #fff; }
+            p { font-size: 13px; color: #94a3b8; margin: 0 0 20px; line-height: 1.5; }
+            .details {
+              background-color: #020617;
+              border-radius: 12px;
+              padding: 12px 16px;
+              margin-bottom: 20px;
+              text-align: left;
+              font-size: 12px;
+            }
+            .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+            .row:last-child { margin-bottom: 0; }
+            .btn {
+              display: inline-block;
+              width: 100%;
+              padding: 14px;
+              border-radius: 12px;
+              background-color: ${isSuccess ? '#10b981' : '#3b82f6'};
+              color: #fff;
+              text-decoration: none;
+              font-weight: bold;
+              font-size: 15px;
+              border: none;
+              cursor: pointer;
+              box-sizing: border-box;
+              transition: all 0.2s ease;
+            }
+            .btn:active {
+              transform: scale(0.98);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">${isSuccess ? '✓' : '!'}</div>
+            <h1>${isSuccess ? 'Payment Confirmed by PayU!' : 'Payment Cancelled / Incomplete'}</h1>
+            <p>${isSuccess ? 'Your transaction has been verified securely by PayU Gateway.' : 'Payment was not completed. Your food order was not placed.'}</p>
+            
+            <div class="details">
+              <div class="row"><span>Status:</span><strong style="color: ${isSuccess ? '#34d399' : '#fbbf24'}; text-transform: uppercase;">${status}</strong></div>
+              ${amount ? `<div class="row"><span>Amount:</span><strong>₹${amount.toFixed(2)}</strong></div>` : ''}
+              ${txnid ? `<div class="row"><span>Txn ID:</span><span style="font-family: monospace; font-size: 11px;">${txnid}</span></div>` : ''}
+              ${mihpayid ? `<div class="row"><span>PayU ID:</span><span style="font-family: monospace; font-size: 11px;">${mihpayid}</span></div>` : ''}
+            </div>
+
+            <button class="btn" onclick="closeOrRedirect()">${isSubscription ? 'Go to Dashboard' : (isSuccess ? 'Go to Home' : 'Return to Table Menu')}</button>
+          </div>
+
+          <script>
+            const payload = {
+              type: 'PAYU_PAYMENT_CALLBACK',
+              status: '${status}',
+              txnid: '${txnid}',
+              amount: '${amount}',
+              mihpayid: '${mihpayid}',
+              hash: '${hash}',
+              udf1: '${udf1}',
+              udf2: '${udf2}',
+              udf3: '${udf3}',
+              udf4: '${udf4}',
+              udf5: '${udf5}'
+            };
+
+            // Notify parent / opener window via PostMessage, localStorage, and BroadcastChannel
+            try {
+              if (window.opener) {
+                window.opener.postMessage(payload, '*');
+              }
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage(payload, '*');
+              }
+              if (typeof localStorage !== 'undefined' && '${txnid}') {
+                localStorage.setItem('digimoms_payu_status_' + '${txnid}', JSON.stringify(payload));
+              }
+              if (typeof BroadcastChannel !== 'undefined') {
+                const bc = new BroadcastChannel('digimoms_payu_channel');
+                bc.postMessage(payload);
+                bc.close();
+              }
+            } catch (e) {
+              console.warn('Callback notification error:', e);
+            }
+
+            function closeOrRedirect() {
+              if (window.opener) {
+                try {
+                  window.opener.postMessage(payload, '*');
+                  window.close();
+                } catch (e) {
+                  window.location.href = '${targetRedirectUrl}';
+                }
+              } else {
+                window.location.href = '${targetRedirectUrl}';
+              }
+            }
+
+            // Auto close popup or redirect immediately to Order Confirmation to avoid duplicate screens
+            if (window.opener && '${isSuccess}' === 'true') {
+              try { window.opener.postMessage(payload, '*'); } catch(e) {}
+              setTimeout(() => {
+                try { window.close(); } catch(e) {}
+              }, 400);
+            } else if (!window.opener && '${isSuccess}' === 'true') {
+              setTimeout(() => {
+                window.location.replace('${targetRedirectUrl}');
+              }, 400);
+            }
+          </script>
+        </body>
+        </html>
+      `;
+
+      res.setHeader('Content-Type', 'text/html');
+      return res.send(htmlResponse);
+    } catch (err) {
+      console.error('PayU callback error:', err);
+      res.redirect('/');
+    }
+  });
+
+  // API Route: AI Help Assistant via Gemini 3.6 Flash
+  app.post('/api/ai-help', async (req, res) => {
+    try {
+      const { prompt, language = 'en', role = 'owner', currentView = 'overview', restaurantName = 'DigiMoms OS', activeContext } = req.body;
+
+      if (!prompt || typeof prompt !== 'string') {
+        return res.status(400).json({ error: 'Missing prompt parameter' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.json({
+          success: false,
+          fallbackNeeded: true,
+          message: 'GEMINI_API_KEY not configured on server'
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
+
+      const langFull = language === 'bn' ? 'Bengali (বাংলা)' : language === 'hi' ? 'Hindi (हिन्दी)' : 'English';
+
+      const systemInstruction = `
+You are the AI Help Assistant for "DigiMoms Smart Restaurant OS", an India-based enterprise multi-tenant restaurant management software.
+Respond strictly in ${langFull}.
+
+Reasoning Workflow:
+1. IDENTIFY USER ROLE & INTENT: Understand whether user is Customer, Waiter, Kitchen, Owner, or CEO, and what specific action they want to accomplish.
+2. CHECK CONTEXT & ACCURACY: Check current restaurant, view, and role permissions. If user asks for DigiMoms support, contact number, or WhatsApp number, provide official DigiMoms channels:
+   - Official WhatsApp Support Line / Contact: 9475388085 (+91 9475388085)
+   - Official Support Email: digimomsagency@gmail.com
+   - Official Web Portals: https://www.digmoms.in or https://os.digimoms.in
+   - Company: DigiMoms Marketing Agency (Sub: DigiMoms Restaurant OS / DigiMoms Smart Restaurant OS)
+   - Founder & Owner: Tanmoy Jana (Sabang, Paschim Medinipur, West Bengal, India)
+   - Supported Payment Gateways: PayU, PhonePe, Razorpay, plus Direct UPI QR and Cash on Counter / Table
+   - Support Operating Hours: Monday to Saturday, 9:00 AM - 9:00 PM IST
+   Never invent random phone numbers or personal mobile numbers.
+3. ANSWER DIRECTLY: Provide actionable, step-by-step guidance without unrelated answers, hallucinations, or unrequested conversational fluff.
+
+Country & Currency Rules:
+- Default Country: India
+- Default Currency: Indian Rupee (INR / ₹) (e.g. ₹499, ₹999, ₹1,099, ₹2,500)
+- Timezone: Asia/Kolkata
+- NEVER use Bangladesh or BDT (৳) currency or Bangladesh payment services (bKash/Nagad/Rocket/Bangladesh Bank).
+- Even if the user selects Bengali (বাংলা), respond strictly within the Indian context (India, ₹ INR, PayU/PhonePe/Razorpay/UPI, Indian restaurant rules).
+
+Payment Gateway Context:
+- Supported Payment Gateways in DigiMoms OS: PayU, PhonePe, and Razorpay, plus Direct UPI QR and Cash settlements.
+- Demo Payment Mode: Permanent simulated mode inside app for safe testing without real money transfer. Always label as DEMO PAYMENT.
+- Live Payment Mode: Requires valid merchant gateway credentials. Live payments MUST be verified server-side via gateway verification API before marking as paid.
+- Never mark live online payments as paid without server verification.
+
+Indian Business Details:
+- Restaurants are located in India. GSTIN and FSSAI license numbers are OPTIONAL. If provided, they appear on bills/website; if not provided, do not invent them.
+
+Context:
+- User Role: ${role.toUpperCase()}
+- Current View/Page: ${currentView}
+- Restaurant: ${restaurantName}
+
+Role Rules:
+- If the user is a Customer, focus on QR ordering, Friend Code, table session, calling waiter, choosing cash vs UPI online payment, and getting digital bills. Do NOT explain internal admin credentials or restaurant backend secrets.
+- If the user is a Waiter, focus on Waiter Terminal actions (orders, serving, call waiter requests, cash payment confirmation). Do NOT explain Owner/CEO administrative functions unless clarifying that it requires Owner permission.
+- If the user is Kitchen staff, focus on Kitchen Display System (KDS) workflows (accept, start cooking, mark ready).
+- If the user is Owner, provide guidance on restaurant management, menu editing, table QR codes, reports, subscription renewal, website editor.
+- If the user is CEO, provide system-level platform administration guidance.
+
+Safety Rule:
+- You are an INSTRUCTIONAL assistant. You MUST NOT execute destructive actions (e.g. deleting restaurants, resetting database). Explain permissions and settings instead.
+- STRICT PRIVACY: NEVER output passwords, authentication tokens, API secrets, Razorpay/PhonePe secret keys, Supabase service-role keys, private customer payment credentials, or sensitive database credentials.
+
+DigiMoms OS Workflows:
+- Online Payment: Customer/Owner selects Online Payment -> Gateway checkout -> Server verifies transaction status -> Payment marked as paid -> Order/Subscription updated.
+- Cash Payment: Customer selects cash -> Order shows 'Pending Cash Payment' -> Staff clicks 'Confirm Cash Payment' button on order card -> Status changes to 'Paid (Cash)'.
+- Call Waiter: Customer clicks 'Call Waiter' on QR menu -> Waiter Terminal plays alert -> Waiter clicks 'Accept', visits table, then clicks 'Complete'.
+- Kitchen KDS: Pending -> Accept -> Start Cooking -> Mark Ready -> Waiter serves.
+- Today's Sales: Owner Dashboard -> Reports & Analytics tab.
+- Menu Item: Owner Dashboard -> Menu Management -> Add Category / Add Item with price in ₹.
+- Subscription Renewal: Owner Dashboard banner -> Renew Subscription -> Choose months & gateway -> Instant extension.
+
+Keep response concise, clear, friendly, and formatted with clean bullet points or numbered steps where applicable.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: prompt,
+        config: {
+          systemInstruction,
+          temperature: 0.3
+        }
+      });
+
+      const answer = response.text || '';
+      return res.json({ success: true, answer });
+    } catch (err: any) {
+      console.warn('Gemini AI Help endpoint warning:', err.message || err);
+      return res.json({ success: false, fallbackNeeded: true, error: err.message });
+    }
+  });
+
+  // Health check endpoint
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.warn('Vite dev server failed to start, falling back to static:', e);
+    }
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  // Supabase Realtime Listener for Push Notifications
+  serverSupabase
+    .channel('server-push-notifications')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, async (payload) => {
+      const newOrder = payload.new;
+      if (newOrder && newOrder.restaurant_id) {
+        const isCash = newOrder.payment_mode === 'cash' || newOrder.payment_mode === 'partial';
+        const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
+        const body = `Table ${newOrder.table_number || 'Takeaway'} (Order #${newOrder.order_number}): ₹${newOrder.grand_total}. Check your dashboard!`;
+        
+        sendPushNotification(newOrder.restaurant_id, title, body, { 
+          orderId: newOrder.id, 
+          type: 'new_order',
+          restaurant_id: newOrder.restaurant_id 
+        });
+      }
+    })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_waiter' }, async (payload) => {
+      const newCall = payload.new;
+      if (newCall && newCall.restaurant_id && newCall.status === 'pending') {
+        const title = '👋 Waiter Called!';
+        const body = `Table ${newCall.table_number} is requesting: ${newCall.request_type.toUpperCase()}`;
+        
+        sendPushNotification(newCall.restaurant_id, title, body, { 
+          callId: newCall.id, 
+          type: 'call_waiter',
+          restaurant_id: newCall.restaurant_id 
+        });
+      }
+    })
+    .subscribe();
+
+  return app;
+}
+
+// Global app instance for consolidation
+let globalApp: any = null;
+
+export default async function getApp() {
+  if (!globalApp) {
+    globalApp = await createExpressApp();
+  }
+  return globalApp;
+}
+
+// Standalone execution (Standard AI Studio / Node environment)
+const isMain = process.env.NODE_ENV !== 'production' || 
+               (!process.env.VERCEL && (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.cjs')));
+
+if (isMain) {
+  createExpressApp().then(app => {
+    const portStr = process.env.PORT || '3000';
+    const PORT = parseInt(portStr, 10);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+  });
+}

@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "buildCommand": "vite build",
+  "buildCommand": "npm run build:client",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
@@ -9,7 +9,7 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!assets/|favicon.ico|sw.js|manifest.json|robots.txt).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
