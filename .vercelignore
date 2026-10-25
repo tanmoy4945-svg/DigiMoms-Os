@@ -1,0 +1,17 @@
+# Directories to ignore for Vercel functions
+sql/
+scripts/
+data/
+mobile-app/
+assets/
+public/
+dist/
+node_modules/
+
+# Files to ignore
+.env*
+.gitignore
+package-lock.json
+tsconfig.json
+metadata.json
+index.html
