@@ -255,7 +255,7 @@ export async function createExpressApp() {
         description: JSON.stringify({ tokens: cleanTokens, updated_at: new Date().toISOString() })
       }]).then(({ error }) => {
         if (error) console.warn('[FCM Sync] Supabase insert warning:', error.message);
-      }).catch(() => {});
+      });
     }
 
     res.json({ success: true, tokenCount: fcmTokens[restaurantId].length });
