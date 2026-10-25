@@ -2394,7 +2394,8 @@ const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1
 
 if (isMain) {
   createExpressApp().then(app => {
-    const PORT = process.env.PORT || 3000;
+    const portStr = process.env.PORT || '3000';
+    const PORT = parseInt(portStr, 10);
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on http://0.0.0.0:${PORT}`);
     });
