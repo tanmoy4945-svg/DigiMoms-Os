@@ -9,7 +9,7 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|favicon.ico|sw.js|manifest.json|robots.txt).*)",
       "destination": "/index.html"
     }
   ]
