@@ -1,14 +1,14 @@
 {
   "framework": "vite",
-  "buildCommand": "vite build",
+  "buildCommand": "npm run build:client",
   "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
