@@ -16,6 +16,7 @@ import { RestaurantWebsiteManager } from '../owner/RestaurantWebsiteManager';
 import { CeoHealthMonitor } from './CeoHealthMonitor';
 import { CeoStaffManagement } from './CeoStaffManagement';
 import { CeoRenewalHistory } from './CeoRenewalHistory';
+import { CeoPartnerCommissions } from './CeoPartnerCommissions';
 import { Restaurant } from '../../types';
 
 export type RevenuePeriod = 'this_month' | 'today' | 'yesterday' | 'this_week' | 'last_month' | 'this_year' | 'lifetime';
@@ -174,7 +175,7 @@ export const CeoDashboard: React.FC = () => {
   const canEditLogs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_logs === true;
   const canDeleteLogs = isMasterCeo || currentCeoStaff?.permissions?.can_delete_logs === true;
 
-  const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'history' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
+  const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'partner_commissions' | 'history' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
     if (currentCeoStaff) {
       if (canViewRest) return 'restaurants';
       if (canViewPay) return 'payment-settings';
@@ -252,7 +253,9 @@ export const CeoDashboard: React.FC = () => {
     password: '',
     address: '',
     monthly_fee: 999,
-    trial_days: 14
+    trial_days: 14,
+    partner_mobile: '',
+    partner_commission_amount: 0
   });
 
   const [revenuePeriod, setRevenuePeriod] = useState<RevenuePeriod>('this_month');
@@ -441,10 +444,24 @@ export const CeoDashboard: React.FC = () => {
         password_hash: newRest.password || 'owner123',
         address: newRest.address,
         monthly_subscription_fee: Number(newRest.monthly_fee) || 999,
-        trial_days: Number(newRest.trial_days) || 14
+        trial_days: Number(newRest.trial_days) || 14,
+        partner_mobile: newRest.partner_mobile || '',
+        partner_commission_amount: Number(newRest.partner_commission_amount) || 0
       });
 
-      setNewRest({ name: '', slug: '', owner_name: '', owner_mobile: '', contact_mobile: '', password: '', address: '', monthly_fee: 999, trial_days: 14 });
+      setNewRest({ 
+        name: '', 
+        slug: '', 
+        owner_name: '', 
+        owner_mobile: '', 
+        contact_mobile: '', 
+        password: '', 
+        address: '', 
+        monthly_fee: 999, 
+        trial_days: 14,
+        partner_mobile: '',
+        partner_commission_amount: 0
+      });
       setCreateRestError(null);
       setShowAddModal(false);
     } catch (err: any) {
@@ -505,6 +522,8 @@ export const CeoDashboard: React.FC = () => {
         trial_end: trialEnd,
         subscription_start: editingRestaurant.subscription_start,
         subscription_end: editingRestaurant.subscription_end,
+        partner_mobile: editingRestaurant.partner_mobile,
+        partner_commission_amount: Number(editingRestaurant.partner_commission_amount) || 0,
         status: editingRestaurant.status
       });
       setEditingRestaurant(null);
@@ -723,6 +742,17 @@ export const CeoDashboard: React.FC = () => {
             <CreditCard className="w-4 h-4 text-emerald-400" /> Subscription Gateway & Payments
           </button>
         )}
+        
+        {canViewPay && (
+          <button
+            onClick={() => setActiveTab('partner_commissions')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'partner_commissions' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4 text-purple-400" /> পার্টনার কমিশন (Partners)
+          </button>
+        )}
 
         {canViewSql && (
           <button
@@ -787,6 +817,11 @@ export const CeoDashboard: React.FC = () => {
           canEdit={canEditTeam}
           canDelete={canDeleteTeam}
         />
+      )}
+
+      {/* TAB: PARTNER COMMISSIONS */}
+      {activeTab === 'partner_commissions' && canViewPay && (
+        <CeoPartnerCommissions />
       )}
 
       {/* TAB 1: RESTAURANT TENANT MANAGEMENT */}
@@ -1337,6 +1372,29 @@ export const CeoDashboard: React.FC = () => {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4 p-3 rounded-2xl bg-purple-950/20 border border-purple-500/20">
+                <div>
+                  <label className="block text-[10px] font-bold text-purple-300 uppercase mb-1">Partner Mobile (Optional)</label>
+                  <input
+                    type="tel"
+                    placeholder="Partner Mobile"
+                    value={newRest.partner_mobile}
+                    onChange={(e) => setNewRest({ ...newRest, partner_mobile: e.target.value })}
+                    className="w-full bg-slate-950 border border-purple-500/30 rounded-xl px-4 py-2 text-xs text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-purple-300 uppercase mb-1">Commission Amount (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 200"
+                    value={newRest.partner_commission_amount}
+                    onChange={(e) => setNewRest({ ...newRest, partner_commission_amount: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-purple-500/30 rounded-xl px-4 py-2 text-xs text-white outline-none"
+                  />
+                </div>
+              </div>
+
               <button
                 type="submit"
                 disabled={isSubmittingRest}
@@ -1410,6 +1468,29 @@ export const CeoDashboard: React.FC = () => {
                     value={editingRestaurant.owner_mobile}
                     onChange={(e) => setEditingRestaurant({ ...editingRestaurant, owner_mobile: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white font-mono outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 p-3 rounded-2xl bg-purple-950/20 border border-purple-500/20">
+                <div>
+                  <label className="block text-[10px] font-bold text-purple-300 uppercase mb-1">Partner Mobile (Optional)</label>
+                  <input
+                    type="tel"
+                    placeholder="Partner Mobile"
+                    value={editingRestaurant.partner_mobile || ''}
+                    onChange={(e) => setEditingRestaurant({ ...editingRestaurant, partner_mobile: e.target.value })}
+                    className="w-full bg-slate-950 border border-purple-500/30 rounded-xl px-4 py-2 text-xs text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-purple-300 uppercase mb-1">Commission Amount (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 200"
+                    value={editingRestaurant.partner_commission_amount || 0}
+                    onChange={(e) => setEditingRestaurant({ ...editingRestaurant, partner_commission_amount: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-purple-500/30 rounded-xl px-4 py-2 text-xs text-white outline-none"
                   />
                 </div>
               </div>

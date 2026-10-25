@@ -105,6 +105,8 @@ export interface Restaurant {
   custom_domain?: string;
   custom_domain_verified?: boolean;
   last_password_change?: string;
+  partner_mobile?: string;
+  partner_commission_amount?: number;
   theme: string;
   language: Language;
   timezone: string;
@@ -439,6 +441,9 @@ export interface SubscriptionHistory {
   subscription_type?: string;
   granted_by?: string;
   reason?: string;
+  commission_status?: 'pending' | 'cleared';
+  commission_cleared_at?: string;
+  commission_cleared_by_mobile?: string;
   created_at: string;
 }
 

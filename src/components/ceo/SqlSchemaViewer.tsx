@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS public.restaurants (
     free_offer_granted_by VARCHAR(100),
     subscription_start TIMESTAMPTZ DEFAULT NOW(),
     subscription_end TIMESTAMPTZ DEFAULT NOW(),
+    partner_mobile VARCHAR(20),
+    partner_commission_amount NUMERIC(10,2) DEFAULT 0,
     theme VARCHAR(50) DEFAULT 'dark-glass',
     language VARCHAR(10) DEFAULT 'en',
     timezone VARCHAR(50) DEFAULT 'Asia/Kolkata',
@@ -226,6 +228,9 @@ CREATE TABLE IF NOT EXISTS public.subscription_history (
     subscription_type VARCHAR(50) DEFAULT 'RENEWAL', -- 'RENEWAL' | 'CEO_FREE_EXTENSION' | 'TRIAL'
     granted_by VARCHAR(100),
     reason TEXT,
+    commission_status VARCHAR(20), -- 'pending' | 'cleared'
+    commission_cleared_at TIMESTAMPTZ,
+    commission_cleared_by_mobile VARCHAR(20),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -349,6 +354,13 @@ CREATE POLICY "Allow All Subscription History" ON public.subscription_history FO
 CREATE POLICY "Allow All Audit Logs" ON public.audit_logs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow All Payment Transactions" ON public.payment_transactions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow All Ceo Payment Settings" ON public.ceo_payment_settings FOR ALL USING (true) WITH CHECK (true);
+
+-- 20. PARTNER COMMISSION MIGRATION (RUN THIS IF COLUMNS MISSING)
+-- ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS partner_mobile VARCHAR(20);
+-- ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS partner_commission_amount NUMERIC(10,2) DEFAULT 0;
+-- ALTER TABLE public.subscription_history ADD COLUMN IF NOT EXISTS commission_status VARCHAR(20);
+-- ALTER TABLE public.subscription_history ADD COLUMN IF NOT EXISTS commission_cleared_at TIMESTAMPTZ;
+-- ALTER TABLE public.subscription_history ADD COLUMN IF NOT EXISTS commission_cleared_by_mobile VARCHAR(20);
 `;
 
   const copyToClipboard = () => {

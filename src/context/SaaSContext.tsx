@@ -140,6 +140,7 @@ interface SaaSContextType {
   deleteOldRestaurantData: (id: string, duration: '6m' | '1y') => Promise<number>;
   factoryResetRestaurant: (id: string, ceoPass: string) => Promise<boolean>;
   executeProductionReset: (ceoPassword?: string) => Promise<boolean>;
+  updateCommissionStatus: (historyId: string, status: 'pending' | 'cleared', clearedByMobile: string) => Promise<void>;
 
   // Owner Actions
   loginOwner: (mobile: string, pass: string, rememberMe?: boolean) => Restaurant | null;
@@ -827,6 +828,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
               free_offer_start: ov.free_offer_start !== undefined ? ov.free_offer_start : (r.free_offer_start || ''),
               free_offer_end: ov.free_offer_end !== undefined ? ov.free_offer_end : (r.free_offer_end || ''),
               free_offer_granted_by: ov.free_offer_granted_by !== undefined ? ov.free_offer_granted_by : (r.free_offer_granted_by || ''),
+              partner_mobile: ov.partner_mobile !== undefined ? ov.partner_mobile : (r.partner_mobile || ''),
+              partner_commission_amount: ov.partner_commission_amount !== undefined ? Number(ov.partner_commission_amount) : (r.partner_commission_amount ?? 0),
               last_password_change: ov.last_password_change !== undefined ? ov.last_password_change : (r.last_password_change || '')
             };
           });
@@ -2616,7 +2619,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           payu_merchant_salt: parsed.payu_merchant_salt || '',
           payu_env: parsed.payu_env || 'TEST',
           payu_verified: parsed.payu_verified || false,
-          payu_verified_at: parsed.payu_verified_at
+          payu_verified_at: parsed.payu_verified_at,
+          webhook_url: parsed.webhook_url || '',
+          webhook_api_key: parsed.webhook_api_key || ''
         };
       } catch (e) {
         console.warn('Failed to parse saved CEO payment config', e);
@@ -2636,7 +2641,9 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       payu_merchant_key: '',
       payu_merchant_salt: '',
       payu_env: 'TEST',
-      payu_verified: false
+      payu_verified: false,
+      webhook_url: '',
+      webhook_api_key: ''
     };
   });
 
@@ -2655,8 +2662,6 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       razorpay_verified: cfg.razorpay_verified ?? ceoPaymentConfig.razorpay_verified ?? false,
       razorpay_verified_at: cfg.razorpay_verified_at ?? ceoPaymentConfig.razorpay_verified_at,
       payu_merchant_key: cfg.payu_merchant_key ?? ceoPaymentConfig.payu_merchant_key ?? '',
-      payu_merchant_salt: cfg.payu_merchant_salt ?? ceoPaymentConfig.payu_merchant_salt ?? '',
-      payu_env: cfg.payu_env ?? ceoPaymentConfig.payu_env ?? 'TEST',
       payu_verified: cfg.payu_verified ?? ceoPaymentConfig.payu_verified ?? false,
       payu_verified_at: cfg.payu_verified_at ?? ceoPaymentConfig.payu_verified_at
     };
@@ -2881,6 +2886,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       free_offer_status: 'off',
       free_offer_start: nowIso,
       free_offer_end: nowIso,
+      partner_mobile: newRest.partner_mobile || '',
+      partner_commission_amount: newRest.partner_commission_amount || 0,
       subscription_start: nowIso,
       subscription_end: nowIso,
       theme: 'dark-glass',
@@ -2914,7 +2921,16 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       language: created.language,
       timezone: created.timezone,
       created_at: created.created_at,
-      updated_at: created.updated_at
+      updated_at: created.updated_at,
+      razorpay_secret: JSON.stringify({
+        _ext: {
+          partner_mobile: created.partner_mobile,
+          partner_commission_amount: created.partner_commission_amount,
+          monthly_subscription_fee: created.monthly_subscription_fee,
+          contact_mobile: created.contact_mobile,
+          trial_days: created.trial_days
+        }
+      })
     });
 
     console.log("Supabase INSERT into public.restaurants payload:", dbPayload);
@@ -3256,7 +3272,13 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
       } else if (error.code === '42703' || error.message?.includes('column')) {
         console.warn("Retrying subscription_history insert without new columns:", error);
-        const { granted_by, reason, subscription_type, previous_expiry, new_expiry, days_added, start_date, end_date, plan_name, razorpay_order_id, razorpay_payment_id, ...core } = record as any;
+        const { 
+          granted_by, reason, subscription_type, previous_expiry, new_expiry, 
+          days_added, start_date, end_date, plan_name, 
+          razorpay_order_id, razorpay_payment_id,
+          commission_status, commission_cleared_at, commission_cleared_by_mobile,
+          ...core 
+        } = record as any;
         
         const retry1 = await supabase.from('subscription_history').insert([core]);
         if (retry1.error) {
@@ -3608,7 +3630,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       amount: feeAmount,
       duration_months: months,
       days_added: months * 30,
-      payment_id: rzpTxId || `TX_PHONEPE_${Date.now()}`,
+      payment_id: rzpTxId || `TX_RENEWAL_${Date.now()}`,
       razorpay_order_id: paymentDetails?.razorpay_order_id || null,
       razorpay_payment_id: paymentDetails?.razorpay_payment_id || null,
       start_date: baseDate.toISOString(),
@@ -3618,7 +3640,8 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       payment_status: 'paid',
       payment_mode: paymentDetails?.mode || ceoPaymentConfig?.mode || 'demo',
       subscription_type: 'RENEWAL',
-      granted_by: 'Owner Payment (PhonePe)',
+      granted_by: 'Owner Payment (Gateway)',
+      commission_status: rest.partner_mobile ? 'pending' : undefined,
       created_at: new Date().toISOString()
     };
 
@@ -3626,6 +3649,50 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     fetchAllFromSupabase().catch(e => console.error("BG fetch error:", e));
     showToast(`🎉 Monthly Subscription Paid (₹${feeAmount}) & Extended by ${months} Calendar Month!`, 'success');
+  };
+
+  const updateCommissionStatus = async (historyId: string, status: 'pending' | 'cleared', clearedByMobile: string) => {
+    const now = new Date().toISOString();
+    
+    // 1. Local update
+    setSubscriptionHistory(prev => {
+      const updated = prev.map(s => s.id === historyId ? {
+        ...s,
+        commission_status: status,
+        commission_cleared_at: status === 'cleared' ? now : undefined,
+        commission_cleared_by_mobile: status === 'cleared' ? clearedByMobile : undefined
+      } : s);
+      try {
+        localStorage.setItem('digimoms_subscription_history', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Persist to DB
+    const { error } = await supabase.from('subscription_history').update({
+      commission_status: status,
+      commission_cleared_at: status === 'cleared' ? now : null,
+      commission_cleared_by_mobile: status === 'cleared' ? clearedByMobile : null
+    }).eq('id', historyId);
+
+    if (error) {
+      console.warn("Could not update commission status in DB (Expected if columns missing):", error);
+      // Fallback: We still have it in React state and local storage is updated in setSubscriptionHistory's callback or next fetch
+    }
+
+    showToast(status === 'cleared' ? 'Commission marked as cleared.' : 'Commission reset to pending.', 'success');
+    
+    // Log audit
+    const record = subscriptionHistory.find(s => s.id === historyId);
+    if (record) {
+      logAudit({
+        restaurant_id: record.restaurant_id,
+        actor_type: 'ceo',
+        actor_name: `CEO / Admin (${clearedByMobile})`,
+        action: 'COMMISSION_STATUS_UPDATED',
+        description: `Commission for renewal ${record.payment_id} marked as ${status.toUpperCase()} by ${clearedByMobile}`
+      });
+    }
   };
 
   const archiveRestaurant = async (id: string) => {
@@ -6809,7 +6876,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loginCeo, loginCeoStaffMember, logoutCeo, ceoRazorpayConfig, updateCeoRazorpayConfig, ceoPaymentConfig, updateCeoPaymentConfig,
       addRestaurant, updateRestaurant, suspendRestaurant,
       resumeRestaurant, grantTrial, endTrial, extendTrial, grantFreeOffer, endFreeOffer, extendFreeOffer, grantFreeExtension, grantFreePlan, grantFreeDays, renewSubscription, renewRestaurantMonthly, archiveRestaurant, deleteRestaurantPermanently, deleteOldRestaurantData,
-      factoryResetRestaurant, executeProductionReset, loginOwner, logoutOwner, updateOwnerProfile, updateOwnerPassword,
+      factoryResetRestaurant, executeProductionReset, updateCommissionStatus, loginOwner, logoutOwner, updateOwnerProfile, updateOwnerPassword,
       addCategory, updateCategory, addMenuItem, updateMenuItem, toggleMenuItemAvailability,
       addTable, clearTableSession, addStaffMember, toggleStaffStatus, deleteStaffMember, updateStaffPassword,
       loginStaff, logoutStaff, acceptCallRequest, completeCallRequest, verifyCashOrder, recordOfflinePayment,
