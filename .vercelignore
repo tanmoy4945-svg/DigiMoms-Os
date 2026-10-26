@@ -1,21 +1,2 @@
-# Ignore everything in the api folder by default
-api/*
-
-# But allow the main consolidated entry point
-!api/index.ts
-
-# Ignore non-essential directories for deployment
-sql/
-data/
-mobile-app/
-assets/.aistudio/
-
-# Ensure frontend files are NOT ignored
-!index.html
-!src/
-!public/
-!assets/
-!package.json
-!vite.config.ts
-!tsconfig.json
-!vercel.json
+# Ensure data files are included
+!data/*.json

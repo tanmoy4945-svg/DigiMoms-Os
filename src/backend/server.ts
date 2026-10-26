@@ -2,9 +2,9 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
-import admin from 'firebase-admin';
+import * as admin from 'firebase-admin';
 
 // Initialize Firebase Admin SDK
 try {
@@ -42,8 +42,10 @@ export async function createExpressApp() {
   const app = express();
   const PORT = 3000;
 
+  const IS_VERCEL = process.env.VERCEL === '1';
   const DATA_DIR = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(DATA_DIR)) {
+  
+  if (!IS_VERCEL && !fs.existsSync(DATA_DIR)) {
     try {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     } catch (err) {
@@ -51,15 +53,25 @@ export async function createExpressApp() {
     }
   }
 
+  // In-memory cache for Vercel since we can't write to disk
+  const vCache = new Map<string, any>();
+
   function readJsonFile<T>(filename: string, defaultVal: T): T {
     try {
+      if (IS_VERCEL && vCache.has(filename)) {
+        return vCache.get(filename);
+      }
+
       const filePath = path.join(DATA_DIR, filename);
       if (!fs.existsSync(filePath)) {
-        fs.writeFileSync(filePath, JSON.stringify(defaultVal, null, 2), 'utf-8');
+        console.log(`[readJsonFile] File not found: ${filename}, using default.`);
         return defaultVal;
       }
       const raw = fs.readFileSync(filePath, 'utf-8');
-      return JSON.parse(raw) as T;
+      const parsed = JSON.parse(raw) as T;
+      
+      if (IS_VERCEL) vCache.set(filename, parsed);
+      return parsed;
     } catch (err) {
       console.warn(`Error reading ${filename}, using default:`, err);
       return defaultVal;
@@ -68,6 +80,12 @@ export async function createExpressApp() {
 
   function writeJsonFile<T>(filename: string, data: T): void {
     try {
+      if (IS_VERCEL) {
+        vCache.set(filename, data);
+        console.log(`[writeJsonFile] Vercel mode: Saved ${filename} to in-memory cache.`);
+        return;
+      }
+
       const filePath = path.join(DATA_DIR, filename);
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (err) {
@@ -247,14 +265,16 @@ export async function createExpressApp() {
     // Also persist to Supabase audit_logs for cloud-sync/persistence on read-only environments like Vercel
     const cleanTokens = tokensToAdd.filter(t => typeof t === 'string' && t.trim().length > 5);
     if (cleanTokens.length > 0) {
-      serverSupabase.from('audit_logs').insert([{
+      (serverSupabase.from('audit_logs').insert([{
         id: crypto.randomUUID(),
         restaurant_id: restaurantId,
         actor_type: 'system',
         action: 'PUSH_TOKEN_REGISTRATION',
         description: JSON.stringify({ tokens: cleanTokens, updated_at: new Date().toISOString() })
-      }]).then(({ error }) => {
+      }]) as any).then(({ error }: any) => {
         if (error) console.warn('[FCM Sync] Supabase insert warning:', error.message);
+      }).catch((err: any) => {
+        console.warn('[FCM Sync] Supabase insert error:', err);
       });
     }
 
@@ -590,11 +610,11 @@ export async function createExpressApp() {
         const isCash = order.payment_mode === 'cash' || order.payment_mode === 'partial';
         const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
         const body = `Table ${order.table_number || 'Takeaway'} (Order #${order.order_number}): ₹${order.grand_total}. Please check dashboard!`;
-        sendPushNotification(order.restaurant_id, title, body, {
+        (sendPushNotification(order.restaurant_id, title, body, {
           orderId: order.id,
           type: 'new_order',
           restaurant_id: order.restaurant_id
-        }).catch(pErr => console.warn('[Orders Save] Push dispatch note:', pErr));
+        }) as any).catch((pErr: any) => console.warn('[Orders Save] Push dispatch note:', pErr));
       }
     }
 
@@ -1075,13 +1095,13 @@ export async function createExpressApp() {
           
           // Using authoritative broadcast for faster UI response
           channelsToNotify.forEach(chName => {
-            serverSupabase.channel(chName).send({
+            (serverSupabase.channel(chName).send({
               type: 'broadcast',
               event: 'order_event',
               payload: { order: finalOrderObj }
-            }).catch(e => console.warn(`Broadcast fail to ${chName}:`, e));
+            }) as any).catch((e: any) => console.warn(`Broadcast fail to ${chName}:`, e));
 
-            serverSupabase.channel(chName).send({
+            (serverSupabase.channel(chName).send({
               type: 'broadcast',
               event: 'order_status_event',
               payload: {
@@ -1095,7 +1115,7 @@ export async function createExpressApp() {
                 online_amount: finalOrderObj.online_amount,
                 cash_due: 0
               }
-            }).catch(e => console.warn(`Status Broadcast fail to ${chName}:`, e));
+            }) as any).catch((e: any) => console.warn(`Status Broadcast fail to ${chName}:`, e));
           });
         } catch (bcastEx) {
           console.warn('[serverSupabase] Realtime broadcast notice:', bcastEx);
@@ -2234,14 +2254,7 @@ export async function createExpressApp() {
         });
       }
 
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build'
-          }
-        }
-      });
+      const ai = new GoogleGenerativeAI(apiKey);
 
       const langFull = language === 'bn' ? 'Bengali (বাংলা)' : language === 'hi' ? 'Hindi (हिन्दी)' : 'English';
 
@@ -2306,16 +2319,14 @@ DigiMoms OS Workflows:
 Keep response concise, clear, friendly, and formatted with clean bullet points or numbered steps where applicable.
       `;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.3
-        }
+      const model = ai.getGenerativeModel({ 
+        model: 'gemini-1.5-flash',
+        systemInstruction
       });
-
-      const answer = response.text || '';
+      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const answer = response.text();
       return res.json({ success: true, answer });
     } catch (err: any) {
       console.warn('Gemini AI Help endpoint warning:', err.message || err);
@@ -2340,7 +2351,7 @@ Keep response concise, clear, friendly, and formatted with clean bullet points o
     } catch (e) {
       console.warn('Vite dev server failed to start, falling back to static:', e);
     }
-  } else {
+  } else if (!IS_VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
