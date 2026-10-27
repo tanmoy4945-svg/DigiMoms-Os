@@ -16,6 +16,7 @@
   ],
   "functions": {
     "api/index.ts": {
+      "memory": 1024,
       "maxDuration": 25,
       "includeFiles": "data/**"
     }
