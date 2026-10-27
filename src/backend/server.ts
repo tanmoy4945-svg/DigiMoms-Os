@@ -96,6 +96,14 @@ export async function createExpressApp() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // Diagnostic logging for backend routing issues
+  app.use((req, res, next) => {
+    if (req.url !== '/api/realtime/events') { // Skip high-frequency SSE logs
+      console.log(`[Backend Request] ${req.method} ${req.url}`);
+    }
+    next();
+  });
+
   // Helper to send push notifications to both FCM and Expo Push Services
   async function sendPushNotification(restaurantId: string, title: string, body: string, data: any = {}) {
     try {
@@ -1130,7 +1138,7 @@ export async function createExpressApp() {
   }
 
   // API Route: PhonePe Callback Handler (POST / GET from PhonePe redirect or S2S callback)
-  app.all('/api/phonepe/callback', async (req, res) => {
+  app.all(['/api/phonepe/callback', '/phonepe/callback'], async (req, res) => {
     try {
       const data = req.method === 'POST' ? req.body : req.query;
       const reqQuery = req.query || {};
@@ -1969,7 +1977,7 @@ export async function createExpressApp() {
   });
 
   // API Route: PayU Callback Handler (POST & GET from PayU Gateway)
-  app.all('/api/payu/callback', async (req, res) => {
+  app.all(['/api/payu/callback', '/payu/callback'], async (req, res) => {
     try {
       const data = req.method === 'POST' ? req.body : req.query;
       const status = data.status || (data.unmappedstatus === 'captured' ? 'success' : 'pending');
