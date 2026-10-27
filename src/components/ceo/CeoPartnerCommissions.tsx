@@ -7,13 +7,26 @@ import {
 } from 'lucide-react';
 import { Restaurant, SubscriptionHistory } from '../../types';
 
-export const CeoPartnerCommissions: React.FC = () => {
+interface CeoPartnerCommissionsProps {
+  canEdit?: boolean;
+  canDelete?: boolean;
+}
+
+export const CeoPartnerCommissions: React.FC<CeoPartnerCommissionsProps> = ({
+  canEdit = true,
+  canDelete = true
+}) => {
   const { 
     restaurants, 
     subscriptionHistory, 
     updateCommissionStatus,
-    showToast
+    showToast,
+    currentCeoStaff
   } = useSaaS();
+
+  const isMasterCeo = !currentCeoStaff;
+  const userCanEdit = isMasterCeo || canEdit;
+  const userCanDelete = isMasterCeo || canDelete;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'cleared'>('all');
@@ -50,6 +63,10 @@ export const CeoPartnerCommissions: React.FC = () => {
   };
 
   const handleClearCommission = async (historyId: string) => {
+    if (!userCanEdit) {
+      showToast('Access Denied: You do not have permission to clear commissions.', 'error');
+      return;
+    }
     if (!adminMobile || adminMobile.length < 10) {
       showToast('Please enter a valid Admin Mobile Number to clear commission.', 'error');
       return;
@@ -66,6 +83,10 @@ export const CeoPartnerCommissions: React.FC = () => {
   };
 
   const handleResetCommission = async (historyId: string) => {
+    if (!userCanDelete) {
+      showToast('Access Denied: You do not have permission to reset commissions.', 'error');
+      return;
+    }
     if (!adminMobile || adminMobile.length < 10) {
       showToast('Please enter a valid Admin Mobile Number to reset commission.', 'error');
       return;
@@ -308,16 +329,22 @@ export const CeoPartnerCommissions: React.FC = () => {
                                 <button
                                   disabled={isProcessing}
                                   onClick={() => handleClearCommission(item.id)}
-                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                                  className={`px-3 py-1.5 rounded-lg text-white text-[10px] font-bold shadow-lg transition-all flex items-center gap-1 ml-auto ${
+                                    userCanEdit ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20' : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                                  }`}
                                 >
+                                  {!userCanEdit && <Lock className="w-3 h-3" />}
                                   Mark as Cleared
                                 </button>
                               ) : (
                                 <button
                                   disabled={isProcessing}
                                   onClick={() => handleResetCommission(item.id)}
-                                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 text-[10px] font-bold border border-slate-700 disabled:opacity-50"
+                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 ml-auto ${
+                                    userCanDelete ? 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-slate-700' : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed opacity-60'
+                                  }`}
                                 >
+                                  {!userCanDelete && <Lock className="w-3 h-3" />}
                                   Reset to Pending
                                 </button>
                               )}

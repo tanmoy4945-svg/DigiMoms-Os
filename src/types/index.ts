@@ -204,6 +204,11 @@ export interface CeoStaffPermissions {
   can_view_logs?: boolean;            // View real-time security events & audit trail (VIEW)
   can_edit_logs?: boolean;            // Filter logs, search logs & export audit trail (EDIT)
   can_delete_logs?: boolean;          // Clear or purge security audit trail logs (DELETE)
+
+  // 12. Partner Commissions Management
+  can_view_partners?: boolean;        // View partner directory, commissions & mobile (VIEW)
+  can_edit_partners?: boolean;        // Mark commissions as cleared, edit partner details (EDIT)
+  can_delete_partners?: boolean;      // Reset commissions or delete partner links (DELETE)
 }
 
 export interface CeoStaffMember {

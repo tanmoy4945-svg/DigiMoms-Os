@@ -162,6 +162,18 @@ const CEO_MENU_CATEGORIES: MenuCategory[] = [
       { key: 'can_delete_logs', label: 'Purge Audit Logs', description: 'Clear or purge security activity history logs', type: 'delete' },
     ]
   },
+  {
+    id: 'partners',
+    name: '12. Partner Commission Management',
+    icon: Users,
+    description: 'Lifetime partner earnings, commission clearing and partner directory',
+    color: 'amber',
+    items: [
+      { key: 'can_view_partners', label: 'View Partners & Earnings', description: 'View partner mobile numbers, linked restaurants and pending commissions', type: 'view' },
+      { key: 'can_edit_partners', label: 'Clear Commissions & Edit', description: 'Authorize marking partner commissions as cleared and update partner details', type: 'edit' },
+      { key: 'can_delete_partners', label: 'Reset / Delete Commissions', description: 'Reset cleared commissions back to pending or remove partner mappings', type: 'delete' },
+    ]
+  },
 ];
 
 // Helper: All permissions preset (Full Super Admin)
@@ -216,6 +228,10 @@ const ALL_PERMISSIONS_PRESET: CeoStaffPermissions = {
   can_view_logs: true,
   can_edit_logs: true,
   can_delete_logs: true,
+
+  can_view_partners: true,
+  can_edit_partners: true,
+  can_delete_partners: true,
 };
 
 // Helper: All restaurant permissions preset (Puro Restaurant Setup Specialist)
@@ -244,6 +260,9 @@ const ALL_RESTAURANT_PRESET: CeoStaffPermissions = {
   can_edit_feedback: true,
 
   can_view_logs: true,
+
+  can_view_partners: true,
+  can_edit_partners: true,
 };
 
 // Helper: Billing preset

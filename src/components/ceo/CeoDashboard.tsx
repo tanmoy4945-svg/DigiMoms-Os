@@ -175,10 +175,16 @@ export const CeoDashboard: React.FC = () => {
   const canEditLogs = isMasterCeo || currentCeoStaff?.permissions?.can_edit_logs === true;
   const canDeleteLogs = isMasterCeo || currentCeoStaff?.permissions?.can_delete_logs === true;
 
+  // 12. Partner Commissions Management
+  const canViewPartners = isMasterCeo || currentCeoStaff?.permissions?.can_view_partners !== false;
+  const canEditPartners = isMasterCeo || currentCeoStaff?.permissions?.can_edit_partners === true;
+  const canDeletePartners = isMasterCeo || currentCeoStaff?.permissions?.can_delete_partners === true;
+
   const [activeTab, setActiveTab] = useState<'restaurants' | 'team' | 'agreement' | 'payment-settings' | 'partner_commissions' | 'history' | 'sql' | 'storage' | 'backup' | 'feedback' | 'logs'>(() => {
     if (currentCeoStaff) {
       if (canViewRest) return 'restaurants';
       if (canViewPay) return 'payment-settings';
+      if (canViewPartners) return 'partner_commissions';
       if (canViewSubs) return 'agreement';
       if (canViewTeam) return 'team';
       if (canViewStorage) return 'storage';
@@ -743,7 +749,7 @@ export const CeoDashboard: React.FC = () => {
           </button>
         )}
         
-        {canViewPay && (
+        {canViewPartners && (
           <button
             onClick={() => setActiveTab('partner_commissions')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
@@ -820,8 +826,11 @@ export const CeoDashboard: React.FC = () => {
       )}
 
       {/* TAB: PARTNER COMMISSIONS */}
-      {activeTab === 'partner_commissions' && canViewPay && (
-        <CeoPartnerCommissions />
+      {activeTab === 'partner_commissions' && canViewPartners && (
+        <CeoPartnerCommissions 
+          canEdit={canEditPartners}
+          canDelete={canDeletePartners}
+        />
       )}
 
       {/* TAB 1: RESTAURANT TENANT MANAGEMENT */}
