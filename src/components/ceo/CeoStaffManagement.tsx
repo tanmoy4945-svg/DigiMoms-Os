@@ -774,6 +774,7 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
           const hasAddRest = staff.permissions?.can_add_restaurants === true;
           const hasSetupRest = staff.permissions?.can_setup_restaurants === true;
           const hasDeleteRest = staff.permissions?.can_delete_restaurants === true;
+          const hasPartnerAccess = staff.permissions?.can_view_partners === true && staff.permissions?.can_edit_partners === true;
           const hasFullSuperAdmin = activeCount >= 25;
 
           return (
@@ -839,6 +840,11 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
                       <Trash2 className="w-3 h-3 text-rose-400" /> Delete Allowed
                     </span>
                   )}
+                  {hasPartnerAccess && (
+                    <span className="px-2.5 py-1 rounded-xl bg-amber-950/60 border border-amber-500/40 text-[10px] font-bold text-amber-300 flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5 text-amber-400" /> Partner Manager (পার্টনার কমিশন)
+                    </span>
+                  )}
                 </div>
 
                 {/* Quick 1-Click Action: Grant All Restaurant Permissions */}
@@ -851,6 +857,30 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
                   >
                     <Building2 className="w-3.5 h-3.5 text-emerald-400" />
                     Grant All Restaurant Permissions (1-Click)
+                  </button>
+                )}
+
+                {/* Quick 1-Click Action: Grant Partner Permissions */}
+                {!hasPartnerAccess && userCanEdit && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const mergedPerms: CeoStaffPermissions = {
+                          ...(staff.permissions || {}),
+                          ...PARTNER_PRESET
+                        };
+                        await updateCeoStaffMember(staff.id, { permissions: mergedPerms });
+                        showToast(`✅ Partner Manager permissions granted to ${staff.name}!`, 'success');
+                      } catch (e: any) {
+                        showToast(`Error updating permissions: ${e.message}`, 'error');
+                      }
+                    }}
+                    className="w-full py-2 px-3 rounded-xl bg-amber-950/80 hover:bg-amber-900 text-amber-300 font-bold text-xs border border-amber-500/40 flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                    title="Enable Partner Commission Access in 1-Click"
+                  >
+                    <Users className="w-3.5 h-3.5 text-amber-400" />
+                    Grant Partner Manager Access (পার্টনার কমিশন)
                   </button>
                 )}
 
