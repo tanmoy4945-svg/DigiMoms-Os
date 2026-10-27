@@ -92,7 +92,7 @@ interface SaaSContextType {
   ceoStaffList: CeoStaffMember[];
   currentCeoStaff: CeoStaffMember | null;
   setCurrentCeoStaff: (staff: CeoStaffMember | null) => void;
-  addCeoStaffMember: (name: string, mobile: string, pass: string, role: 'manager' | 'support' | 'billing', permissions: CeoStaffPermissions) => Promise<void>;
+  addCeoStaffMember: (name: string, mobile: string, pass: string, role: 'manager' | 'support' | 'billing' | 'partner', permissions: CeoStaffPermissions) => Promise<void>;
   updateCeoStaffMember: (id: string, updates: Partial<CeoStaffMember>) => Promise<void>;
   toggleCeoStaffStatus: (id: string) => Promise<void>;
   deleteCeoStaffMember: (id: string) => Promise<void>;
@@ -2316,7 +2316,7 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const addCeoStaffMember = async (name: string, mobile: string, pass: string, role: 'manager' | 'support' | 'billing', permissions: CeoStaffPermissions) => {
+  const addCeoStaffMember = async (name: string, mobile: string, pass: string, role: 'manager' | 'support' | 'billing' | 'partner', permissions: CeoStaffPermissions) => {
     const cleanMobile = mobile.trim();
     const cleanName = name.trim();
 
@@ -2940,8 +2940,15 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (restErr) {
       console.error("Supabase INSERT Error:", restErr);
-      showToast(`Database Insert Failed [${restErr.code || 'ERR'}]: ${restErr.message}`, 'error');
-      const errToThrow = new Error(`Supabase Insert Error [${restErr.code}]: ${restErr.message}`);
+      
+      // Handle the generic "Failed to fetch" browser error specifically
+      if (String(restErr).includes('Failed to fetch') || (restErr as any).message?.includes('Failed to fetch')) {
+        showToast('Network Error: Failed to reach database. Please check your internet or disable AdBlockers/Privacy extensions.', 'error');
+      } else {
+        showToast(`Database Insert Failed [${restErr.code || 'ERR'}]: ${restErr.message}`, 'error');
+      }
+      
+      const errToThrow = new Error(`Supabase Insert Error [${restErr.code || 'FETCH_ERROR'}]: ${restErr.message}`);
       (errToThrow as any).code = restErr.code;
       (errToThrow as any).details = restErr.details || restErr.hint || '';
       throw errToThrow;

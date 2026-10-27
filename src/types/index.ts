@@ -216,7 +216,7 @@ export interface CeoStaffMember {
   name: string;
   mobile: string;
   password_hash: string;
-  role: 'manager' | 'support' | 'billing';
+  role: 'manager' | 'support' | 'billing' | 'partner';
   status: 'active' | 'disabled';
   permissions: CeoStaffPermissions;
   last_password_change?: string;

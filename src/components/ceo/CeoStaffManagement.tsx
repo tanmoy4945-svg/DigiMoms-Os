@@ -277,6 +277,17 @@ const BILLING_PRESET: CeoStaffPermissions = {
   can_edit_payments: true,
   can_view_reports: true,
   can_edit_reports: true,
+  can_view_partners: true,
+  can_edit_partners: true,
+};
+
+// Helper: Partner Commission Manager preset
+const PARTNER_PRESET: CeoStaffPermissions = {
+  can_view_restaurants: true,
+  can_view_reports: true,
+  can_view_partners: true,
+  can_edit_partners: true,
+  can_view_logs: true,
 };
 
 // Helper: Tech & Database preset
@@ -342,7 +353,7 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
   const [newName, setNewName] = useState('');
   const [newMobile, setNewMobile] = useState('');
   const [newPassword, setNewPassword] = useState('ceoStaff123');
-  const [newRole, setNewRole] = useState<'manager' | 'support' | 'billing'>('manager');
+  const [newRole, setNewRole] = useState<'manager' | 'support' | 'billing' | 'partner'>('manager');
   const [newPermissions, setNewPermissions] = useState<CeoStaffPermissions>({ ...ALL_RESTAURANT_PRESET });
 
   const [passwordInput, setPasswordInput] = useState('');
@@ -532,6 +543,14 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
               className="px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/40 text-blue-200 border border-blue-500/30 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
             >
               💳 Billing & Finance
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPerms({ ...PARTNER_PRESET })}
+              className="px-3 py-1.5 rounded-xl bg-orange-600/20 hover:bg-orange-600/40 text-orange-200 border border-orange-500/30 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              🤝 Partner Manager
             </button>
 
             <button
@@ -1008,6 +1027,7 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
                     <option value="manager">CEO Operations Manager</option>
                     <option value="support">Customer Support Lead</option>
                     <option value="billing">Billing & Subscription Manager</option>
+                    <option value="partner">Partner Commission Lead</option>
                   </select>
                 </div>
               </div>
@@ -1094,6 +1114,7 @@ export const CeoStaffManagement: React.FC<CeoStaffManagementProps> = ({
                     <option value="manager">CEO Operations Manager</option>
                     <option value="support">Customer Support Lead</option>
                     <option value="billing">Billing & Subscription Manager</option>
+                    <option value="partner">Partner Commission Lead</option>
                   </select>
                 </div>
               </div>
