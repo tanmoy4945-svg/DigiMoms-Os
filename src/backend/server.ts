@@ -93,6 +93,12 @@ export async function createExpressApp() {
     }
   }
 
+  app.use((req: any, _res, next) => {
+    if (req.body && typeof req.body === 'object') {
+      req._body = true;
+    }
+    next();
+  });
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -2367,37 +2373,39 @@ Keep response concise, clear, friendly, and formatted with clean bullet points o
     });
   }
 
-  // Supabase Realtime Listener for Push Notifications
-  serverSupabase
-    .channel('server-push-notifications')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, async (payload) => {
-      const newOrder = payload.new;
-      if (newOrder && newOrder.restaurant_id) {
-        const isCash = newOrder.payment_mode === 'cash' || newOrder.payment_mode === 'partial';
-        const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
-        const body = `Table ${newOrder.table_number || 'Takeaway'} (Order #${newOrder.order_number}): ₹${newOrder.grand_total}. Check your dashboard!`;
-        
-        sendPushNotification(newOrder.restaurant_id, title, body, { 
-          orderId: newOrder.id, 
-          type: 'new_order',
-          restaurant_id: newOrder.restaurant_id 
-        });
-      }
-    })
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_waiter' }, async (payload) => {
-      const newCall = payload.new;
-      if (newCall && newCall.restaurant_id && newCall.status === 'pending') {
-        const title = '👋 Waiter Called!';
-        const body = `Table ${newCall.table_number} is requesting: ${newCall.request_type.toUpperCase()}`;
-        
-        sendPushNotification(newCall.restaurant_id, title, body, { 
-          callId: newCall.id, 
-          type: 'call_waiter',
-          restaurant_id: newCall.restaurant_id 
-        });
-      }
-    })
-    .subscribe();
+  // Supabase Realtime Listener for Push Notifications (only in persistent server, not ephemeral serverless)
+  if (!IS_VERCEL && !process.env.NOW_REGION) {
+    serverSupabase
+      .channel('server-push-notifications')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, async (payload) => {
+        const newOrder = payload.new;
+        if (newOrder && newOrder.restaurant_id) {
+          const isCash = newOrder.payment_mode === 'cash' || newOrder.payment_mode === 'partial';
+          const title = isCash ? '💵 New Cash Order' : '🔔 New Order Received';
+          const body = `Table ${newOrder.table_number || 'Takeaway'} (Order #${newOrder.order_number}): ₹${newOrder.grand_total}. Check your dashboard!`;
+          
+          sendPushNotification(newOrder.restaurant_id, title, body, { 
+            orderId: newOrder.id, 
+            type: 'new_order',
+            restaurant_id: newOrder.restaurant_id 
+          });
+        }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_waiter' }, async (payload) => {
+        const newCall = payload.new;
+        if (newCall && newCall.restaurant_id && newCall.status === 'pending') {
+          const title = '👋 Waiter Called!';
+          const body = `Table ${newCall.table_number} is requesting: ${newCall.request_type.toUpperCase()}`;
+          
+          sendPushNotification(newCall.restaurant_id, title, body, { 
+            callId: newCall.id, 
+            type: 'call_waiter',
+            restaurant_id: newCall.restaurant_id 
+          });
+        }
+      })
+      .subscribe();
+  }
 
   return app;
 }
@@ -2413,8 +2421,11 @@ export default async function getApp() {
 }
 
 // Standalone execution (Standard AI Studio / Node environment)
-const isMain = process.env.NODE_ENV !== 'production' || 
-               (!process.env.VERCEL && (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.cjs')));
+const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION);
+const isMain = !isVercel && (
+  process.env.NODE_ENV !== 'production' || 
+  (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.cjs'))
+);
 
 if (isMain) {
   createExpressApp().then(app => {
