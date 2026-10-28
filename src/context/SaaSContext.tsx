@@ -251,13 +251,13 @@ const parseRouteFromPath = (
 ): { view: ActiveView; shortCode: string; slug: string } => {
   const cleanPath = pathname.trim().replace(/\/+$/, '') || '/';
 
-  if (cleanPath === '/login-ceo' || cleanPath === '/ceo') {
+  if (cleanPath === '/login-ceo' || cleanPath === '/ceo' || cleanPath === '/ceo-login') {
     return { view: isCeoAuth ? 'ceo-dashboard' : 'ceo-login', shortCode: '', slug: '' };
   }
-  if (cleanPath === '/login-owner' || cleanPath === '/owner' || cleanPath === '/login') {
+  if (cleanPath === '/login-owner' || cleanPath === '/owner' || cleanPath === '/owner-login' || cleanPath === '/login') {
     return { view: owner ? 'owner-dashboard' : 'owner-login', shortCode: '', slug: '' };
   }
-  if (cleanPath === '/login-staff' || cleanPath === '/staff' || cleanPath === '/login-worker' || cleanPath === '/worker') {
+  if (cleanPath === '/login-staff' || cleanPath === '/staff' || cleanPath === '/staff-login' || cleanPath === '/login-worker' || cleanPath === '/worker') {
     return {
       view: staff ? (staff.role === 'kitchen' ? 'kitchen-terminal' : 'waiter-terminal') : 'staff-login',
       shortCode: '',
@@ -269,6 +269,7 @@ const parseRouteFromPath = (
   }
   if (
     cleanPath === '/owner-dashboard' ||
+    cleanPath === '/dashboard' ||
     cleanPath === '/owner-payment' ||
     cleanPath === '/subscription' ||
     cleanPath === '/renew' ||

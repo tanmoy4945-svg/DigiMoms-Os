@@ -6,7 +6,11 @@
   "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/((?!api/|assets/|favicon.ico|manifest.json).*)",
+      "source": "/api/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ],
@@ -17,5 +21,3 @@
     }
   }
 }
-// dummy_change_to_trigger_git
-
