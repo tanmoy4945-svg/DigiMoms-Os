@@ -9,7 +9,16 @@ export default async function handler(req: any, res: any) {
       res.on('error', reject);
 
       app(req, res, (err: any) => {
-        if (err) return reject(err);
+        if (err) {
+          console.error('[API Error]:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Internal Server Error', message: String(err?.message || err) });
+          }
+          return resolve();
+        }
+        if (!res.headersSent) {
+          res.status(404).json({ error: 'Not Found', path: req.url });
+        }
         resolve();
       });
     });

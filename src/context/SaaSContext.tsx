@@ -531,6 +531,53 @@ export const SaaSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTimeout(() => setToast(null), 3500);
   };
 
+  // Listen for Gateway Payment Callback or Renewal Redirect (?payment=success or BroadcastChannel)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePaymentConfirmationCheck = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paymentStatus = urlParams.get('payment');
+      const renewed = urlParams.get('renewed');
+
+      if (paymentStatus === 'success' || renewed === '1') {
+        console.log('[SaaSContext] Detected Successful Payment/Renewal via URL parameters.');
+        
+        // Refresh all fresh data from Supabase immediately
+        try {
+          await fetchAllFromSupabase(true);
+        } catch (e) {}
+        
+        // Clean URL params cleanly without reloading page
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+
+        showToast('🎉 পেমেন্ট সফল হয়েছে! আপনার সাবস্ক্রিপশন রিনিউ ও অ্যাকাউন্ট অ্যাক্টিভ করা হয়েছে।', 'success');
+      }
+    };
+
+    handlePaymentConfirmationCheck();
+
+    // Listen for BroadcastChannel events from PayU / Gateway popup windows
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('digimoms_payu_channel');
+        bc.onmessage = async (event) => {
+          if (event.data && event.data.type === 'PAYU_PAYMENT_CALLBACK' && event.data.status === 'success') {
+            console.log('[SaaSContext] Received PayU success event via BroadcastChannel:', event.data);
+            try {
+              await fetchAllFromSupabase(true);
+            } catch (e) {}
+            showToast('🎉 PayU পেমেন্ট সফল হয়েছে এবং অ্যাকাউন্ট অ্যাক্টিভ করা হয়েছে!', 'success');
+          }
+        };
+        return () => {
+          try { bc.close(); } catch (e) {}
+        };
+      }
+    } catch (e) {}
+  }, []);
+
   // Core Data Collections (Starts Empty - Loaded Purely From Supabase)
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);

@@ -94,7 +94,22 @@ export async function createExpressApp() {
   }
 
   app.use((req: any, _res, next) => {
-    if (req.body && typeof req.body === 'object') {
+    if (req.body !== undefined && req.body !== null) {
+      if (typeof req.body === 'string' && req.body.trim().length > 0) {
+        try {
+          if (req.headers['content-type']?.includes('application/json')) {
+            req.body = JSON.parse(req.body);
+          } else {
+            const params = new URLSearchParams(req.body);
+            const obj: Record<string, any> = {};
+            params.forEach((v, k) => { obj[k] = v; });
+            req.body = obj;
+          }
+        } catch (e) {}
+      }
+      req._body = true;
+    }
+    if (req.readableEnded || req.complete) {
       req._body = true;
     }
     next();
@@ -1983,7 +1998,7 @@ export async function createExpressApp() {
   });
 
   // API Route: PayU Callback Handler (POST & GET from PayU Gateway)
-  app.all(['/api/payu/callback', '/payu/callback'], async (req, res) => {
+  app.all(['/api/payu/callback', '/payu/callback', '/callback', '/api/callback'], async (req, res) => {
     try {
       const data = req.method === 'POST' ? req.body : req.query;
       const status = data.status || (data.unmappedstatus === 'captured' ? 'success' : 'pending');
@@ -2016,17 +2031,98 @@ export async function createExpressApp() {
         });
       }
 
-      const isSubscription = udf5 === '1' || txnid.startsWith('SUB_') || txnid.startsWith('RENEW_');
+      const isSubscription = udf5 === '1' || txnid.startsWith('SUB_') || txnid.startsWith('RENEW_') || (!udf2 && udf1);
       const statusParam = isSuccess ? 'success' : 'cancelled';
 
       let targetRedirectUrl = '/';
       if (isSubscription) {
-        targetRedirectUrl = `/owner-dashboard?payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
+        targetRedirectUrl = `/owner-dashboard?payment=${statusParam}&txnid=${encodeURIComponent(txnid)}&renewed=1`;
       } else if (udf3) {
         const basePath = udf3.startsWith('/') ? udf3 : `/q/${encodeURIComponent(udf3)}`;
         targetRedirectUrl = `${basePath}?order_id=${encodeURIComponent(udf2)}&payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
       } else if (udf2) {
         targetRedirectUrl = `/?order_id=${encodeURIComponent(udf2)}&payment=${statusParam}&txnid=${encodeURIComponent(txnid)}`;
+      }
+
+      // If subscription payment succeeded, authoritatively activate restaurant & extend expiry in Supabase!
+      if (isSuccess && isSubscription && udf1) {
+        try {
+          console.log(`[PayU Callback] Activating Subscription for restaurant: ${udf1}, txnid: ${txnid}`);
+          
+          const { data: currentRest } = await serverSupabase
+            .from('restaurants')
+            .select('*')
+            .eq('id', udf1)
+            .maybeSingle();
+
+          const now = Date.now();
+          const currentExpiryMs = new Date(currentRest?.subscription_end || currentRest?.trial_end || now).getTime();
+          const baseDate = new Date(currentExpiryMs > now ? currentExpiryMs : now);
+          
+          // Add 1 calendar month
+          const newExpiryDate = new Date(baseDate.getTime());
+          newExpiryDate.setMonth(newExpiryDate.getMonth() + 1);
+          const newSubEndIso = newExpiryDate.toISOString();
+
+          // 1. Authoritative update in Supabase restaurants table (status: 'active', extended subscription_end)
+          const { error: restUpdateErr } = await serverSupabase
+            .from('restaurants')
+            .update({
+              subscription_end: newSubEndIso,
+              status: 'active',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', udf1);
+
+          if (restUpdateErr) {
+            console.error('[PayU Callback] Error updating restaurant in Supabase:', restUpdateErr.message);
+          } else {
+            console.log(`[PayU Callback] Successfully marked restaurant ${udf1} active with new expiry: ${newSubEndIso}`);
+          }
+
+          // 2. Insert into Supabase subscription_history
+          const historyId = crypto.randomUUID();
+          await serverSupabase
+            .from('subscription_history')
+            .insert([{
+              id: historyId,
+              restaurant_id: udf1,
+              plan_name: 'Monthly Standard Subscription',
+              amount: amount || (currentRest?.monthly_subscription_fee || 999),
+              duration_months: 1,
+              days_added: 30,
+              payment_id: txnid || mihpayid || `PAYU_${Date.now()}`,
+              start_date: baseDate.toISOString(),
+              end_date: newSubEndIso,
+              previous_expiry: new Date(currentExpiryMs).toISOString(),
+              new_expiry: newSubEndIso,
+              payment_status: 'paid',
+              payment_mode: 'live',
+              subscription_type: 'RENEWAL',
+              granted_by: 'Owner Payment (PayU Gateway)',
+              commission_status: currentRest?.partner_mobile ? 'pending' : undefined,
+              created_at: new Date().toISOString()
+            }]);
+
+          // 3. Save to local fallback cache
+          try {
+            const histList = readJsonFile<any[]>('subscription_history.json', []);
+            histList.unshift({
+              id: historyId,
+              restaurant_id: udf1,
+              amount: amount || (currentRest?.monthly_subscription_fee || 999),
+              payment_id: txnid || mihpayid,
+              end_date: newSubEndIso,
+              payment_status: 'paid',
+              subscription_type: 'RENEWAL',
+              created_at: new Date().toISOString()
+            });
+            writeJsonFile('subscription_history.json', histList.slice(0, 500));
+          } catch (hErr) {}
+
+        } catch (subErr) {
+          console.error('[PayU Callback] Subscription update error:', subErr);
+        }
       }
 
       // If payment failed or was cancelled, ensure any pending unpaid food order is discarded/cancelled

@@ -14,7 +14,16 @@ export default async function handler(req: any, res: any) {
       res.on('error', reject);
 
       app(req, res, (err: any) => {
-        if (err) return reject(err);
+        if (err) {
+          console.error('[PayU Callback Error]:', err);
+          if (!res.headersSent) {
+            res.status(500).send('Internal Server Error');
+          }
+          return resolve();
+        }
+        if (!res.headersSent) {
+          res.redirect(302, '/owner-dashboard');
+        }
         resolve();
       });
     });
