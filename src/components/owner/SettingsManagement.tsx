@@ -97,6 +97,16 @@ For feedback, reservations, or inquiries, please call us or send a WhatsApp mess
     }
 
     const updatedForm = { ...form, logo: logoUrl, banner: bannerUrl };
+    delete updatedForm.status;
+    delete updatedForm.subscription_start;
+    delete updatedForm.subscription_end;
+    delete updatedForm.trial_start;
+    delete updatedForm.trial_end;
+    delete updatedForm.trial_status;
+    delete updatedForm.free_offer_start;
+    delete updatedForm.free_offer_end;
+    delete updatedForm.free_offer_status;
+    delete updatedForm.password_hash;
     setForm(updatedForm);
     await updateOwnerProfile(updatedForm);
     setIsValidatingImages(false);

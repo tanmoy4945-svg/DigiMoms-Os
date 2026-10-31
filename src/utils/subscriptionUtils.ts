@@ -60,19 +60,19 @@ export function getRestaurantSubscriptionDetails(
   const trialEndMs = getEndOfDayMs(restaurant.trial_end);
   const isTrialActive =
     !isSuspended &&
-    restaurant.trial_status === 'active' &&
+    (restaurant.trial_status === 'active' || restaurant.status === 'trial') &&
     trialEndMs > now;
 
   const freeEndMs = getEndOfDayMs(restaurant.free_offer_end);
   const isFreeActive =
     !isSuspended &&
-    restaurant.free_offer_status === 'active' &&
+    (restaurant.free_offer_status === 'active' || (restaurant.status as string) === 'free_offer') &&
     freeEndMs > now;
 
   const subEndBaseMs = getEndOfDayMs(restaurant.subscription_end);
   const isSubActive =
     !isSuspended &&
-    restaurant.status === 'active' &&
+    (restaurant.status === 'active' || subEndBaseMs > now) &&
     subEndBaseMs > now;
 
   // Determine effective subscription end date across paid subscription, trial, and free offers
@@ -97,7 +97,6 @@ export function getRestaurantSubscriptionDetails(
   // Check if expired
   const isExpired =
     isSuspended ||
-    restaurant.status === 'inactive' ||
     restaurant.status === 'expired' ||
     (!isTrialActive && !isFreeActive && !isSubActive);
 
